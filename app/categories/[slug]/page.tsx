@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import Quandr3Card, { Quandr3Mock } from "../../components/Quandr3Card";
+import Quandr3Card from "../../components/Quandr3Card";
 
 // ---- COLOR SYSTEM (same as Home/Explore/Create) ----
 const colors = {
@@ -14,9 +14,10 @@ const colors = {
   blue: "#2563EB",
 };
 
-const MOCK: Quandr3Mock[] = [
+const MOCK = [
   {
     id: "money-001",
+    createdAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
     poster: { name: "Ken L." },
     category: "Money",
     title: "Pay off the card or stack cash?",
@@ -32,6 +33,7 @@ const MOCK: Quandr3Mock[] = [
   },
   {
     id: "style-011",
+    createdAt: new Date(Date.now() - 6 * 3600 * 1000).toISOString(),
     poster: { name: "Jaxon L." },
     category: "Style",
     title: "Which shoes with this dress?",
@@ -47,6 +49,7 @@ const MOCK: Quandr3Mock[] = [
   },
   {
     id: "rel-020",
+    createdAt: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
     poster: { name: "Anonymous" },
     category: "Relationships",
     title: "Do I address this now or let it go?",
@@ -69,11 +72,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   relationships: "Relationships",
 };
 
-export default function CategoryPage({
-  params,
-}: {
-  params: { slug: string };
-}) {
+export default function CategoryPage({ params }: { params: { slug: string } }) {
   const { slug } = params;
 
   const activeCategory = CATEGORY_LABELS[slug] ?? null;
@@ -83,9 +82,7 @@ export default function CategoryPage({
     return MOCK.filter((q) => q.category === activeCategory);
   }, [activeCategory]);
 
-  const heading = activeCategory
-    ? `${activeCategory} Quandr3s`
-    : "Category Quandr3s";
+  const heading = activeCategory ? `${activeCategory} Quandr3s` : "Category Quandr3s";
 
   const helper = activeCategory
     ? `Real questions about ${activeCategory.toLowerCase()}. Different curiosos, different reasoning — same category.`
@@ -124,50 +121,26 @@ export default function CategoryPage({
             >
               Category board
             </p>
-            <h1
-              style={{
-                fontSize: 32,
-                fontWeight: 900,
-                letterSpacing: -0.4,
-                margin: 0,
-              }}
-            >
+
+            <h1 style={{ fontSize: 32, fontWeight: 900, letterSpacing: -0.4, margin: 0 }}>
               {heading}
             </h1>
-            <p
-              style={{
-                margin: 0,
-                marginTop: 6,
-                color: colors.textSub,
-                fontSize: 15,
-              }}
-            >
+
+            <p style={{ margin: 0, marginTop: 6, color: colors.textSub, fontSize: 15 }}>
               {helper}
             </p>
+
             {activeCategory && (
-              <p
-                style={{
-                  margin: 0,
-                  marginTop: 4,
-                  color: colors.textMuted,
-                  fontSize: 13,
-                }}
-              >
+              <p style={{ margin: 0, marginTop: 4, color: colors.textMuted, fontSize: 13 }}>
                 URL slug: <code>/categories/{slug}</code> (local demo)
               </p>
             )}
           </header>
 
-          {/* Cards: vertical stack, no multi-column grid */}
-          <section
-            style={{
-              marginTop: 20,
-              display: "grid",
-              gap: 16,
-            }}
-          >
+          {/* Cards */}
+          <section style={{ marginTop: 20, display: "grid", gap: 16 }}>
             {filtered.map((q) => (
-              <Quandr3Card key={q.id} q={q} />
+              <Quandr3Card key={q.id} {...q} />
             ))}
 
             {filtered.length === 0 && (
@@ -181,9 +154,8 @@ export default function CategoryPage({
                   color: colors.textSub,
                 }}
               >
-                No demo Quandr3s yet for this category. Once live data is wired
-                in, this board will show all open and resolved Quandr3s tagged
-                <strong> {activeCategory ?? slug}</strong>.
+                No demo Quandr3s yet for this category. Once live data is wired in, this board will
+                show all open and resolved Quandr3s tagged <strong>{activeCategory ?? slug}</strong>.
               </div>
             )}
           </section>

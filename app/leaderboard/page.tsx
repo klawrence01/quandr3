@@ -1,434 +1,428 @@
+// @ts-nocheck
 "use client";
 
-import React from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/utils/supabase/browser";
 
 const NAVY = "#0b2343";
 const BLUE = "#1e63f3";
 const TEAL = "#00a9a5";
 const CORAL = "#ff6b6b";
-const SOFT_BG = "#f7f9ff";
+const SOFT = "#f5f7fc";
 
-type LeaderEntry = {
+type Quandr3Row = {
   id: string;
-  name: string;
-  username: string;
-  avatarInitials: string;
-  accuracy: number; // 0–100
-  played: number;
-  rank: number;
-  isYou?: boolean;
+  category: string;
+  status: "Open" | "Resolved" | string;
+  created_at: string;
 };
 
-const mockLeaderboard: LeaderEntry[] = [
-  {
-    id: "u1",
-    name: "Maya Johnson",
-    username: "Maya",
-    avatarInitials: "MJ",
-    accuracy: 82,
-    played: 147,
-    rank: 1,
-  },
-  {
-    id: "u2",
-    name: "Derrick Cole",
-    username: "Derrick",
-    avatarInitials: "DC",
-    accuracy: 79,
-    played: 203,
-    rank: 2,
-  },
-  {
-    id: "u3",
-    name: "Nia Rivers",
-    username: "Nia",
-    avatarInitials: "NR",
-    accuracy: 77,
-    played: 98,
-    rank: 3,
-  },
-  {
-    id: "u4",
-    name: "Omar Watts",
-    username: "Omar",
-    avatarInitials: "OW",
-    accuracy: 74,
-    played: 121,
-    rank: 4,
-  },
-  {
-    id: "u5",
-    name: "Tasha Green",
-    username: "Tasha",
-    avatarInitials: "TG",
-    accuracy: 73,
-    played: 89,
-    rank: 5,
-  },
-  {
-    id: "u-you",
-    name: "Ken Lawrence",
-    username: "Ken",
-    avatarInitials: "KL",
-    accuracy: 63,
-    played: 41,
-    rank: 18,
-    isYou: true,
-  },
-];
+type CategoryStat = {
+  category: string;
+  total: number;
+  open: number;
+  resolved: number;
+  lastActivity: string | null;
+};
 
 export default function LeaderboardPage() {
-  const router = useRouter();
+  const [items, setItems] = useState<Quandr3Row[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      setMessage(null);
+
+      // You can bump the limit later; 1000 is a safe MVP cap.
+      const { data, error } = await supabase
+        .from("quandr3s")
+        .select("id, category, status, created_at")
+        .order("created_at", { ascending: false })
+        .limit(1000);
+
+      if (error) {
+        console.error(error);
+        setMessage(error.message);
+        setLoading(false);
+        return;
+      }
+
+      setItems((data || []) as Quandr3Row[]);
+      setLoading(false);
+    }
+
+    load();
+  }, []);
+
+  const totalCount = items.length;
+  const totalOpen = items.filter((q) => q.status === "Open").length;
+  const totalResolved = items.filter((q) => q.status === "Resolved").length;
+  const distinctCategories = new Set(items.map((q) => q.category)).size;
+
+  const categoryStats: CategoryStat[] = useMemo(() => {
+    const map = new Map<string, CategoryStat>();
+
+    for (const q of items) {
+      if (!q.category) continue;
+      const existing = map.get(q.category) || {
+        category: q.category,
+        total: 0,
+        open: 0,
+        resolved: 0,
+        lastActivity: null as string | null,
+      };
+
+      existing.total += 1;
+      if (q.status === "Open") existing.open += 1;
+      if (q.status === "Resolved") existing.resolved += 1;
+
+      // track latest activity per category
+      if (!existing.lastActivity) {
+        existing.lastActivity = q.created_at;
+      } else {
+        const prev = new Date(existing.lastActivity).getTime();
+        const curr = new Date(q.created_at).getTime();
+        if (curr > prev) existing.lastActivity = q.created_at;
+      }
+
+      map.set(q.category, existing);
+    }
+
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  }, [items]);
 
   return (
     <main
       style={{
         minHeight: "100vh",
-        background: SOFT_BG,
+        padding: "80px 24px 40px",
+        fontFamily: "system-ui",
+        maxWidth: 1120,
+        margin: "0 auto",
+        background: SOFT,
         color: NAVY,
-        fontFamily:
-          "system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial",
       }}
     >
-      <div style={{ maxWidth: 1040, margin: "0 auto", padding: "32px 18px" }}>
-        {/* Header row */}
-        <header
+      {/* HERO / INTRO */}
+      <section style={{ marginBottom: 24 }}>
+        <p
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: 16,
-            marginBottom: 18,
+            fontSize: 12,
+            fontWeight: 800,
+            letterSpacing: 1.6,
+            textTransform: "uppercase",
+            margin: 0,
+            color: BLUE,
           }}
         >
-          <div>
-            <h1
-              style={{
-                margin: 0,
-                marginBottom: 4,
-                fontSize: 28,
-                fontWeight: 950,
-              }}
-            >
-              Leaderboard
-            </h1>
-            <p
-              style={{
-                margin: 0,
-                fontSize: 14,
-                color: "rgba(11,35,67,0.78)",
-              }}
-            >
-              Top predictors and sharpest thinkers on Quandr3.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => router.push("/dashboard")}
-            style={{
-              borderRadius: 999,
-              border: "1px solid rgba(11,35,67,0.16)",
-              background: "#ffffff",
-              padding: "8px 16px",
-              fontSize: 13,
-              fontWeight: 750,
-              cursor: "pointer",
-            }}
-          >
-            Back to dashboard
-          </button>
-        </header>
-
-        {/* Filters row */}
-        <div
+          QUANDR3 LEADERBOARDS
+        </p>
+        <h1
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
+            fontSize: 34,
+            lineHeight: 1.1,
+            fontWeight: 900,
+            margin: "8px 0 10px",
+          }}
+        >
+          See what the community is wrestling with most.
+        </h1>
+        <p
+          style={{
+            fontSize: 14,
+            lineHeight: 1.6,
+            margin: 0,
+            maxWidth: 620,
+            color: "rgba(11,35,67,0.9)",
+          }}
+        >
+          These leaderboards show which categories are heating up on Quandr3.
+          Each category is ranked by how many Quandr3s have been posted, how
+          many are still open, and when the last decision went live.
+        </p>
+      </section>
+
+      {/* TOP STATS */}
+      <section
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: 16,
+          marginBottom: 24,
+        }}
+      >
+        <StatCard
+          label="Total Quandr3s (sample)"
+          value={totalCount}
+          hint="Based on the latest 1,000"
+        />
+        <StatCard
+          label="Open Quandr3s"
+          value={totalOpen}
+          hint="Still accepting Wayfinders"
+        />
+        <StatCard
+          label="Resolved Quandr3s"
+          value={totalResolved}
+          hint="Curioso has made a call"
+        />
+        <StatCard
+          label="Active Categories"
+          value={distinctCategories}
+          hint="At least one Quandr3 posted"
+        />
+      </section>
+
+      {/* STATUS */}
+      {message && (
+        <p
+          style={{
+            color: CORAL,
             marginBottom: 16,
-            flexWrap: "wrap",
+            fontSize: 13,
           }}
         >
-          <div
-            style={{
-              display: "inline-flex",
-              gap: 6,
-              padding: 4,
-              borderRadius: 999,
-              background: "#ffffff",
-              boxShadow: "0 10px 26px rgba(11,35,67,0.08)",
-            }}
-          >
-            <FilterPill label="Global" active />
-            <FilterPill label="Categories" />
-            <FilterPill label="Local" />
-            <FilterPill label="Following" />
-          </div>
+          {message}
+        </p>
+      )}
 
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "6px 10px",
-              borderRadius: 999,
-              border: "1px solid rgba(11,35,67,0.16)",
-              background: "#ffffff",
-              fontSize: 12,
-            }}
-          >
-            <span style={{ opacity: 0.8 }}>Sort</span>
-            <span
-              style={{
-                fontWeight: 750,
-                color: BLUE,
-              }}
-            >
-              Accuracy ▼
-            </span>
-          </div>
-        </div>
-
-        {/* Table card */}
-        <section
+      {loading && (
+        <p
           style={{
-            borderRadius: 22,
-            background: "#ffffff",
-            boxShadow: "0 18px 50px rgba(11,35,67,0.12)",
-            padding: 18,
+            fontSize: 14,
+            color: "rgba(11,35,67,0.9)",
+            marginBottom: 16,
           }}
         >
-          {/* Header line */}
-          <div
-            style={{
-              display: "flex",
-              fontSize: 11,
-              fontWeight: 800,
-              textTransform: "uppercase",
-              letterSpacing: 0.6,
-              color: "rgba(11,35,67,0.7)",
-              padding: "4px 6px 8px",
-            }}
-          >
-            <div style={{ width: 40 }}>Rank</div>
-            <div style={{ flex: 1 }}>Curioso</div>
-            <div style={{ width: 120, textAlign: "right" }}>Accuracy</div>
-            <div style={{ width: 120, textAlign: "right" }}>Played</div>
-          </div>
+          Loading leaderboards…
+        </p>
+      )}
 
-          <div
-            style={{
-              height: 1,
-              background: "rgba(11,35,67,0.08)",
-              marginBottom: 4,
-            }}
-          />
+      {!loading && !message && categoryStats.length === 0 && (
+        <p
+          style={{
+            fontSize: 14,
+            color: "rgba(11,35,67,0.9)",
+            marginBottom: 16,
+          }}
+        >
+          No Quandr3s found yet. Once people start posting, category
+          leaderboards will appear here.
+        </p>
+      )}
 
+      {/* CATEGORY LEADERBOARD TABLE */}
+      {categoryStats.length > 0 && (
+        <section>
           <div
             style={{
-              maxHeight: 420,
-              overflowY: "auto",
-              paddingRight: 4,
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-            }}
-          >
-            {mockLeaderboard.map((entry) => (
-              <LeaderRow key={entry.id} entry={entry} />
-            ))}
-          </div>
-
-          <div
-            style={{
-              marginTop: 10,
               display: "flex",
               justifyContent: "space-between",
-              alignItems: "center",
-              fontSize: 12,
-              color: "rgba(11,35,67,0.7)",
+              alignItems: "flex-end",
+              marginBottom: 12,
+              gap: 16,
             }}
           >
-            <span>V1: leaderboard uses local mock data.</span>
-            <button
-              type="button"
-              onClick={() => router.push("/stats")}
+            <div>
+              <h2
+                style={{
+                  fontSize: 16,
+                  fontWeight: 900,
+                  margin: 0,
+                }}
+              >
+                Top Categories (All-Time Sample)
+              </h2>
+              <p
+                style={{
+                  fontSize: 11,
+                  margin: "4px 0 0",
+                  color: "rgba(11,35,67,0.8)",
+                }}
+              >
+                Ranked by total Quandr3s posted. Sample includes the latest{" "}
+                {totalCount} Quandr3{totalCount === 1 ? "" : "s"}.
+              </p>
+            </div>
+            <span
               style={{
-                border: "none",
-                background: "transparent",
-                cursor: "pointer",
-                fontSize: 12,
-                fontWeight: 750,
-                color: BLUE,
+                fontSize: 11,
+                fontWeight: 700,
+                color: TEAL,
+                textTransform: "uppercase",
               }}
             >
-              View my stats →
-            </button>
+              User &amp; Wayfinder leaderboards coming soon
+            </span>
+          </div>
+
+          <div
+            style={{
+              borderRadius: 20,
+              overflow: "hidden",
+              background: "#ffffff",
+              boxShadow: "0 16px 45px rgba(15,23,42,0.12)",
+              border: "1px solid rgba(11,35,67,0.06)",
+            }}
+          >
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 13,
+              }}
+            >
+              <thead
+                style={{
+                  background: "rgba(11,35,67,0.03)",
+                  textAlign: "left",
+                }}
+              >
+                <tr>
+                  <th style={thStyle}>Rank</th>
+                  <th style={thStyle}>Category</th>
+                  <th style={thStyle}>Total</th>
+                  <th style={thStyle}>Open</th>
+                  <th style={thStyle}>Resolved</th>
+                  <th style={thStyle}>Last Activity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {categoryStats.map((cat, index) => {
+                  const isTop = index === 0;
+                  const isEven = index % 2 === 0;
+                  return (
+                    <tr
+                      key={cat.category}
+                      style={{
+                        background: isTop
+                          ? "rgba(30,99,243,0.05)"
+                          : isEven
+                          ? "rgba(11,35,67,0.008)"
+                          : "transparent",
+                      }}
+                    >
+                      <td style={tdStyle}>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            minWidth: 24,
+                            height: 24,
+                            borderRadius: 999,
+                            fontSize: 11,
+                            fontWeight: 800,
+                            background: isTop
+                              ? `linear-gradient(135deg, ${BLUE}, ${TEAL})`
+                              : "rgba(11,35,67,0.06)",
+                            color: isTop ? "#ffffff" : NAVY,
+                          }}
+                        >
+                          {index + 1}
+                        </span>
+                      </td>
+                      <td style={tdStyle}>
+                        <span
+                          style={{
+                            fontWeight: 700,
+                            fontSize: 13,
+                          }}
+                        >
+                          {cat.category || "Uncategorized"}
+                        </span>
+                      </td>
+                      <td style={tdStyle}>{cat.total}</td>
+                      <td style={tdStyle}>{cat.open}</td>
+                      <td style={tdStyle}>{cat.resolved}</td>
+                      <td style={tdStyle}>
+                        {cat.lastActivity
+                          ? new Date(cat.lastActivity).toLocaleString()
+                          : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </section>
-      </div>
+      )}
     </main>
   );
 }
 
-function FilterPill({ label, active }: { label: string; active?: boolean }) {
-  return (
-    <button
-      type="button"
-      style={{
-        borderRadius: 999,
-        border: "none",
-        padding: "6px 12px",
-        fontSize: 12,
-        fontWeight: 750,
-        cursor: "pointer",
-        background: active ? BLUE : "transparent",
-        color: active ? "#ffffff" : "rgba(11,35,67,0.8)",
-      }}
-    >
-      {label}
-    </button>
-  );
-}
+const thStyle: React.CSSProperties = {
+  padding: "10px 14px",
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: 0.4,
+  textTransform: "uppercase",
+  color: "rgba(11,35,67,0.9)",
+  borderBottom: "1px solid rgba(11,35,67,0.08)",
+};
 
-function LeaderRow({ entry }: { entry: LeaderEntry }) {
-  const crown =
-    entry.rank === 1 ? (
-      <span
-        style={{
-          fontSize: 11,
-          fontWeight: 800,
-          color: CORAL,
-          marginLeft: 4,
-        }}
-      >
-        ★
-      </span>
-    ) : null;
+const tdStyle: React.CSSProperties = {
+  padding: "9px 14px",
+  borderBottom: "1px solid rgba(11,35,67,0.04)",
+  fontSize: 13,
+  color: "rgba(11,35,67,0.95)",
+};
 
-  const bg = entry.isYou
-    ? "rgba(0,169,165,0.08)"
-    : "rgba(11,35,67,0.01)";
-  const border = entry.isYou
-    ? `1px solid rgba(0,169,165,0.6)`
-    : "1px solid rgba(11,35,67,0.08)";
-
+function StatCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: number;
+  hint?: string;
+}) {
   return (
     <div
       style={{
+        borderRadius: 18,
+        padding: 14,
+        background: "#ffffff",
+        boxShadow: "0 14px 35px rgba(15,23,42,0.12)",
+        border: "1px solid rgba(11,35,67,0.04)",
         display: "flex",
-        alignItems: "center",
-        padding: "8px 10px",
-        borderRadius: 16,
-        background: bg,
-        border,
-        cursor: "pointer",
-        transition: "transform 120ms ease, box-shadow 120ms ease",
+        flexDirection: "column",
+        gap: 4,
       }}
     >
-      <div
+      <span
         style={{
-          width: 40,
-          fontSize: 13,
+          fontSize: 11,
+          textTransform: "uppercase",
+          letterSpacing: 0.4,
           fontWeight: 800,
-          color: "rgba(11,35,67,0.9)",
+          color: "rgba(11,35,67,0.85)",
         }}
       >
-        #{entry.rank}
-      </div>
-
-      {/* Avatar + name */}
-      <div
+        {label}
+      </span>
+      <span
         style={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
+          fontSize: 22,
+          fontWeight: 900,
+          color: NAVY,
         }}
       >
-        <div
+        {value}
+      </span>
+      {hint && (
+        <span
           style={{
-            width: 32,
-            height: 32,
-            borderRadius: 999,
-            background:
-              entry.rank === 1
-                ? `linear-gradient(135deg, ${BLUE}, ${CORAL})`
-                : `linear-gradient(135deg, ${BLUE}, ${TEAL})`,
-            display: "grid",
-            placeItems: "center",
-            fontSize: 12,
-            fontWeight: 900,
-            color: "#ffffff",
+            fontSize: 11,
+            color: "rgba(11,35,67,0.85)",
           }}
         >
-          {entry.avatarInitials}
-        </div>
-        <div>
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 800,
-              display: "flex",
-              alignItems: "center",
-            }}
-          >
-            {entry.username}
-            {crown}
-            {entry.isYou && (
-              <span
-                style={{
-                  marginLeft: 6,
-                  fontSize: 11,
-                  fontWeight: 800,
-                  padding: "2px 8px",
-                  borderRadius: 999,
-                  background: "rgba(0,169,165,0.12)",
-                  color: TEAL,
-                }}
-              >
-                You
-              </span>
-            )}
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: "rgba(11,35,67,0.7)",
-            }}
-          >
-            {entry.name}
-          </div>
-        </div>
-      </div>
-
-      {/* Accuracy */}
-      <div
-        style={{
-          width: 120,
-          textAlign: "right",
-          fontSize: 13,
-          fontWeight: 850,
-          color: BLUE,
-        }}
-      >
-        {entry.accuracy}%
-      </div>
-
-      {/* Played */}
-      <div
-        style={{
-          width: 120,
-          textAlign: "right",
-          fontSize: 12,
-          color: "rgba(11,35,67,0.78)",
-        }}
-      >
-        {entry.played} played
-      </div>
+          {hint}
+        </span>
+      )}
     </div>
   );
 }

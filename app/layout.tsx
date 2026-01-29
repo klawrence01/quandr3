@@ -1,17 +1,7 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+
 import TopNav from "./components/TopNav";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "Quandr3",
@@ -26,11 +16,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable}`}
-        style={{ margin: 0 }}
+        className="antialiased"
+        style={{
+          fontFamily:
+            'system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif',
+        }}
       >
         <TopNav />
-        {children}
+        <main className="flex-1 w-full pt-4">{children}</main>
       </body>
     </html>
   );

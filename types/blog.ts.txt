@@ -1,0 +1,19 @@
+export type BlogType = "product" | "culture" | "community";
+export type BlogStatus = "draft" | "scheduled" | "published" | "archived";
+
+export interface BlogPost {
+  id: string;
+  title: string;
+  slug: string;
+  blog_type: BlogType;
+  status: BlogStatus;
+  content_md: string;
+  excerpt: string | null;
+  hero_image_url: string | null;
+  author_id: string | null;
+  author_name: string | null;
+  scheduled_at: string | null;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+}

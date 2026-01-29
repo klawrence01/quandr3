@@ -1,203 +1,162 @@
+// app/components/TopNav.tsx
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
+import Image from "next/image";
+import { supabase } from "@/utils/supabase/browser";
 
-const NAVY = "#0b2343";
-const BLUE = "#1e63f3";
-const TEAL = "#00a9a5";
-const CORAL = "#ff6b6b";
-const SOFT_BG = "#f5f7fc";
+type AuthedUser = {
+  email?: string | null;
+};
 
 export default function TopNav() {
+  const router = useRouter();
   const pathname = usePathname();
 
-  const isRouteActive = (routes: string[]) =>
-    routes.some(
-      (r) => pathname === r || pathname.startsWith(r + "/")
-    );
+  const [user, setUser] = useState<AuthedUser | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
-  const exploreActive = isRouteActive(["/explore", "/"]);
-  const createActive = isRouteActive([
-    "/create",
-    "/onboarding",
-    "/signup",
-    "/login",
-  ]);
-  const dashboardActive = isRouteActive(["/dashboard"]);
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadUser() {
+      try {
+        const { data, error } = await supabase.auth.getUser();
+        if (!isMounted) return;
+        if (error || !data.user) {
+          setUser(null);
+        } else {
+          setUser({ email: data.user.email });
+        }
+      } catch {
+        if (isMounted) setUser(null);
+      } finally {
+        if (isMounted) setCheckingAuth(false);
+      }
+    }
+
+    loadUser();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  async function handleLogout() {
+    try {
+      await fetch("/api/logout", { method: "POST" });
+    } catch {
+      // ignore; still send them home
+    } finally {
+      router.push("/");
+      router.refresh();
+    }
+  }
+
+  const isOnCreate = pathname === "/create";
 
   return (
-    <header
-      style={{
-        width: "100%",
-        background: SOFT_BG,
-        borderBottom: "1px solid rgba(11,35,67,0.04)",
-      }}
-    >
-      <div
-        style={{
-          maxWidth: 1120,
-          margin: "0 auto",
-          padding: "14px 18px 10px",
-        }}
-      >
-        {/* Row 1 — logo + main nav */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 16,
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
+    <header className="w-full border-b border-slate-200 bg-white/80 backdrop-blur">
+      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+        {/* LEFT: logo + wordmark + Explore */}
+        <div className="flex items-center gap-6">
           {/* Logo + wordmark */}
-          <Link
-            href="/home"
-            style={{
-              textDecoration: "none",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <div
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 12,
-                background:
-                  "linear-gradient(135deg,#1e63f3 0%,#ff6b6b 50%,#00a9a5 100%)",
-                display: "grid",
-                placeItems: "center",
-                boxShadow: "0 8px 20px rgba(11,35,67,0.25)",
-              }}
-            >
-              <img
-                src="/quandr3-logo.png"
-                alt="Quandr3"
-                style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: 7,
-                  background: "#ffffff",
-                  objectFit: "cover",
-                }}
-              />
-            </div>
-            <div>
-              <div
-                style={{
-                  fontWeight: 900,
-                  letterSpacing: 0.4,
-                  fontSize: 18,
-                  color: NAVY,
-                }}
-              >
-                QUANDR3
-              </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  opacity: 0.8,
-                  color: "rgba(11,35,67,0.8)",
-                }}
-              >
-                A people-powered clarity engine.
-              </div>
+          <Link href="/" className="flex items-center gap-3">
+            <Image
+              src="/assets/logo/quandr3-logo.png"
+              alt="Quandr3 logo"
+              width={40}
+              height={40}
+              className="h-10 w-10 rounded-2xl"
+              priority
+            />
+            <div className="flex flex-col leading-tight">
+              <span className="text-sm font-semibold text-slate-900">
+                Quandr3
+              </span>
+              <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                Ask. Share. Decide.
+              </span>
             </div>
           </Link>
 
-          {/* Main nav links */}
-          <nav
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 14,
-              fontSize: 14,
-              fontWeight: 700,
-            }}
-          >
-            {/* Explore */}
+          {/* Explore link */}
+          <nav className="flex items-center gap-6">
             <Link
               href="/explore"
-              style={{
-                textDecoration: "none",
-                color: exploreActive
-                  ? BLUE
-                  : "rgba(11,35,67,0.9)",
-              }}
+              className={`text-sm font-medium ${
+                pathname?.startsWith("/explore")
+                  ? "text-slate-900"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
             >
               Explore
-            </Link>
-
-            {/* Create */}
-            <Link
-              href="/create"
-              style={{
-                textDecoration: "none",
-              }}
-            >
-              <button
-                type="button"
-                style={{
-                  padding: "8px 18px",
-                  borderRadius: 999,
-                  border: "none",
-                  cursor: "pointer",
-                  fontWeight: 800,
-                  fontSize: 14,
-                  color: "#ffffff",
-                  background: createActive
-                    ? "linear-gradient(135deg,#1e63f3 0%,#00a9a5 50%,#ff6b6b 100%)"
-                    : "linear-gradient(135deg,#1e63f3 0%,#1e63f3 100%)",
-                  boxShadow: "0 14px 30px rgba(11,35,67,0.28)",
-                }}
-              >
-                + Create
-              </button>
-            </Link>
-
-            {/* Dashboard */}
-            <Link
-              href="/dashboard"
-              style={{
-                textDecoration: "none",
-                color: dashboardActive
-                  ? BLUE
-                  : "rgba(11,35,67,0.9)",
-              }}
-            >
-              Dashboard
             </Link>
           </nav>
         </div>
 
-        {/* Row 2 — category pills */}
-        <div
-          style={{
-            marginTop: 14,
-            display: "flex",
-            gap: 8,
-            flexWrap: "wrap",
-          }}
-        >
-          {["Money", "Style", "Relationships"].map((cat) => (
-            <span
-              key={cat}
-              style={{
-                padding: "6px 14px",
-                borderRadius: 999,
-                border: "1px solid rgba(11,35,67,0.08)",
-                background: "#ffffff",
-                fontSize: 13,
-                fontWeight: 700,
-                color: "rgba(11,35,67,0.9)",
-              }}
-            >
-              {cat}
-            </span>
-          ))}
+        {/* RIGHT: Create pill + auth capsule */}
+        <div className="flex items-center gap-3">
+          {/* Smaller Create button so it doesn't overpower Explore */}
+          <Link
+            href="/create"
+            className={`inline-flex items-center rounded-full px-4 py-1.5 text-xs sm:text-sm font-semibold text-white shadow-sm whitespace-nowrap transition-transform ${
+              isOnCreate ? "scale-[1.02]" : "hover:scale-[1.02]"
+            }`}
+            style={{
+              background:
+                "linear-gradient(90deg, #1e63f3 0%, #00a9a5 50%, #ff6b6b 100%)",
+            }}
+          >
+            Create a Quandr3
+          </Link>
+
+          {/* Auth state */}
+          {checkingAuth ? null : user ? (
+            <div className="flex items-center gap-2">
+              {/* Make the Wayfinder capsule clickable -> member page */}
+              <Link
+                href={`/u/${encodeURIComponent(user.email ?? "")}`}
+                className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 shadow-sm cursor-pointer"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white">
+                  {user.email?.[0]?.toUpperCase() ?? "Q"}
+                </div>
+                <div className="flex flex-col leading-tight">
+                  <span className="max-w-[160px] truncate text-xs font-medium text-slate-800">
+                    {user.email}
+                  </span>
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Wayfinder
+                  </span>
+                </div>
+              </Link>
+
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Log out
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Link
+                href="/login"
+                className="text-sm font-medium text-slate-700 hover:text-slate-900"
+              >
+                Log in
+              </Link>
+              <Link
+                href="/signup"
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Sign up
+              </Link>
+            </div>
+          )}
         </div>
       </div>
     </header>

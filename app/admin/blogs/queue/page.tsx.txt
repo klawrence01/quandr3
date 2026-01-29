@@ -1,0 +1,89 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { getBrowserSupabase } from "@/utils/supabase/browser";
+
+type BlogRow = {
+  id: string;
+  title: string;
+  slug: string;
+  status: string;
+  blog_type: string;
+};
+
+export default function BlogQueueDebugPage() {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [rows, setRows] = useState<BlogRow[]>([]);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const supabase = getBrowserSupabase();
+        const { data, error } = await supabase
+          .from("blogs")
+          .select("id, title, slug, status, blog_type")
+          .order("created_at", { ascending: false });
+
+        if (error) {
+          console.error("Supabase error:", error);
+          setError(error.message);
+        } else {
+          setRows((data || []) as BlogRow[]);
+        }
+      } catch (err: any) {
+        console.error(err);
+        setError(err.message || "Unknown error");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    load();
+  }, []);
+
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        padding: "40px 24px",
+        fontFamily: "system-ui",
+      }}
+    >
+      <h1 style={{ fontSize: 28, fontWeight: 900, marginBottom: 12 }}>
+        Blog Queue Debug
+      </h1>
+
+      <p style={{ fontSize: 14, opacity: 0.7, marginBottom: 24 }}>
+        This page is just for testing that the <code>blogs</code> table is
+        connected.
+      </p>
+
+      {loading && <p>Loading from Supabase…</p>}
+
+      {error && (
+        <p style={{ color: "red", fontWeight: 700 }}>
+          Error: {error}
+        </p>
+      )}
+
+      {!loading && !error && rows.length === 0 && (
+        <p>No rows found in the blogs table.</p>
+      )}
+
+      {!loading && !error && rows.length > 0 && (
+        <div>
+          <h2 style={{ fontSize: 18, marginBottom: 8 }}>Rows</h2>
+          <ul>
+            {rows.map((row) => (
+              <li key={row.id}>
+                <strong>{row.title}</strong> — {row.slug} ({row.status},{" "}
+                {row.blog_type})
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </main>
+  );
+}

@@ -1,395 +1,225 @@
-
+// app/login/page.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/utils/supabase/browser";
 
-const NAVY = "#0b2343";
-const BLUE = "#1e63f3";
-const TEAL = "#00a9a5";
-const CORAL = "#ff6b6b";
-const SOFT_BG = "#f7f9ff";
-
-const LS_KEY_SIGNUP_STUB = "q3_signup_stub_v1";
-
-type SignupStub = {
-  displayName: string;
-  email: string;
-  createdAtISO: string;
-  lastLoginISO?: string;
+type Profile = {
+  id: string;
+  username: string | null;
 };
-
-function loadStub(): SignupStub | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(LS_KEY_SIGNUP_STUB);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function saveStub(data: SignupStub) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(LS_KEY_SIGNUP_STUB, JSON.stringify(data));
-}
-
-/* Small UI bits reused */
-
-function Pill({ children }: { children: React.ReactNode }) {
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "6px 10px",
-        borderRadius: 999,
-        border: "1px solid rgba(30,99,243,0.3)",
-        background: "rgba(30,99,243,0.06)",
-        fontSize: 12,
-        letterSpacing: 0.2,
-        color: BLUE,
-        fontWeight: 700,
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
-function Button({
-  children,
-  onClick,
-  variant = "primary",
-  disabled,
-  type = "button",
-}: {
-  children: React.ReactNode;
-  onClick?: () => void;
-  variant?: "primary" | "ghost";
-  disabled?: boolean;
-  type?: "button" | "submit";
-}) {
-  const isGhost = variant === "ghost";
-
-  return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        cursor: disabled ? "not-allowed" : "pointer",
-        padding: "11px 14px",
-        borderRadius: 999,
-        border: isGhost
-          ? "1px solid rgba(11,35,67,0.16)"
-          : "1px solid rgba(30,99,243,0.6)",
-        background: isGhost
-          ? "#ffffff"
-          : "linear-gradient(135deg, #1e63f3 0%, #00a9a5 50%, #ff6b6b 100%)",
-        color: isGhost ? NAVY : "#ffffff",
-        fontWeight: 850,
-        letterSpacing: 0.2,
-        opacity: disabled ? 0.55 : 1,
-        boxShadow: isGhost
-          ? "0 4px 10px rgba(11,35,67,0.08)"
-          : "0 14px 34px rgba(11,35,67,0.28)",
-        transition: "transform 120ms ease, filter 120ms ease, box-shadow 120ms",
-        filter: disabled ? "none" : "saturate(1.02)",
-      }}
-      onMouseDown={(e) => {
-        if (!disabled) e.currentTarget.style.transform = "scale(0.985)";
-      }}
-      onMouseUp={(e) => {
-        if (!disabled) e.currentTarget.style.transform = "scale(1)";
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  type?: string;
-}) {
-  return (
-    <label style={{ display: "grid", gap: 6 }}>
-      <div
-        style={{
-          fontSize: 13,
-          opacity: 0.9,
-          fontWeight: 800,
-          color: NAVY,
-        }}
-      >
-        {label}
-      </div>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        type={type}
-        style={{
-          width: "100%",
-          padding: "11px 13px",
-          borderRadius: 14,
-          border: "1px solid rgba(30,99,243,0.25)",
-          background: "#ffffff",
-          color: NAVY,
-          outline: "none",
-          fontSize: 14,
-          boxShadow: "0 4px 10px rgba(11,35,67,0.04)",
-        }}
-      />
-    </label>
-  );
-}
 
 export default function LoginPage() {
   const router = useRouter();
-  const existing = typeof window !== "undefined" ? loadStub() : null;
 
-  const [email, setEmail] = useState(existing?.email ?? "");
-  const [remember, setRemember] = useState(true);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [status, setStatus] = useState<string>("Checking session...");
+  const [error, setError] = useState<string>("");
 
-  const canSubmit = useMemo(() => {
-    const e = email.trim().toLowerCase();
-    return e.includes("@") && e.includes(".");
-  }, [email]);
+  useEffect(() => {
+    async function check() {
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
 
-  const shellStyle: React.CSSProperties = {
-    minHeight: "100vh",
-    color: NAVY,
-    background: SOFT_BG,
-    fontFamily:
-      "system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial",
-  };
+      if (error) {
+        console.error(error);
+        setStatus("Error checking session.");
+        return;
+      }
 
-  const cardStyle: React.CSSProperties = {
-    width: "100%",
-    maxWidth: 640,
-    margin: "0 auto",
-    padding: "22px",
-    borderRadius: 22,
-    border: "1px solid rgba(11,35,67,0.08)",
-    background: "#ffffff",
-    boxShadow: "0 18px 50px rgba(11,35,67,0.12)",
-  };
+      if (!user) {
+        setStatus("You are NOT signed in yet.");
+        return;
+      }
+
+      setStatus(`Signed in as ${user.email ?? user.id}`);
+    }
+
+    check();
+  }, []);
+
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setStatus("Signing in...");
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      console.error(error);
+      setError(error.message);
+      setStatus("Sign in failed.");
+      return;
+    }
+
+    setStatus(`Signed in as ${data.user?.email ?? data.user?.id}`);
+  }
+
+  async function goToMyProfile() {
+    setError("");
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      setError("You are not signed in. Sign in first.");
+      return;
+    }
+
+    // assumes profiles.id = auth.user.id and has username
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, username")
+      .eq("id", user.id)
+      .maybeSingle<Profile>();
+
+    if (profileError) {
+      console.error(profileError);
+      setError("Could not load your profile.");
+      return;
+    }
+
+    if (!profile || !profile.username) {
+      setError("Profile exists but username is missing.");
+      return;
+    }
+
+    router.push(`/u/${profile.username}`);
+  }
 
   return (
-    <main style={shellStyle}>
-      <div style={{ maxWidth: 980, margin: "0 auto", padding: "26px 18px" }}>
-        {/* Top Row */}
+    <main
+      style={{
+        minHeight: "100vh",
+        padding: "40px 24px",
+        fontFamily: "system-ui",
+        background: "#f9fafb",
+      }}
+    >
+      <div style={{ maxWidth: 460, margin: "0 auto" }}>
+        <h1 style={{ fontSize: 30, fontWeight: 900, marginBottom: 8 }}>
+          Account
+        </h1>
+        <p style={{ fontSize: 14, color: "#4b5563", marginBottom: 16 }}>
+          Use this page to sign in and jump straight to your own profile.
+        </p>
+
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            marginBottom: 14,
+            padding: 12,
+            borderRadius: 12,
+            background: "#eef2ff",
+            fontSize: 13,
+            marginBottom: 20,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 14,
-                background:
-                  "linear-gradient(135deg, #1e63f3 0%, #ff6b6b 50%, #00a9a5 100%)",
-                display: "grid",
-                placeItems: "center",
-                boxShadow: "0 10px 26px rgba(11,35,67,0.28)",
-              }}
-            >
-              <img
-                src="/assets/logo/quandr3-logo.png"
-                alt="Quandr3"
-                style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: 10,
-                  background: "#ffffff",
-                  objectFit: "cover",
-                }}
-              />
-            </div>
-            <div>
-              <div
-                style={{
-                  fontWeight: 950,
-                  letterSpacing: 0.2,
-                  fontSize: 16,
-                }}
-              >
-                QUANDR3
-              </div>
-              <div style={{ fontSize: 12, opacity: 0.82 }}>
-                Ask. Share. Decide.
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <Pill>Welcome back</Pill>
-          </div>
+          <strong>Status:</strong> {status}
         </div>
 
-        {/* Main Card */}
-        <div style={cardStyle}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 10,
-              flexWrap: "wrap",
-              marginBottom: 12,
-            }}
-          >
-            <div>
-              <h1
-                style={{
-                  fontSize: 30,
-                  margin: 0,
-                  fontWeight: 950,
-                  color: NAVY,
-                }}
-              >
-                Log in
-              </h1>
-              <p
-                style={{
-                  marginTop: 8,
-                  marginBottom: 0,
-                  opacity: 0.9,
-                  lineHeight: 1.6,
-                  fontSize: 15,
-                  maxWidth: 380,
-                }}
-              >
-                Jump back into your feed, profiles, and saved Quandr3s.
-              </p>
-            </div>
-            <Button variant="ghost" onClick={() => router.push("/signup")}>
-              Create account
-            </Button>
-          </div>
+        <button
+          type="button"
+          onClick={goToMyProfile}
+          style={{
+            marginBottom: 20,
+            padding: "10px 18px",
+            borderRadius: 999,
+            border: "none",
+            background: "#1e63f3",
+            color: "#fff",
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          Go to my profile
+        </button>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!canSubmit) return;
+        {error && (
+          <p style={{ color: "#b91c1c", fontSize: 13, marginTop: 4 }}>
+            {error}
+          </p>
+        )}
 
-              const trimmedEmail = email.trim().toLowerCase();
+        <hr style={{ margin: "24px 0" }} />
 
-              const base: SignupStub =
-                existing && existing.email === trimmedEmail
-                  ? existing
-                  : {
-                      displayName: existing?.displayName || "Guest",
-                      email: trimmedEmail,
-                      createdAtISO:
-                        existing?.createdAtISO ||
-                        new Date().toISOString(),
-                    };
-
-              saveStub({
-                ...base,
-                lastLoginISO: new Date().toISOString(),
-              });
-
-              // Local-only "login" — for now go to onboarding lenses
-              router.push("/onboarding/step1");
-            }}
-            style={{ display: "grid", gap: 12, marginTop: 8 }}
-          >
-            <Field
-              label="Email"
-              value={email}
-              onChange={setEmail}
-              placeholder="you@example.com"
-              type="email"
-            />
-
+        <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>
+          Sign in
+        </h2>
+        <form onSubmit={handleLogin}>
+          <div style={{ marginBottom: 12 }}>
             <label
               style={{
-                display: "flex",
-                gap: 10,
-                alignItems: "center",
-                opacity: 0.95,
-                marginTop: 2,
+                display: "block",
+                fontSize: 13,
+                fontWeight: 600,
+                marginBottom: 4,
               }}
             >
-              <input
-                type="checkbox"
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
-                style={{ transform: "scale(1.1)" }}
-              />
-              <span style={{ fontSize: 13, lineHeight: 1.4, color: NAVY }}>
-                Remember me on this device.
-              </span>
+              Email
             </label>
-
-            <div
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               style={{
-                display: "flex",
-                gap: 10,
-                flexWrap: "wrap",
-                marginTop: 4,
+                width: "100%",
+                padding: 8,
+                borderRadius: 8,
+                border: "1px solid #d1d5db",
+                fontSize: 14,
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 13,
+                fontWeight: 600,
+                marginBottom: 4,
               }}
             >
-              <Button type="submit" disabled={!canSubmit}>
-                Log in
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={() => alert("Stub: Google sign-in coming later.")}
-              >
-                Continue with Google (later)
-              </Button>
-              <button
-                type="button"
-                onClick={() => router.push("/forgot-password")}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  padding: 0,
-                  fontSize: 13,
-                  color: BLUE,
-                  textDecoration: "underline",
-                  cursor: "pointer",
-                }}
-              >
-                Forgot password?
-              </button>
-            </div>
-
-            <div
+              Password
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               style={{
-                opacity: 0.8,
-                fontSize: 12,
-                marginTop: 8,
-                color: "rgba(11,35,67,0.85)",
+                width: "100%",
+                padding: 8,
+                borderRadius: 8,
+                border: "1px solid #d1d5db",
+                fontSize: 14,
               }}
-            >
-              V1 note: This login is local-only. Real auth goes live when we
-              wire Supabase.
-            </div>
-          </form>
-        </div>
+            />
+          </div>
+
+          <button
+            type="submit"
+            style={{
+              padding: "10px 18px",
+              borderRadius: 999,
+              border: "none",
+              background: "#0b2343",
+              color: "#fff",
+              fontWeight: 700,
+              cursor: "pointer",
+              marginTop: 4,
+            }}
+          >
+            Sign in
+          </button>
+        </form>
       </div>
     </main>
   );

@@ -1,434 +1,766 @@
 "use client";
+// @ts-nocheck
 
-import { useState, useMemo } from "react";
-import { useParams } from "next/navigation";
-import { seedQ } from "@/lib/seedQ";
+export const dynamic = "force-dynamic";
 
-type Voice = {
-  name: string;
-  lens: string;
-  text: string;
-};
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { supabase } from "@/utils/supabase/browser";
 
-const NAVY = "#0b2343";
-const BLUE = "#1e63f3";
-const TEAL = "#00a9a5";
-const CORAL = "#ff6b6b";
-const SOFT_BG = "#f7f9ff";
+/* =========================
+   Helpers
+========================= */
 
-export default function QPage() {
-  const params = useParams<{ id: string }>();
-  const id = params?.id as string | undefined;
+function fmt(ts?: string) {
+  if (!ts) return "";
+  return new Date(ts).toLocaleString();
+}
 
-  const [selected, setSelected] = useState<string | null>(null);
-  const [phase, setPhase] = useState<"choose" | "reveal">("choose");
+function hoursLeft(createdAt: string, duration: number) {
+  const end = new Date(createdAt).getTime() + duration * 3600 * 1000;
+  const diff = end - Date.now();
+  return Math.max(0, Math.ceil(diff / 3600000));
+}
 
-  // 🔹 SUBTLE VOICES HERE
-  const voicesByOption: Record<string, Voice[]> = {
-    A: [
-      { name: "Maya", lens: "Structure-first", text: "I need a roadmap. If I don’t have structure, I drift." },
-      { name: "Derrick", lens: "Money-wise", text: "Credentials matter for raises. A course helps me justify the jump." },
-      { name: "Nia", lens: "Long-term", text: "I’d rather build skills properly than rush and get gaps later." },
-    ],
-    B: [
-      { name: "Andre", lens: "Hands-on", text: "I learn faster by building something and fixing what breaks." },
-      { name: "Sofia", lens: "Momentum", text: "Small wins keep me going. Projects give me motion from day one." },
-      { name: "Jalen", lens: "No-fluff", text: "Projects expose weak spots quick. You can’t hide from reality." },
-    ],
-    C: [
-      { name: "Tasha", lens: "Community-driven", text: "Other people keep me consistent when motivation dips." },
-      { name: "Eli", lens: "Shared thinking", text: "Seeing how others solve the same problem unlocks insight." },
-      { name: "Ramon", lens: "Avoid stuck", text: "Being stuck alone kills progress. People help me push through." },
-    ],
-    D: [
-      { name: "Leah", lens: "Cautious", text: "I like to test before committing. It saves me time and regret." },
-      { name: "Chris", lens: "Low-risk", text: "Short trials help me figure out if it’s worth real effort." },
-      { name: "Kira", lens: "Fit matters", text: "I’m choosing a learning style. Sampling shows what fits me." },
-    ],
-  };
+function cleanReason(s?: string) {
+  if (!s) return "";
+  const t = String(s).trim();
+  if (!t) return "";
+  if (t.toUpperCase() === "UPDATED TEXT HERE") return "";
+  return t;
+}
 
-  const widthByOption: Record<string, string> = {
-    A: "36",
-    B: "33",
-    C: "18",
-    D: "13",
-  };
+const LETTER = ["A", "B", "C", "D"];
 
-  const winningOptionId = useMemo(() => {
-    let best: string | null = null;
-    let max = -1;
-    for (const [k, v] of Object.entries(widthByOption)) {
-      const num = parseFloat(v);
-      if (num > max) {
-        max = num;
-        best = k;
-      }
-    }
-    return best;
+/* =========================
+   Page
+========================= */
+
+export default function Quandr3DetailPage() {
+  const params = useParams();
+  const router = useRouter();
+
+  // Normalize id (Next can give string|string[])
+  const id = useMemo(() => {
+    const raw: any = params?.id;
+    if (!raw) return null;
+    return Array.isArray(raw) ? raw[0] : raw;
+  }, [params]);
+
+  const [user, setUser] = useState<any>(null);
+  const [q, setQ] = useState<any>(null);
+  const [options, setOptions] = useState<any[]>([]);
+  const [votes, setVotes] = useState<any[]>([]);
+  const [resolution, setResolution] = useState<any>(null);
+  const [profile, setProfile] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Vote reasons
+  const [reasonsByVoteId, setReasonsByVoteId] = useState<Record<string, string>>(
+    {}
+  );
+  const [reasonDraftByVoteId, setReasonDraftByVoteId] = useState<
+    Record<string, string>
+  >({});
+  const [savingReason, setSavingReason] = useState(false);
+
+  // Discussion (B)
+  const [comments, setComments] = useState<any[]>([]);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [postingComment, setPostingComment] = useState(false);
+  const [commentProfilesById, setCommentProfilesById] = useState<
+    Record<string, any>
+  >({});
+
+  // Curioso toggles
+  const [togglingDiscussion, setTogglingDiscussion] = useState(false);
+
+  /* =========================
+     Load Auth
+  ========================= */
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data?.user ?? null);
+    });
   }, []);
 
-  const colorCycle = [BLUE, TEAL, CORAL];
+  /* =========================
+     Load / Refresh Helpers
+  ========================= */
+
+  async function refreshVotesAndReasons(qid: string) {
+    const { data: v } = await supabase
+      .from("quandr3_votes")
+      .select("*")
+      .eq("quandr3_id", qid);
+
+    const vRows = v ?? [];
+    setVotes(vRows);
+
+    if (vRows.length) {
+      const voteIds = vRows.map((x: any) => x.id).filter(Boolean);
+
+      const { data: rs } = await supabase
+        .from("vote_reasons")
+        .select("vote_id, reason")
+        .in("vote_id", voteIds);
+
+      const map: Record<string, string> = {};
+      (rs ?? []).forEach((r: any) => {
+        const txt = cleanReason(r.reason);
+        if (txt) map[r.vote_id] = txt;
+      });
+      setReasonsByVoteId(map);
+    } else {
+      setReasonsByVoteId({});
+    }
+  }
+
+  async function refreshComments(qid: string) {
+    const { data: rows } = await supabase
+      .from("quandr3_comments")
+      .select("*")
+      .eq("quandr3_id", qid)
+      .order("created_at", { ascending: true });
+
+    const c = rows ?? [];
+    setComments(c);
+
+    const userIds = Array.from(new Set(c.map((x: any) => x.user_id).filter(Boolean)));
+
+    if (!userIds.length) {
+      setCommentProfilesById({});
+      return;
+    }
+
+    const { data: profs } = await supabase
+      .from("profiles")
+      .select("id, display_name, avatar_url")
+      .in("id", userIds);
+
+    const map: Record<string, any> = {};
+    (profs ?? []).forEach((p: any) => {
+      map[p.id] = p;
+    });
+    setCommentProfilesById(map);
+  }
+
+  async function refreshCore(qid: string) {
+    const { data: qRow } = await supabase
+      .from("quandr3s")
+      .select("*")
+      .eq("id", qid)
+      .single();
+
+    setQ(qRow ?? null);
+
+    if (qRow?.author_id) {
+      const { data: p } = await supabase
+        .from("profiles")
+        .select("display_name, avatar_url")
+        .eq("id", qRow.author_id)
+        .single();
+      setProfile(p ?? null);
+    } else {
+      setProfile(null);
+    }
+
+    const { data: opts } = await supabase
+      .from("quandr3_options")
+      .select("*")
+      .eq("quandr3_id", qid)
+      .order("order", { ascending: true });
+
+    setOptions(opts ?? []);
+
+    await refreshVotesAndReasons(qid);
+
+    const { data: r } = await supabase
+      .from("quandr3_resolutions")
+      .select("*")
+      .eq("quandr3_id", qid)
+      .maybeSingle();
+
+    setResolution(r ?? null);
+
+    // Discussion load depends on current flag
+    if (qRow?.discussion_open) {
+      await refreshComments(qid);
+    } else {
+      setComments([]);
+      setCommentDraft("");
+      setCommentProfilesById({});
+    }
+  }
+
+  useEffect(() => {
+    if (!id) return;
+
+    (async () => {
+      setLoading(true);
+      await refreshCore(id);
+      setLoading(false);
+    })();
+  }, [id]);
+
+  /* =========================
+     Derived Logic
+  ========================= */
+
+  const myVote = useMemo(() => {
+    if (!user) return null;
+    return votes.find((v: any) => v.user_id === user.id) ?? null;
+  }, [votes, user]);
+
+  const myReason = useMemo(() => {
+    if (!myVote?.id) return "";
+    return cleanReason(reasonsByVoteId[myVote.id] ?? "");
+  }, [myVote, reasonsByVoteId]);
+
+  const voteCounts = useMemo(() => {
+    const map: Record<number, number> = {};
+    votes.forEach((v: any) => {
+      map[v.choice_index] = (map[v.choice_index] || 0) + 1;
+    });
+    return map;
+  }, [votes]);
+
+  const totalVotes = votes.length;
+
+  const votingExpired = useMemo(() => {
+    if (!q) return false;
+
+    const timeExpired =
+      Date.now() >
+      new Date(q.created_at).getTime() + q.voting_duration_hours * 3600 * 1000;
+
+    const voteCapReached =
+      q.voting_max_votes && totalVotes >= q.voting_max_votes;
+
+    return timeExpired || voteCapReached;
+  }, [q, totalVotes]);
+
+  const status = useMemo(() => {
+    if (resolution) return "resolved";
+    if (votingExpired) return "awaiting_user";
+    return "open";
+  }, [resolution, votingExpired]);
+
+  const winningOrder = useMemo(() => {
+    if (resolution) {
+      const opt = options.find((o: any) => o.id === resolution.option_id);
+      return opt?.order;
+    }
+    let max = 0;
+    let win: any = null;
+    Object.entries(voteCounts).forEach(([k, v]: any) => {
+      if (v > max) {
+        max = v;
+        win = Number(k);
+      }
+    });
+    return win;
+  }, [voteCounts, resolution, options]);
+
+  const reasonsByChoiceIndex = useMemo(() => {
+    const grouped: Record<number, string[]> = {};
+    votes.forEach((v: any) => {
+      const rid = v.id;
+      const txt = cleanReason(reasonsByVoteId[rid]);
+      if (!txt) return;
+      const idx = v.choice_index;
+      grouped[idx] = grouped[idx] || [];
+      grouped[idx].push(txt);
+    });
+    return grouped;
+  }, [votes, reasonsByVoteId]);
+
+  // Only allow editing reasons while voting is open (not expired, not resolved)
+  const canEditReason = useMemo(() => {
+    return !!user && status === "open" && !votingExpired && !resolution;
+  }, [user, status, votingExpired, resolution]);
+
+  const isCurioso = useMemo(() => {
+    if (!user?.id || !q?.author_id) return false;
+    return user.id === q.author_id;
+  }, [user, q]);
+
+  const canToggleDiscussion = useMemo(() => {
+    // Curioso can open/close discussion after voting ends OR after resolution.
+    if (!isCurioso) return false;
+    return votingExpired || !!resolution;
+  }, [isCurioso, votingExpired, resolution]);
+
+  /* =========================
+     Actions
+  ========================= */
+
+  async function vote(order: number) {
+    if (!id) return;
+
+    if (!user) {
+      router.push(`/login?next=/q/${id}`);
+      return;
+    }
+    if (votingExpired || resolution) return;
+
+    const { data: inserted, error } = await supabase
+      .from("quandr3_votes")
+      .insert({
+        quandr3_id: id,
+        user_id: user.id,
+        choice_index: order,
+      })
+      .select("id, user_id, choice_index, quandr3_id, created_at")
+      .single();
+
+    if (error) {
+      await refreshVotesAndReasons(id);
+      return;
+    }
+
+    await refreshVotesAndReasons(id);
+
+    if (inserted?.id) {
+      setReasonDraftByVoteId((prev: any) => ({
+        ...prev,
+        [inserted.id]: cleanReason(prev[inserted.id]) ?? "",
+      }));
+    }
+  }
+
+  async function saveMyReason() {
+    if (!id) return;
+
+    if (!user) {
+      router.push(`/login?next=/q/${id}`);
+      return;
+    }
+    if (!myVote?.id) return;
+    if (!canEditReason) return;
+
+    const draft = cleanReason(reasonDraftByVoteId[myVote.id] ?? "");
+    if (!draft) return;
+
+    setSavingReason(true);
+
+    const { error } = await supabase
+      .from("vote_reasons")
+      .upsert(
+        {
+          vote_id: myVote.id,
+          reason: draft,
+        },
+        { onConflict: "vote_id" }
+      );
+
+    setSavingReason(false);
+
+    if (error) {
+      alert(error.message || "Could not save reason.");
+      return;
+    }
+
+    await refreshVotesAndReasons(id);
+  }
+
+  async function postComment() {
+    if (!id) return;
+
+    if (!user) {
+      router.push(`/login?next=/q/${id}`);
+      return;
+    }
+    if (!q?.discussion_open) return;
+
+    const body = commentDraft.trim();
+    if (!body) return;
+
+    setPostingComment(true);
+
+    const { error } = await supabase.from("quandr3_comments").insert({
+      quandr3_id: id,
+      user_id: user.id,
+      body,
+    });
+
+    setPostingComment(false);
+
+    if (error) {
+      alert(error.message || "Could not post comment.");
+      return;
+    }
+
+    setCommentDraft("");
+    await refreshComments(id);
+  }
+
+  async function deleteComment(commentId: string) {
+    if (!id) return;
+
+    if (!user) {
+      router.push(`/login?next=/q/${id}`);
+      return;
+    }
+
+    const { error } = await supabase
+      .from("quandr3_comments")
+      .delete()
+      .eq("id", commentId);
+
+    if (error) {
+      alert(error.message || "Could not delete comment.");
+      return;
+    }
+
+    await refreshComments(id);
+  }
+
+  async function setDiscussionOpen(nextOpen: boolean) {
+    if (!id) return;
+
+    if (!user) {
+      router.push(`/login?next=/q/${id}`);
+      return;
+    }
+    if (!isCurioso) return;
+    if (!canToggleDiscussion) return;
+
+    setTogglingDiscussion(true);
+
+    const { error } = await supabase
+      .from("quandr3s")
+      .update({ discussion_open: nextOpen })
+      .eq("id", id);
+
+    setTogglingDiscussion(false);
+
+    if (error) {
+      alert(
+        error.message ||
+          "Could not toggle discussion (likely RLS). Make sure only the author can update discussion_open."
+      );
+      return;
+    }
+
+    // Always re-pull the core row so UI is 100% consistent
+    await refreshCore(id);
+  }
+
+  /* =========================
+     Render
+  ========================= */
+
+  if (loading) return <div>Loading…</div>;
+  if (!q) return <div>Not found</div>;
 
   return (
-    <main
-      style={{
-        maxWidth: 860,
-        margin: "0 auto",
-        padding: "48px 24px 64px",
-        lineHeight: 1.6,
-        background: SOFT_BG,
-        minHeight: "100vh",
-        color: NAVY,
-        fontFamily:
-          "system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-      }}
-    >
-      {/* HEADER */}
-      <section style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: 30, fontWeight: 900, marginBottom: 12 }}>
-          {seedQ.title}
-        </h1>
+    <div style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
+      {/* Top Bar */}
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <Link href="/explore">Browse Quandr3s</Link>
+        <Link href="/q/create">Create Quandr3</Link>
+      </div>
 
-        <p style={{ fontSize: 17, opacity: 0.9, marginBottom: 10 }}>
-          {seedQ.context}
-        </p>
+      {/* Header */}
+      <h1 style={{ marginTop: 18 }}>{q.title}</h1>
 
-        {id && (
-          <p style={{ fontSize: 12, opacity: 0.6, marginBottom: 10 }}>
-            Quandr3 ID · {id}
-          </p>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
+        {/* Avatar (simple MVP) */}
+        <div
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: 999,
+            background: "#eee",
+            overflow: "hidden",
+          }}
+        >
+          {profile?.avatar_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={profile.avatar_url}
+              alt=""
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          ) : null}
+        </div>
+
+        <div>
+          <div>
+            Asked by <strong>{profile?.display_name ?? "Unknown"}</strong> •{" "}
+            {fmt(q.created_at)}
+          </div>
+          <div>
+            Category: <strong>{q.category}</strong>
+          </div>
+        </div>
+      </div>
+
+      {/* Status */}
+      <div style={{ marginTop: 14 }}>
+        Status: <strong>{status}</strong> • {totalVotes}{" "}
+        {totalVotes === 1 ? "vote" : "votes"}
+        {status === "open" && (
+          <> • {hoursLeft(q.created_at, q.voting_duration_hours)}h left</>
         )}
+      </div>
 
-        <p style={{ fontSize: 13, opacity: 0.75, marginBottom: 0 }}>
-          There’s no single right answer — just different ways to think about the same choice.
-        </p>
-      </section>
+      {/* Curioso Reasoning */}
+      {q.reasoning && (
+        <div style={{ marginTop: 16 }}>
+          <h3>Why I asked this</h3>
+          <p>{q.reasoning}</p>
+        </div>
+      )}
 
-      {/* CHOOSE STEP */}
-      {phase === "choose" && (
-        <>
-          <section
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 16,
-              marginBottom: 32,
-            }}
-          >
-            {seedQ.options.map((option) => {
-              const isSelected = selected === option.id;
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  onClick={() => setSelected(option.id)}
-                  style={{
-                    textAlign: "left",
-                    borderRadius: 16,
-                    padding: 18,
-                    cursor: "pointer",
-                    border: isSelected
-                      ? `2px solid ${BLUE}`
-                      : "1px solid rgba(11,35,67,0.12)",
-                    background: isSelected ? "#ffffff" : "rgba(247,249,255,0.9)",
-                    boxShadow: isSelected
-                      ? "0 16px 36px rgba(11,35,67,0.14)"
-                      : "0 8px 18px rgba(11,35,67,0.06)",
-                    transition: "all 0.18s ease",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 8,
-                      alignItems: "center",
-                    }}
-                  >
-                    <strong style={{ fontSize: 18, fontWeight: 850 }}>
-                      {option.id}. {option.label}
-                    </strong>
+      {/* Options */}
+      <div style={{ marginTop: 24 }}>
+        {options.map((opt: any) => {
+          const count = voteCounts[opt.order] || 0;
+          const pct = totalVotes ? Math.round((count / totalVotes) * 100) : 0;
 
-                    {isSelected && (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 800,
-                          padding: "4px 10px",
-                          borderRadius: 999,
-                          background: "rgba(30,99,243,0.10)",
-                          color: BLUE,
-                          border: "1px solid rgba(30,99,243,0.6)",
-                          letterSpacing: "0.12em",
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        Your pick
-                      </span>
-                    )}
+          const isWinner = opt.order === winningOrder;
+          const optReasons = reasonsByChoiceIndex[opt.order] ?? [];
+
+          const isMyPicked = myVote?.choice_index === opt.order;
+
+          // Only show reason box if voting is currently open AND this is my pick
+          const showReasonBox = !!myVote?.id && isMyPicked && canEditReason;
+
+          const voteIdForMyVote = myVote?.id;
+
+          const reasonDraft =
+            voteIdForMyVote != null
+              ? (reasonDraftByVoteId[voteIdForMyVote] ?? myReason ?? "")
+              : "";
+
+          return (
+            <div
+              key={opt.id}
+              style={{
+                border: "1px solid #ddd",
+                padding: 14,
+                marginBottom: 12,
+                background: isWinner ? "#f0f7ff" : "white",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <strong>
+                  {LETTER[opt.order - 1]}. {opt.label}
+                </strong>
+
+                {status === "open" ? (
+                  <button onClick={() => vote(opt.order)}>Vote</button>
+                ) : (
+                  <div>
+                    {count} votes ({pct}%)
                   </div>
-                </button>
-              );
-            })}
-          </section>
+                )}
+              </div>
 
-          {selected && (
-            <div>
-              <button
-                onClick={() => setPhase("reveal")}
-                style={{
-                  padding: "14px 26px",
-                  fontSize: 14,
-                  borderRadius: 999,
-                  border: "none",
-                  background: BLUE,
-                  color: "#ffffff",
-                  cursor: "pointer",
-                  fontWeight: 800,
-                  letterSpacing: "0.18em",
-                  textTransform: "uppercase",
-                  boxShadow: "0 16px 40px rgba(30,99,243,0.35)",
-                }}
-              >
-                See how others think
-              </button>
-              <p style={{ marginTop: 10, fontSize: 12, opacity: 0.72 }}>
-                Your answer locks first. Then you’ll see how different thinkers approached it.
-              </p>
+              {/* Only show when there are real reasons */}
+              {optReasons.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                    Why people chose this
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {optReasons.slice(0, 5).map((txt: string, idx: number) => (
+                      <li key={`${opt.id}-r-${idx}`}>{txt}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Reason UI (only for the voter, only while voting is open) */}
+              {showReasonBox && (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                    {myReason ? "Edit your reason" : "Why did you choose this?"}
+                  </div>
+
+                  <textarea
+                    value={reasonDraft}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setReasonDraftByVoteId((prev: any) => ({
+                        ...prev,
+                        [voteIdForMyVote]: val,
+                      }));
+                    }}
+                    rows={3}
+                    style={{ width: "100%", padding: 10 }}
+                    placeholder="Write a short reason (1–2 sentences is perfect)."
+                  />
+
+                  <div style={{ marginTop: 8 }}>
+                    <button onClick={saveMyReason} disabled={savingReason}>
+                      {savingReason ? "Saving..." : "Save reason"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Resolution */}
+      {resolution && (
+        <div style={{ marginTop: 24 }}>
+          <h3>Curioso Resolution</h3>
+          <p>{resolution.note}</p>
+          <div>Resolved on {fmt(resolution.created_at)}</div>
+        </div>
+      )}
+
+      {/* Discussion (B — LIVE) */}
+      <div style={{ marginTop: 32 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <h3 style={{ margin: 0 }}>Discussion</h3>
+
+          {/* Curioso Open/Close buttons */}
+          {isCurioso && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {!canToggleDiscussion ? (
+                <div style={{ fontSize: 12, color: "#666" }}>
+                  (You can open discussion after voting ends.)
+                </div>
+              ) : q.discussion_open ? (
+                <button
+                  onClick={() => setDiscussionOpen(false)}
+                  disabled={togglingDiscussion}
+                >
+                  {togglingDiscussion ? "Closing..." : "Close Discussion"}
+                </button>
+              ) : (
+                <button
+                  onClick={() => setDiscussionOpen(true)}
+                  disabled={togglingDiscussion}
+                >
+                  {togglingDiscussion ? "Opening..." : "Open Discussion"}
+                </button>
+              )}
             </div>
           )}
-        </>
-      )}
+        </div>
 
-      {/* REVEAL STEP */}
-      {phase === "reveal" && (
-        <section style={{ marginTop: 40, display: "grid", gap: 24 }}>
-          {/* Reveal header */}
-          <div
-            style={{
-              borderRadius: 22,
-              background: "#ffffff",
-              padding: 18,
-              boxShadow: "0 18px 48px rgba(11,35,67,0.14)",
-              border: "1px solid rgba(11,35,67,0.06)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 800,
-                letterSpacing: "0.18em",
-                textTransform: "uppercase",
-                color: "rgba(11,35,67,0.78)",
-                marginBottom: 6,
-              }}
-            >
-              Quandr3 Reveal
+        {!q.discussion_open ? (
+          <div style={{ color: "#666", marginTop: 8 }}>Discussion is closed.</div>
+        ) : (
+          <>
+            {/* Add comment */}
+            <div style={{ border: "1px solid #ddd", padding: 12, marginTop: 10 }}>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>
+                Add to the discussion
+              </div>
+
+              <textarea
+                value={commentDraft}
+                onChange={(e) => setCommentDraft(e.target.value)}
+                rows={3}
+                style={{ width: "100%", padding: 10 }}
+                placeholder={
+                  user
+                    ? "Share your take (keep it respectful)."
+                    : "Log in to comment."
+                }
+                disabled={!user || postingComment}
+              />
+
+              <div style={{ marginTop: 8 }}>
+                <button onClick={postComment} disabled={!user || postingComment}>
+                  {postingComment ? "Posting..." : "Post comment"}
+                </button>
+              </div>
             </div>
-            <h2
-              style={{
-                fontSize: 22,
-                fontWeight: 900,
-                margin: "0 0 4px",
-              }}
-            >
-              How people approached this
-            </h2>
-            <p style={{ fontSize: 13, opacity: 0.78, margin: 0 }}>
-              People can agree on an answer for different reasons. This shows you the spread.
-            </p>
-          </div>
 
-          {/* Breakdown */}
-          {seedQ.options.map((option) => {
-            const isMine = selected === option.id;
-            const voices = voicesByOption[option.id] ?? [];
-            const pct = parseFloat(widthByOption[option.id] ?? "25");
-            const isWinner = option.id === winningOptionId;
+            {/* Comments list */}
+            <div style={{ marginTop: 14 }}>
+              {comments.length === 0 ? (
+                <div style={{ color: "#666" }}>No comments yet.</div>
+              ) : (
+                comments.map((c: any) => {
+                  const p = commentProfilesById[c.user_id];
+                  const canDelete = user?.id && c.user_id === user.id;
 
-            return (
-              <div
-                key={option.id}
-                style={{
-                  borderRadius: 20,
-                  padding: 18,
-                  background: "#ffffff",
-                  border: isMine
-                    ? `1px solid ${BLUE}`
-                    : "1px solid rgba(11,35,67,0.08)",
-                  boxShadow: isMine
-                    ? "0 16px 40px rgba(30,99,243,0.25)"
-                    : "0 10px 26px rgba(11,35,67,0.10)",
-                }}
-              >
-                {/* header row */}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 10,
-                    alignItems: "center",
-                    marginBottom: 10,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <strong style={{ fontSize: 16, fontWeight: 850 }}>
-                      {option.id}. {option.label}
-                    </strong>
-
-                    {isWinner && (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 800,
-                          padding: "3px 10px",
-                          borderRadius: 999,
-                          background: "rgba(0,169,165,0.10)",
-                          color: TEAL,
-                          border: "1px solid rgba(0,169,165,0.65)",
-                          letterSpacing: "0.14em",
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        Most chosen
-                      </span>
-                    )}
-
-                    {isMine && (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 800,
-                          padding: "3px 10px",
-                          borderRadius: 999,
-                          background: "rgba(30,99,243,0.10)",
-                          color: BLUE,
-                          border: "1px solid rgba(30,99,243,0.65)",
-                          letterSpacing: "0.14em",
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        Your choice
-                      </span>
-                    )}
-                  </div>
-
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 750,
-                      color: "rgba(11,35,67,0.85)",
-                    }}
-                  >
-                    ~{pct}%
-                  </div>
-                </div>
-
-                {/* distribution bar */}
-                <div
-                  style={{
-                    height: 8,
-                    borderRadius: 999,
-                    background: "rgba(11,35,67,0.06)",
-                    overflow: "hidden",
-                    marginBottom: 16,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: `${Math.max(pct, 8)}%`,
-                      height: "100%",
-                      borderRadius: 999,
-                      background: isWinner ? BLUE : TEAL,
-                      transition: "width 0.25s ease",
-                    }}
-                  />
-                </div>
-
-                {/* Voices */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {voices.slice(0, 3).map((v, idx) => {
-                    const color = colorCycle[idx % colorCycle.length];
-                    return (
+                  return (
+                    <div
+                      key={c.id}
+                      style={{
+                        border: "1px solid #eee",
+                        padding: 12,
+                        marginBottom: 10,
+                        background: "white",
+                      }}
+                    >
                       <div
-                        key={idx}
                         style={{
                           display: "flex",
+                          justifyContent: "space-between",
                           gap: 12,
-                          padding: 12,
-                          borderRadius: 14,
-                          background: "rgba(247,249,255,0.9)",
-                          border: "1px solid rgba(11,35,67,0.08)",
                         }}
                       >
-                        <div
-                          style={{
-                            width: 32,
-                            height: 32,
-                            borderRadius: 999,
-                            background: color,
-                            flexShrink: 0,
-                            display: "grid",
-                            placeItems: "center",
-                            color: "#ffffff",
-                            fontSize: 14,
-                            fontWeight: 900,
-                          }}
-                        >
-                          {v.name.charAt(0).toUpperCase()}
-                        </div>
-
-                        <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <div
                             style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 10,
-                              marginBottom: 6,
-                              flexWrap: "wrap",
+                              width: 34,
+                              height: 34,
+                              borderRadius: 999,
+                              background: "#eee",
+                              overflow: "hidden",
                             }}
                           >
-                            <strong style={{ fontSize: 13 }}>{v.name}</strong>
-                            <span
-                              style={{
-                                fontSize: 11,
-                                opacity: 0.9,
-                                padding: "2px 8px",
-                                borderRadius: 999,
-                                background: "#ffffff",
-                                border: "1px solid rgba(11,35,67,0.12)",
-                                fontWeight: 700,
-                                color: NAVY,
-                              }}
-                            >
-                              {v.lens}
-                            </span>
+                            {p?.avatar_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={p.avatar_url}
+                                alt=""
+                                style={{
+                                  width: "100%",
+                                  height: "100%",
+                                  objectFit: "cover",
+                                }}
+                              />
+                            ) : null}
                           </div>
 
-                          <p
-                            style={{
-                              fontSize: 13,
-                              opacity: 0.94,
-                              margin: 0,
-                            }}
-                          >
-                            {v.text}
-                          </p>
+                          <div>
+                            <div style={{ fontWeight: 700 }}>
+                              {p?.display_name ?? "Member"}
+                            </div>
+                            <div style={{ fontSize: 12, color: "#666" }}>
+                              {fmt(c.created_at)}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
 
-          <div style={{ marginTop: 10, fontSize: 12, opacity: 0.78 }}>
-            Seeing different reasoning styles is the fun part. Post your own Quandr3 and test the crowd.
-          </div>
-        </section>
-      )}
-    </main>
+                        {canDelete ? (
+                          <button onClick={() => deleteComment(c.id)}>Delete</button>
+                        ) : null}
+                      </div>
+
+                      <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>
+                        {c.body}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }

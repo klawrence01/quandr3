@@ -1,286 +1,339 @@
-import Link from "next/link";
-import Image from "next/image";
-
-const colors = {
-  pageBg: "#f4f7ff", // soft blue page background
-  cardBg: "#ffffff",
-  border: "#d9e2ff",
-  primaryBlue: "#1554d1", // anchor blue
-  teal: "#06b6d4", // accent
-  coral: "#fb6b5b", // accent
-  textMain: "#0b1220",
-  textSubtle: "#4b5563",
-  textMuted: "#94a3b8",
-};
+// app/about/page.tsx
 
 export default function AboutPage() {
   return (
-    <div
+    <main
       style={{
-        minHeight: "100vh",
-        background: colors.pageBg,
-        color: colors.textMain,
-        fontFamily:
-          "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+        maxWidth: 960,
+        margin: "0 auto",
+        padding: "64px 24px 96px",
+        fontFamily: "system-ui",
+        color: "#0b2343",
       }}
     >
-      <div
-        style={{
-          maxWidth: 1040,
-          margin: "0 auto",
-          padding: "32px 24px 64px",
-        }}
-      >
-        {/* Brand header */}
-        <header
+      {/* Hero */}
+      <section style={{ marginBottom: 40 }}>
+        <p
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
-            marginBottom: 24,
-            flexWrap: "wrap",
+            fontSize: 14,
+            fontWeight: 700,
+            letterSpacing: 1.4,
+            textTransform: "uppercase",
+            color: "#00a9a5",
+            marginBottom: 12,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          About Quandr3
+        </p>
+        <h1
+          style={{
+            fontSize: 44,
+            lineHeight: 1.05,
+            fontWeight: 900,
+            letterSpacing: -0.4,
+            marginBottom: 16,
+          }}
+        >
+          A people-powered clarity engine.
+        </h1>
+        <p
+          style={{
+            fontSize: 18,
+            lineHeight: 1.6,
+            maxWidth: 640,
+            color: "#1f2933",
+          }}
+        >
+          Quandr3 is where real people help you make better decisions. You bring
+          the crossroads moment. The community brings perspective. Together, you
+          walk away with options you actually feel good about.
+        </p>
+      </section>
+
+      {/* Two-column intro */}
+      <section
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1.4fr)",
+          gap: 32,
+          marginBottom: 56,
+        }}
+      >
+        <div
+          style={{
+            background: "#f7f9ff",
+            borderRadius: 20,
+            padding: 24,
+          }}
+        >
+          <h2
+            style={{
+              fontSize: 22,
+              fontWeight: 800,
+              marginBottom: 12,
+            }}
+          >
+            Why Quandr3 exists
+          </h2>
+          <p style={{ fontSize: 16, lineHeight: 1.7, marginBottom: 16 }}>
+            Most platforms are built to keep you scrolling, not to help you
+            decide. Quandr3 flips that script. It’s designed for the exact
+            moment when you’re stuck between options—big or small—and need
+            honest, targeted input instead of random noise.
+          </p>
+          <p style={{ fontSize: 16, lineHeight: 1.7 }}>
+            Our job is simple: create a safe, structured space where good people
+            can share what they know, so you can see your choices clearly and
+            move forward with confidence.
+          </p>
+        </div>
+
+        <aside
+          style={{
+            borderRadius: 20,
+            padding: 20,
+            border: "1px solid rgba(15, 23, 42, 0.06)",
+            boxShadow: "0 18px 45px rgba(15, 23, 42, 0.08)",
+          }}
+        >
+          <h3
+            style={{
+              fontSize: 18,
+              fontWeight: 800,
+              marginBottom: 16,
+            }}
+          >
+            Snapshot
+          </h3>
+          <ul
+            style={{
+              listStyle: "none",
+              padding: 0,
+              margin: 0,
+              fontSize: 14,
+              lineHeight: 1.6,
+            }}
+          >
+            <li style={{ marginBottom: 8 }}>
+              <strong>Format:</strong> short scenarios, four options, real
+              votes.
+            </li>
+            <li style={{ marginBottom: 8 }}>
+              <strong>Focus:</strong> everyday crossroads—money, style,
+              relationships, and beyond.
+            </li>
+            <li style={{ marginBottom: 8 }}>
+              <strong>Built for:</strong> curious people who want better
+              outcomes, not more arguing.
+            </li>
+            <li>
+              <strong>Core idea:</strong> better questions + better input =
+              stronger decisions.
+            </li>
+          </ul>
+        </aside>
+      </section>
+
+      {/* How it works */}
+      <section style={{ marginBottom: 56 }}>
+        <h2
+          style={{
+            fontSize: 24,
+            fontWeight: 900,
+            marginBottom: 16,
+          }}
+        >
+          How Quandr3 works
+        </h2>
+        <p
+          style={{
+            fontSize: 16,
+            maxWidth: 640,
+            marginBottom: 24,
+            color: "#1f2933",
+          }}
+        >
+          We keep the flow simple on purpose, so you can focus on the decision
+          itself—not on learning another complicated app.
+        </p>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 20,
+          }}
+        >
+          {[
+            {
+              label: "1. Ask",
+              title: "Post your Quandr3",
+              body: "Share the real situation, what you’re choosing between, and what matters most to you.",
+            },
+            {
+              label: "2. Share",
+              title: "Invite Wayfinders",
+              body: "People you trust—and people with experience—vote, explain their reasoning, and surface angles you may have missed.",
+            },
+            {
+              label: "3. Decide",
+              title: "See the path forward",
+              body: "View the results, read the thinking behind each choice, and close your Quandr3 when you’re ready.",
+            },
+          ].map((step) => (
             <div
+              key={step.label}
               style={{
-                position: "relative",
-                width: 44,
-                height: 44,
-                borderRadius: 14,
-                overflow: "hidden",
+                borderRadius: 18,
+                padding: 20,
                 background: "#ffffff",
-                border: `1px solid ${colors.border}`,
-                boxShadow: "0 8px 18px rgba(15,23,42,0.08)",
+                border: "1px solid rgba(15, 23, 42, 0.06)",
               }}
             >
-              <Image
-                src="/quandr3-logo.png"
-                alt="QUANDR3 logo"
-                fill
-                style={{ objectFit: "contain" }}
-              />
-            </div>
-            <div>
-              <div style={{ fontWeight: 900, fontSize: 18, letterSpacing: -0.03 }}>
-                QUANDR3
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  textTransform: "uppercase",
+                  letterSpacing: 1.4,
+                  color: "#00a9a5",
+                  marginBottom: 6,
+                }}
+              >
+                {step.label}
               </div>
-              <div style={{ fontSize: 12, color: colors.textMuted }}>
-                A people-powered clarity engine.
-              </div>
+              <h3
+                style={{
+                  fontSize: 17,
+                  fontWeight: 800,
+                  marginBottom: 8,
+                }}
+              >
+                {step.title}
+              </h3>
+              <p style={{ fontSize: 14, lineHeight: 1.7, color: "#334155" }}>
+                {step.body}
+              </p>
             </div>
+          ))}
+        </div>
+      </section>
+
+      {/* What makes it different */}
+      <section style={{ marginBottom: 56 }}>
+        <h2
+          style={{
+            fontSize: 24,
+            fontWeight: 900,
+            marginBottom: 16,
+          }}
+        >
+          What makes Quandr3 different
+        </h2>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            gap: 20,
+          }}
+        >
+          <div
+            style={{
+              borderRadius: 18,
+              padding: 20,
+              background: "#f7f9ff",
+            }}
+          >
+            <h3
+              style={{
+                fontSize: 17,
+                fontWeight: 800,
+                marginBottom: 8,
+              }}
+            >
+              Context, not hot takes
+            </h3>
+            <p style={{ fontSize: 14, lineHeight: 1.7 }}>
+              Votes are important, but the “why” matters more. Quandr3
+              encourages short, honest explanations so you can see the thinking
+              behind each option.
+            </p>
           </div>
 
           <div
             style={{
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-              fontSize: 12,
+              borderRadius: 18,
+              padding: 20,
+              background: "#ffffff",
+              border: "1px solid rgba(15, 23, 42, 0.06)",
             }}
           >
-            <span
-              style={{
-                padding: "6px 12px",
-                borderRadius: 999,
-                border: `1px solid ${colors.border}`,
-                background: "#ffffff",
-                color: colors.primaryBlue,
-                fontWeight: 600,
-              }}
-            >
-              About
-            </span>
-            <span
-              style={{
-                padding: "6px 12px",
-                borderRadius: 999,
-                background: `linear-gradient(135deg, ${colors.teal}, ${colors.coral})`,
-                color: "#ffffff",
-                fontWeight: 600,
-              }}
-            >
-              Ask • Share • Decide
-            </span>
-          </div>
-        </header>
-
-        {/* Main card */}
-        <main
-          style={{
-            maxWidth: 900,
-            margin: "0 auto",
-            padding: "32px 24px 40px",
-            borderRadius: 20,
-            background: colors.cardBg,
-            border: `1px solid ${colors.border}`,
-            boxShadow: "0 18px 40px rgba(15,23,42,0.08)",
-            lineHeight: 1.6,
-          }}
-        >
-          {/* Header */}
-          <h1
-            style={{
-              fontSize: 42,
-              fontWeight: 900,
-              marginBottom: 8,
-              letterSpacing: -0.03,
-            }}
-          >
-            About Quandr3
-          </h1>
-
-          <p
-            style={{
-              fontSize: 20,
-              marginBottom: 32,
-              color: colors.textSubtle,
-            }}
-          >
-            Ask. Share. Decide.
-          </p>
-
-          {/* Core message */}
-          <section style={{ marginBottom: 40 }}>
-            <p style={{ fontSize: 18, marginBottom: 20 }}>
-              Life puts all of us in situations we’ve never faced before. A
-              decision, a dilemma, a question — and suddenly it feels like we’re
-              supposed to figure it out on our own.
-            </p>
-
-            <p style={{ fontSize: 18, marginBottom: 20 }}>
-              <strong>Quandr3 exists so you don’t have to.</strong>
-            </p>
-
-            <p style={{ fontSize: 18, marginBottom: 20 }}>
-              Quandr3 is a safe space for moving forward. It’s where you come to
-              ask a real question, see how others would choose, and decide what’s
-              right for you.
-            </p>
-
-            <p style={{ fontSize: 18, marginBottom: 20 }}>
-              Your situation may be new to you. It may even feel extreme. But you
-              can be sure of one thing — somewhere, there is a person for whom
-              your situation is familiar. Someone who has been there before.
-            </p>
-
-            <p style={{ fontSize: 18 }}>
-              Quandr3 connects you to that perspective — not to tell you what to
-              do, but to help you feel supported, less alone, and more confident
-              moving forward.
-            </p>
-          </section>
-
-          {/* How it works */}
-          <section style={{ marginBottom: 40 }}>
-            <h2
-              style={{
-                fontSize: 28,
-                fontWeight: 850,
-                marginBottom: 16,
-                letterSpacing: -0.02,
-              }}
-            >
-              How Quandr3 Works
-            </h2>
-
-            <ul
+            <h3
               style={{
                 fontSize: 17,
-                paddingLeft: 20,
-                color: colors.textSubtle,
+                fontWeight: 800,
+                marginBottom: 8,
               }}
             >
-              <li style={{ marginBottom: 10 }}>
-                <strong>Ask.</strong> Post a real question with clear options. Add
-                images or a short video if it helps.
-              </li>
-              <li style={{ marginBottom: 10 }}>
-                <strong>Share.</strong> Others respond anonymously. Percentages
-                stay hidden until you vote.
-              </li>
-              <li style={{ marginBottom: 10 }}>
-                <strong>Decide.</strong> You resolve the Quandr3. People who
-                matched your choice earn points.
-              </li>
-            </ul>
-          </section>
-
-          {/* Philosophy */}
-          <section style={{ marginBottom: 40 }}>
-            <h2
-              style={{
-                fontSize: 28,
-                fontWeight: 850,
-                marginBottom: 16,
-                letterSpacing: -0.02,
-              }}
-            >
-              What Quandr3 Is — and Isn’t
-            </h2>
-
-            <p style={{ fontSize: 18, marginBottom: 16 }}>
-              Quandr3 isn’t about arguments, hot takes, or winning debates.
+              Built to respect your time
+            </h3>
+            <p style={{ fontSize: 14, lineHeight: 1.7 }}>
+              Quandr3s are short by design. You’re here to decide and move on
+              with your life—not to doomscroll.
             </p>
+          </div>
 
-            <p style={{ fontSize: 18, marginBottom: 16 }}>
-              It’s about perspective. Support. Relief. Knowing that you don’t
-              have to make decisions in isolation.
-            </p>
-
-            <p style={{ fontSize: 18 }}>
-              You always keep your agency. You make the final call. Quandr3
-              simply helps you see your options more clearly by learning how
-              others would choose.
-            </p>
-          </section>
-
-          {/* CTA */}
-          <section
+          <div
             style={{
-              marginTop: 40,
-              paddingTop: 24,
-              borderTop: "1px solid rgba(148,163,184,0.35)",
-              display: "flex",
-              gap: 16,
-              flexWrap: "wrap",
+              borderRadius: 18,
+              padding: 20,
+              background: "#fff7f5",
+              border: "1px solid rgba(248, 113, 113, 0.25)",
             }}
           >
-            <Link
-              href="/explore"
+            <h3
               style={{
-                padding: "12px 20px",
-                borderRadius: 999,
-                background: `linear-gradient(135deg, ${colors.primaryBlue}, ${colors.teal})`,
-                color: "#ffffff",
+                fontSize: 17,
                 fontWeight: 800,
-                fontSize: 14,
-                textDecoration: "none",
-                boxShadow: "0 10px 26px rgba(21,84,209,0.4)",
+                marginBottom: 8,
               }}
             >
-              Explore Quandr3s
-            </Link>
+              Designed with care
+            </h3>
+            <p style={{ fontSize: 14, lineHeight: 1.7 }}>
+              Safety, transparency, and clear community rules are core to the
+              product. We’d rather grow slower and healthier than faster and
+              chaotic.
+            </p>
+          </div>
+        </div>
+      </section>
 
-            <Link
-              href="/create"
-              style={{
-                padding: "12px 20px",
-                borderRadius: 999,
-                border: `1px solid ${colors.border}`,
-                fontWeight: 800,
-                fontSize: 14,
-                textDecoration: "none",
-                color: colors.primaryBlue,
-                background: "#ffffff",
-              }}
-            >
-              Create a Quandr3
-            </Link>
-          </section>
-        </main>
-      </div>
-    </div>
+      {/* Founder / vision teaser */}
+      <section>
+        <h2
+          style={{
+            fontSize: 24,
+            fontWeight: 900,
+            marginBottom: 12,
+          }}
+        >
+          Where we’re headed
+        </h2>
+        <p
+          style={{
+            fontSize: 16,
+            lineHeight: 1.7,
+            maxWidth: 700,
+            color: "#1f2933",
+          }}
+        >
+          Quandr3 is starting with everyday decisions, but the long-term vision
+          is bigger: a global map of real-world choices and outcomes that helps
+          people, families, and communities move from confusion to clarity.
+        </p>
+      </section>
+    </main>
   );
 }

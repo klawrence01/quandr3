@@ -1,0 +1,366 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import type { BlogPost, BlogStatus, BlogType } from "@/types/blog";
+
+const NAVY = "#0b2343";
+const BLUE = "#1e63f3";
+const TEAL = "#00a9a5";
+const CORAL = "#ff6b6b";
+const SOFT_BG = "#f7f9ff";
+
+const STATUS_LABELS: Record<BlogStatus, string> = {
+  draft: "Draft",
+  scheduled: "Scheduled",
+  published: "Published",
+  archived: "Archived",
+};
+
+const TYPE_LABELS: Record<BlogType, string> = {
+  product: "Product",
+  culture: "Culture & Ideas",
+  community: "Community",
+};
+
+export default function BlogQueueClient({
+  initialPosts,
+}: {
+  initialPosts: BlogPost[];
+}) {
+  const [statusFilter, setStatusFilter] = useState<BlogStatus | "all">("all");
+  const [typeFilter, setTypeFilter] = useState<BlogType | "all">("all");
+  const [search, setSearch] = useState("");
+
+  const filteredPosts = useMemo(() => {
+    return initialPosts.filter((post) => {
+      if (statusFilter !== "all" && post.status !== statusFilter) return false;
+      if (typeFilter !== "all" && post.blog_type !== typeFilter) return false;
+
+      if (search) {
+        const s = search.toLowerCase();
+        const haystack =
+          `${post.title} ${post.excerpt ?? ""}`.toLowerCase();
+        if (!haystack.includes(s)) return false;
+      }
+
+      return true;
+    });
+  }, [initialPosts, statusFilter, typeFilter, search]);
+
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        padding: "40px 24px 64px",
+        background: SOFT_BG,
+        fontFamily: "system-ui",
+        color: NAVY,
+      }}
+    >
+      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+        {/* Header */}
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 24,
+          }}
+        >
+          <div>
+            <h1
+              style={{
+                margin: 0,
+                fontSize: 32,
+                fontWeight: 900,
+                letterSpacing: -0.4,
+              }}
+            >
+              Blog Queue
+            </h1>
+            <p style={{ marginTop: 6, opacity: 0.8, fontSize: 14 }}>
+              Draft, schedule, and publish posts across all Quandr3 blogs.
+            </p>
+          </div>
+
+          <button
+            onClick={() => {
+              window.location.href = "/admin/blogs/new";
+            }}
+            style={{
+              border: "none",
+              borderRadius: 999,
+              padding: "10px 20px",
+              background: `linear-gradient(135deg, ${BLUE}, ${TEAL})`,
+              color: "#fff",
+              fontWeight: 700,
+              fontSize: 14,
+              cursor: "pointer",
+              boxShadow: "0 10px 25px rgba(0,0,0,0.12)",
+            }}
+          >
+            + New Post
+          </button>
+        </header>
+
+        {/* Filters */}
+        <section
+          style={{
+            display: "flex",
+            gap: 12,
+            flexWrap: "wrap",
+            marginBottom: 20,
+          }}
+        >
+          {/* Status filter */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              background: "#fff",
+              borderRadius: 999,
+              padding: "4px 10px",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.04)",
+            }}
+          >
+            <span style={{ fontSize: 12, fontWeight: 700, opacity: 0.7 }}>
+              Status:
+            </span>
+            {["all", "draft", "scheduled", "published", "archived"].map(
+              (value) => {
+                const active =
+                  statusFilter === value ||
+                  (value === "all" && statusFilter === "all");
+                return (
+                  <button
+                    key={value}
+                    onClick={() =>
+                      setStatusFilter(value as BlogStatus | "all")
+                    }
+                    style={{
+                      border: "none",
+                      borderRadius: 999,
+                      padding: "4px 10px",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      background: active ? NAVY : "transparent",
+                      color: active ? "#fff" : NAVY,
+                    }}
+                  >
+                    {value === "all"
+                      ? "All"
+                      : STATUS_LABELS[value as BlogStatus]}
+                  </button>
+                );
+              }
+            )}
+          </div>
+
+          {/* Type filter */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              background: "#fff",
+              borderRadius: 999,
+              padding: "4px 10px",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.04)",
+            }}
+          >
+            <span style={{ fontSize: 12, fontWeight: 700, opacity: 0.7 }}>
+              Blog:
+            </span>
+            {["all", "product", "culture", "community"].map((value) => {
+              const active =
+                typeFilter === value ||
+                (value === "all" && typeFilter === "all");
+              return (
+                <button
+                  key={value}
+                  onClick={() =>
+                    setTypeFilter(value as BlogType | "all")
+                  }
+                  style={{
+                    border: "none",
+                    borderRadius: 999,
+                    padding: "4px 10px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    background: active ? TEAL : "transparent",
+                    color: active ? "#fff" : NAVY,
+                  }}
+                >
+                  {value === "all"
+                    ? "All"
+                    : TYPE_LABELS[value as BlogType]}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Search */}
+          <input
+            placeholder="Search title or excerpt…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{
+              flex: 1,
+              minWidth: 180,
+              borderRadius: 999,
+              border: "none",
+              padding: "8px 14px",
+              fontSize: 13,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.04)",
+              outline: "none",
+            }}
+          />
+        </section>
+
+        {/* Table */}
+        <section
+          style={{
+            background: "#fff",
+            borderRadius: 24,
+            padding: 16,
+            boxShadow: "0 16px 40px rgba(0,0,0,0.06)",
+          }}
+        >
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: 13,
+            }}
+          >
+            <thead>
+              <tr
+                style={{
+                  textAlign: "left",
+                  borderBottom: "1px solid rgba(11,35,67,0.08)",
+                }}
+              >
+                <th style={{ padding: "8px 6px" }}>Title</th>
+                <th style={{ padding: "8px 6px" }}>Blog</th>
+                <th style={{ padding: "8px 6px" }}>Status</th>
+                <th style={{ padding: "8px 6px" }}>Scheduled / Published</th>
+                <th style={{ padding: "8px 6px", textAlign: "right" }}>
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredPosts.map((post) => (
+                <tr
+                  key={post.id}
+                  style={{
+                    borderBottom: "1px solid rgba(11,35,67,0.04)",
+                  }}
+                >
+                  <td style={{ padding: "10px 6px", fontWeight: 600 }}>
+                    {post.title}
+                    <div style={{ fontSize: 11, opacity: 0.7 }}>
+                      {post.excerpt}
+                    </div>
+                  </td>
+                  <td style={{ padding: "10px 6px", fontSize: 12 }}>
+                    {TYPE_LABELS[post.blog_type]}
+                  </td>
+                  <td style={{ padding: "10px 6px" }}>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 800,
+                        padding: "3px 10px",
+                        borderRadius: 999,
+                        background:
+                          post.status === "published"
+                            ? "rgba(30,99,243,0.1)"
+                            : post.status === "scheduled"
+                            ? "rgba(255,107,107,0.1)"
+                            : "rgba(11,35,67,0.05)",
+                        color:
+                          post.status === "published"
+                            ? BLUE
+                            : post.status === "scheduled"
+                            ? CORAL
+                            : NAVY,
+                      }}
+                    >
+                      {STATUS_LABELS[post.status]}
+                    </span>
+                  </td>
+                  <td style={{ padding: "10px 6px", fontSize: 12 }}>
+                    {post.published_at
+                      ? `Published ${new Date(
+                          post.published_at
+                        ).toLocaleString()}`
+                      : post.scheduled_at
+                      ? `Scheduled ${new Date(
+                          post.scheduled_at
+                        ).toLocaleString()}`
+                      : "—"}
+                  </td>
+                  <td
+                    style={{
+                      padding: "10px 6px",
+                      textAlign: "right",
+                      fontSize: 12,
+                    }}
+                  >
+                    <button
+                      onClick={() =>
+                        (window.location.href = `/admin/blogs/${post.id}/edit`)
+                      }
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        marginRight: 8,
+                        color: BLUE,
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        fontSize: 12,
+                        cursor: "pointer",
+                        opacity: 0.6,
+                      }}
+                    >
+                      ⋯
+                    </button>
+                  </td>
+                </tr>
+              ))}
+
+              {filteredPosts.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={5}
+                    style={{
+                      padding: "24px 6px",
+                      textAlign: "center",
+                      fontSize: 13,
+                      opacity: 0.7,
+                    }}
+                  >
+                    No posts yet — we’ll fix that next.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </main>
+  );
+}
