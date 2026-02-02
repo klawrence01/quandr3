@@ -42,8 +42,10 @@ type ExploreRow = {
   status?: "open" | "awaiting_user" | "resolved" | string;
   created_at?: string;
   discussion_open?: boolean;
+
+  // optional columns (safe if missing)
   category?: string;
-  scope?: string; // "global" / "local" etc.
+  scope?: string; // e.g. "global" / "local"
 };
 
 type SortMode = "trending" | "new" | "resolved";
@@ -67,7 +69,6 @@ export default function ExploreClient(props: {
 }) {
   const router = useRouter();
 
-  // Start from URL-driven initial props (from _ExploreInner)
   const [category, setCategory] = useState<string>(props.initialCategory || "All");
   const [status, setStatus] = useState<StatusFilter>(
     (props.initialStatus as StatusFilter) || "all"
@@ -82,12 +83,13 @@ export default function ExploreClient(props: {
   const [rows, setRows] = useState<ExploreRow[]>([]);
   const [voteCounts, setVoteCounts] = useState<Record<string, number>>({});
 
-  // Keep URL in sync (without useSearchParams)
+  // Keep URL in sync
   useEffect(() => {
     const params = new URLSearchParams();
     if (category && category !== "All") params.set("cat", category);
     if (status && status !== "all") params.set("status", status);
     if (sort && sort !== "trending") params.set("sort", sort);
+    if (props.initialScope) params.set("scope", props.initialScope);
 
     const qs = params.toString();
     router.replace(qs ? `/explore?${qs}` : "/explore");
@@ -104,9 +106,11 @@ export default function ExploreClient(props: {
 
         const { data, error } = await supabase
           .from("quandr3s")
-          .select("id,title,question,prompt,status,created_at,discussion_open,category,scope")
+          .select(
+            "id,title,question,prompt,status,created_at,discussion_open,category,scope"
+          )
           .order("created_at", { ascending: false })
-          .limit(80);
+          .limit(48); // ✅ performance guard
 
         if (error) throw error;
 
@@ -122,23 +126,19 @@ export default function ExploreClient(props: {
           scope: d.scope,
         }));
 
-        // Vote counts (best-effort across possible vote tables/keys)
+        // Vote counts (best-effort)
         const ids = list.map((q) => q.id).filter(Boolean);
         const counts: Record<string, number> = {};
 
         if (ids.length) {
           const voteTables = ["votes", "quandr3_votes", "quandry_votes"];
-          let got = false;
 
           for (const vt of voteTables) {
             try {
-              // Pull a chunk and count locally (safe + build friendly)
-              const { data: vdata, error: verr } = await supabase
+              const { data: vdata } = await supabase
                 .from(vt)
                 .select("quandr3_id,q_id,parent_id")
                 .limit(5000);
-
-              if (verr) throw verr;
 
               for (const v of (vdata || []) as any[]) {
                 const qid =
@@ -147,16 +147,8 @@ export default function ExploreClient(props: {
                 if (!ids.includes(qid)) continue;
                 counts[qid] = (counts[qid] || 0) + 1;
               }
-
-              got = true;
               break;
-            } catch {
-              // try next table
-            }
-          }
-
-          if (!got) {
-            // no-op; voteCounts stays empty
+            } catch {}
           }
         }
 
@@ -197,19 +189,26 @@ export default function ExploreClient(props: {
   const filtered = useMemo(() => {
     let list = [...rows];
 
+    // category filter (optional column)
     if (category && category !== "All") {
       list = list.filter(
-        (r) => safeStr((r as any).category).toLowerCase() === category.toLowerCase()
+        (r) =>
+          safeStr((r as any).category).toLowerCase() === category.toLowerCase()
       );
     }
 
+    // status filter
     if (status !== "all") {
       list = list.filter((r) => (r.status || "open") === status);
     }
 
+    // sorting
     if (sort === "new") {
-      list.sort((a, b) => (safeStr(b.created_at) > safeStr(a.created_at) ? 1 : -1));
+      list.sort((a, b) =>
+        safeStr(b.created_at) > safeStr(a.created_at) ? 1 : -1
+      );
     } else if (sort === "resolved") {
+      // resolved first, then newest
       list.sort((a, b) => {
         const ar = (a.status || "") === "resolved" ? 1 : 0;
         const br = (b.status || "") === "resolved" ? 1 : 0;
@@ -217,7 +216,7 @@ export default function ExploreClient(props: {
         return safeStr(b.created_at) > safeStr(a.created_at) ? 1 : -1;
       });
     } else {
-      // trending
+      // trending: voteCount desc, then newest
       list.sort((a, b) => {
         const av = voteCounts[a.id] || 0;
         const bv = voteCounts[b.id] || 0;
@@ -234,6 +233,7 @@ export default function ExploreClient(props: {
   return (
     <main className="min-h-screen" style={{ background: SOFT_BG }}>
       <div className="mx-auto max-w-6xl px-4 py-10">
+        {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <div className="text-xs font-semibold tracking-widest text-slate-600">
@@ -243,12 +243,25 @@ export default function ExploreClient(props: {
               Find interesting Quandr3s
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-600">
-              Browse real dilemmas. Filter by status and category. Click any card to open
-              <span className="font-semibold" style={{ color: NAVY }}> /q/[id]</span>.
+              Browse real dilemmas. Filter by status and category. Click any card
+              to open{" "}
+              <span className="font-semibold" style={{ color: NAVY }}>
+                /q/[id]
+              </span>
+              .
             </p>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {/* ✅ soft conversion CTA */}
+            <Link
+              href="/"
+              className="inline-flex items-center justify-center rounded-xl border bg-white px-5 py-3 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
+              title="Why Quandr3?"
+            >
+              Why Quandr3?
+            </Link>
+
             <Link
               href="/q/create"
               className="inline-flex items-center justify-center rounded-xl px-5 py-3 text-sm font-extrabold text-white shadow-sm"
@@ -256,6 +269,7 @@ export default function ExploreClient(props: {
             >
               Create a Quandr3
             </Link>
+
             <Link
               href="/"
               className="inline-flex items-center justify-center rounded-xl border bg-white px-5 py-3 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
@@ -265,12 +279,14 @@ export default function ExploreClient(props: {
           </div>
         </div>
 
+        {/* Errors */}
         {errorMsg ? (
           <div className="mt-6 rounded-2xl border border-red-200 bg-white p-4 text-sm text-red-600 shadow-sm">
             {errorMsg}
           </div>
         ) : null}
 
+        {/* Category pills */}
         <div className="mt-8 rounded-2xl border bg-white p-5 shadow-sm">
           <div className="text-xs font-semibold tracking-widest text-slate-600">
             CATEGORIES
@@ -284,7 +300,9 @@ export default function ExploreClient(props: {
                   onClick={() => setCategory(c)}
                   className={cx(
                     "rounded-full border px-4 py-2 text-sm font-semibold transition",
-                    active ? "text-white" : "bg-white text-slate-800 hover:bg-slate-50"
+                    active
+                      ? "text-white"
+                      : "bg-white text-slate-800 hover:bg-slate-50"
                   )}
                   style={
                     active
@@ -299,6 +317,7 @@ export default function ExploreClient(props: {
           </div>
         </div>
 
+        {/* Status + sort */}
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           <div className="rounded-2xl border bg-white p-5 shadow-sm">
             <div className="text-xs font-semibold tracking-widest text-slate-600">
@@ -315,7 +334,13 @@ export default function ExploreClient(props: {
               ).map(([k, label]) => {
                 const active = status === k;
                 const color =
-                  k === "open" ? BLUE : k === "awaiting_user" ? CORAL : k === "resolved" ? TEAL : NAVY;
+                  k === "open"
+                    ? BLUE
+                    : k === "awaiting_user"
+                    ? CORAL
+                    : k === "resolved"
+                    ? TEAL
+                    : NAVY;
 
                 return (
                   <button
@@ -323,7 +348,9 @@ export default function ExploreClient(props: {
                     onClick={() => setStatus(k)}
                     className={cx(
                       "rounded-xl border px-4 py-2 text-sm font-semibold transition",
-                      active ? "text-white" : "bg-white text-slate-800 hover:bg-slate-50"
+                      active
+                        ? "text-white"
+                        : "bg-white text-slate-800 hover:bg-slate-50"
                     )}
                     style={
                       active
@@ -357,7 +384,9 @@ export default function ExploreClient(props: {
                     onClick={() => setSort(k)}
                     className={cx(
                       "rounded-xl border px-4 py-2 text-sm font-semibold transition",
-                      active ? "text-white" : "bg-white text-slate-800 hover:bg-slate-50"
+                      active
+                        ? "text-white"
+                        : "bg-white text-slate-800 hover:bg-slate-50"
                     )}
                     style={
                       active
@@ -372,11 +401,13 @@ export default function ExploreClient(props: {
             </div>
 
             <div className="mt-3 text-xs text-slate-500">
-              Trending uses vote-count when available; otherwise it falls back to newest.
+              Trending uses vote-count when available; otherwise it falls back to
+              newest.
             </div>
           </div>
         </div>
 
+        {/* Results grid */}
         <div className="mt-8">
           <div className="mb-3 flex items-center justify-between">
             <div className="text-sm text-slate-600">
@@ -444,6 +475,8 @@ export default function ExploreClient(props: {
                   ? new Date(q.created_at as any).toLocaleString()
                   : "";
 
+                const cta = st === "resolved" ? "See Result →" : "Open →";
+
                 return (
                   <Link
                     key={q.id}
@@ -464,8 +497,23 @@ export default function ExploreClient(props: {
                       </span>
                     </div>
 
+                    {/* ✅ discussion badge */}
+                    {q.discussion_open ? (
+                      <div className="mt-3">
+                        <span
+                          className="inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold"
+                          style={{ borderColor: "rgba(0,169,165,0.35)", color: TEAL }}
+                        >
+                          Discussion Open
+                        </span>
+                      </div>
+                    ) : null}
+
                     <div
-                      className="mt-3 text-lg font-extrabold leading-snug transition group-hover:underline"
+                      className={cx(
+                        "mt-3 text-lg font-extrabold leading-snug transition group-hover:underline",
+                        q.discussion_open ? "mt-2" : "mt-3"
+                      )}
                       style={{ color: NAVY }}
                     >
                       {pickQuestion(q)}
@@ -489,7 +537,7 @@ export default function ExploreClient(props: {
                       </div>
 
                       <span className="text-xs font-semibold" style={{ color: BLUE }}>
-                        Open →
+                        {cta}
                       </span>
                     </div>
                   </Link>
