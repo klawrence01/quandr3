@@ -25,26 +25,26 @@ function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
+// ✅ Only use real columns: title (no question/prompt)
 function pickQuestion(q: any) {
-  return (
-    safeStr(q.title) ||
-    safeStr(q.question) ||
-    safeStr(q.prompt) ||
-    "Untitled Quandr3"
-  );
+  return safeStr(q.title) || "Untitled Quandr3";
 }
 
 type ExploreRow = {
   id: string;
   title?: string;
-  question?: string;
-  prompt?: string;
+  context?: string;
+
   status?: "open" | "awaiting_user" | "resolved" | string;
   created_at?: string;
+  closes_at?: string;
   discussion_open?: boolean;
 
-  // optional columns (safe if missing)
   category?: string;
+  visibility?: string;
+  hero_image_url?: string;
+
+  // optional UI-only notion (not a DB column in your table)
   scope?: string; // e.g. "global" / "local"
 };
 
@@ -69,7 +69,9 @@ export default function ExploreClient(props: {
 }) {
   const router = useRouter();
 
-  const [category, setCategory] = useState<string>(props.initialCategory || "All");
+  const [category, setCategory] = useState<string>(
+    props.initialCategory || "All"
+  );
   const [status, setStatus] = useState<StatusFilter>(
     (props.initialStatus as StatusFilter) || "all"
   );
@@ -83,10 +85,10 @@ export default function ExploreClient(props: {
   const [rows, setRows] = useState<ExploreRow[]>([]);
   const [voteCounts, setVoteCounts] = useState<Record<string, number>>({});
 
-  // Keep URL in sync
+  // Keep URL in sync (✅ use "category" to match _ExploreInner.tsx)
   useEffect(() => {
     const params = new URLSearchParams();
-    if (category && category !== "All") params.set("cat", category);
+    if (category && category !== "All") params.set("category", category);
     if (status && status !== "all") params.set("status", status);
     if (sort && sort !== "trending") params.set("sort", sort);
     if (props.initialScope) params.set("scope", props.initialScope);
@@ -104,26 +106,30 @@ export default function ExploreClient(props: {
         setLoading(true);
         setErrorMsg("");
 
+        // ✅ Match your real table columns
         const { data, error } = await supabase
           .from("quandr3s")
           .select(
-            "id,title,question,prompt,status,created_at,discussion_open,category,scope"
+            "id,title,context,category,status,created_at,closes_at,discussion_open,hero_image_url,is_sponsored,visibility"
           )
+          // ✅ Explore should only show public (safe default)
+          .eq("visibility", "public")
           .order("created_at", { ascending: false })
-          .limit(48); // ✅ performance guard
+          .limit(60); // ✅ performance guard
 
         if (error) throw error;
 
         const list: ExploreRow[] = (data || []).map((d: any) => ({
           id: safeStr(d.id),
           title: d.title,
-          question: d.question,
-          prompt: d.prompt,
+          context: d.context,
+          category: d.category,
           status: d.status || "open",
           created_at: d.created_at,
+          closes_at: d.closes_at,
           discussion_open: !!d.discussion_open,
-          category: d.category,
-          scope: d.scope,
+          hero_image_url: d.hero_image_url,
+          visibility: d.visibility,
         }));
 
         // Vote counts (best-effort)
@@ -142,7 +148,9 @@ export default function ExploreClient(props: {
 
               for (const v of (vdata || []) as any[]) {
                 const qid =
-                  safeStr(v.quandr3_id) || safeStr(v.q_id) || safeStr(v.parent_id);
+                  safeStr(v.quandr3_id) ||
+                  safeStr(v.q_id) ||
+                  safeStr(v.parent_id);
                 if (!qid) continue;
                 if (!ids.includes(qid)) continue;
                 counts[qid] = (counts[qid] || 0) + 1;
@@ -180,6 +188,7 @@ export default function ExploreClient(props: {
 
     const merged = [...DEFAULT_CATEGORIES];
     found.forEach((c) => {
+      // Keep the default display list clean, but allow new categories to appear
       if (!merged.includes(c)) merged.push(c);
     });
 
@@ -189,7 +198,7 @@ export default function ExploreClient(props: {
   const filtered = useMemo(() => {
     let list = [...rows];
 
-    // category filter (optional column)
+    // category filter
     if (category && category !== "All") {
       list = list.filter(
         (r) =>
@@ -253,7 +262,6 @@ export default function ExploreClient(props: {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {/* ✅ soft conversion CTA */}
             <Link
               href="/"
               className="inline-flex items-center justify-center rounded-xl border bg-white px-5 py-3 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
@@ -497,12 +505,15 @@ export default function ExploreClient(props: {
                       </span>
                     </div>
 
-                    {/* ✅ discussion badge */}
+                    {/* discussion badge */}
                     {q.discussion_open ? (
                       <div className="mt-3">
                         <span
                           className="inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold"
-                          style={{ borderColor: "rgba(0,169,165,0.35)", color: TEAL }}
+                          style={{
+                            borderColor: "rgba(0,169,165,0.35)",
+                            color: TEAL,
+                          }}
                         >
                           Discussion Open
                         </span>
