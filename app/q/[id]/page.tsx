@@ -1,3 +1,4 @@
+// app/q/[id]/page.tsx
 "use client";
 // @ts-nocheck
 
@@ -18,7 +19,9 @@ function fmt(ts?: string) {
 }
 
 function hoursLeft(createdAt: string, duration: number) {
-  const end = new Date(createdAt).getTime() + duration * 3600 * 1000;
+  const dur = Number(duration || 0);
+  if (!createdAt || !dur) return 0;
+  const end = new Date(createdAt).getTime() + dur * 3600 * 1000;
   const diff = end - Date.now();
   return Math.max(0, Math.ceil(diff / 3600000));
 }
@@ -116,6 +119,8 @@ export default function Quandr3DetailPage() {
     } else {
       setReasonsByVoteId({});
     }
+
+    return vRows;
   }
 
   async function refreshComments(qid: string) {
@@ -128,7 +133,9 @@ export default function Quandr3DetailPage() {
     const c = rows ?? [];
     setComments(c);
 
-    const userIds = Array.from(new Set(c.map((x: any) => x.user_id).filter(Boolean)));
+    const userIds = Array.from(
+      new Set(c.map((x: any) => x.user_id).filter(Boolean))
+    );
 
     if (!userIds.length) {
       setCommentProfilesById({});
@@ -175,7 +182,7 @@ export default function Quandr3DetailPage() {
 
     setOptions(opts ?? []);
 
-    await refreshVotesAndReasons(qid);
+    const vRows = await refreshVotesAndReasons(qid);
 
     const { data: r } = await supabase
       .from("quandr3_resolutions")
@@ -185,8 +192,26 @@ export default function Quandr3DetailPage() {
 
     setResolution(r ?? null);
 
-    // Discussion load depends on current flag
-    if (qRow?.discussion_open) {
+    // ✅ Discussion fetch ONLY if:
+    // - discussion is open
+    // - voting is NOT open anymore (expired OR resolved)
+    // - and this viewer has voted (invited)
+    const duration = Number(qRow?.voting_duration_hours || 0);
+    const createdAt = qRow?.created_at;
+    const timeExpired =
+      !!createdAt && !!duration
+        ? Date.now() > new Date(createdAt).getTime() + duration * 3600 * 1000
+        : false;
+
+    const voteCapReached =
+      qRow?.voting_max_votes ? vRows.length >= Number(qRow.voting_max_votes) : false;
+
+    const votingEnded = timeExpired || voteCapReached || !!r;
+
+    const didVote =
+      !!user?.id && vRows.some((x: any) => x.user_id === user.id);
+
+    if (qRow?.discussion_open && votingEnded && didVote) {
       await refreshComments(qid);
     } else {
       setComments([]);
@@ -203,7 +228,8 @@ export default function Quandr3DetailPage() {
       await refreshCore(id);
       setLoading(false);
     })();
-  }, [id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, user?.id]); // ✅ re-evaluate invite gating after login loads
 
   /* =========================
      Derived Logic
@@ -213,6 +239,10 @@ export default function Quandr3DetailPage() {
     if (!user) return null;
     return votes.find((v: any) => v.user_id === user.id) ?? null;
   }, [votes, user]);
+
+  const didVote = useMemo(() => {
+    return !!myVote?.id;
+  }, [myVote]);
 
   const myReason = useMemo(() => {
     if (!myVote?.id) return "";
@@ -232,12 +262,16 @@ export default function Quandr3DetailPage() {
   const votingExpired = useMemo(() => {
     if (!q) return false;
 
+    const duration = Number(q.voting_duration_hours || 0);
+    const createdAt = q.created_at;
+
     const timeExpired =
-      Date.now() >
-      new Date(q.created_at).getTime() + q.voting_duration_hours * 3600 * 1000;
+      !!createdAt && !!duration
+        ? Date.now() > new Date(createdAt).getTime() + duration * 3600 * 1000
+        : false;
 
     const voteCapReached =
-      q.voting_max_votes && totalVotes >= q.voting_max_votes;
+      q.voting_max_votes ? totalVotes >= Number(q.voting_max_votes) : false;
 
     return timeExpired || voteCapReached;
   }, [q, totalVotes]);
@@ -247,6 +281,17 @@ export default function Quandr3DetailPage() {
     if (votingExpired) return "awaiting_user";
     return "open";
   }, [resolution, votingExpired]);
+
+  const canShowResults = useMemo(() => {
+    // Results is for closed quandr3s (awaiting_user or resolved)
+    return status !== "open";
+  }, [status]);
+
+  const canShowDiscussion = useMemo(() => {
+    // ✅ your rule:
+    // discussion only after close AND only for those who voted AND only if author opened it
+    return status !== "open" && !!q?.discussion_open && didVote;
+  }, [status, q, didVote]);
 
   const winningOrder = useMemo(() => {
     if (resolution) {
@@ -321,6 +366,11 @@ export default function Quandr3DetailPage() {
       return;
     }
 
+    // ✅ mark “invited” locally too (optional but useful)
+    try {
+      localStorage.setItem(`quandr3-voted-${id}`, "1");
+    } catch {}
+
     await refreshVotesAndReasons(id);
 
     if (inserted?.id) {
@@ -373,7 +423,9 @@ export default function Quandr3DetailPage() {
       router.push(`/login?next=/q/${id}`);
       return;
     }
-    if (!q?.discussion_open) return;
+
+    // ✅ enforce invite rule client-side too
+    if (!canShowDiscussion) return;
 
     const body = commentDraft.trim();
     if (!body) return;
@@ -524,7 +576,6 @@ export default function Quandr3DetailPage() {
 
           const isWinner = opt.order === winningOrder;
           const optReasons = reasonsByChoiceIndex[opt.order] ?? [];
-
           const isMyPicked = myVote?.choice_index === opt.order;
 
           // Only show reason box if voting is currently open AND this is my pick
@@ -562,7 +613,7 @@ export default function Quandr3DetailPage() {
               </div>
 
               {/* Only show when there are real reasons */}
-              {optReasons.length > 0 && (
+              {optReasons.length > 0 && canShowResults && (
                 <div style={{ marginTop: 12 }}>
                   <div style={{ fontWeight: 700, marginBottom: 6 }}>
                     Why people chose this
@@ -617,7 +668,10 @@ export default function Quandr3DetailPage() {
         </div>
       )}
 
-      {/* Discussion (B — LIVE) */}
+      {/* =========================
+          Discussion (GATED)
+         ========================= */}
+
       <div style={{ marginTop: 32 }}>
         <div
           style={{
@@ -629,7 +683,7 @@ export default function Quandr3DetailPage() {
         >
           <h3 style={{ margin: 0 }}>Discussion</h3>
 
-          {/* Curioso Open/Close buttons */}
+          {/* Curioso Open/Close buttons (only after close) */}
           {isCurioso && (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               {!canToggleDiscussion ? (
@@ -655,10 +709,25 @@ export default function Quandr3DetailPage() {
           )}
         </div>
 
-        {!q.discussion_open ? (
+        {/* Rule 1: never show discussion while open */}
+        {status === "open" ? (
+          <div style={{ color: "#666", marginTop: 8 }}>
+            Discussion opens after voting closes.
+          </div>
+        ) : !q.discussion_open ? (
           <div style={{ color: "#666", marginTop: 8 }}>Discussion is closed.</div>
+        ) : !user ? (
+          <div style={{ color: "#666", marginTop: 8 }}>
+            Log in to see if you’re invited to the discussion.
+          </div>
+        ) : !didVote ? (
+          <div style={{ color: "#666", marginTop: 8 }}>
+            Discussion is for voters only on this Quandr3.
+          </div>
         ) : (
           <>
+            {/* ✅ Only reaches here if: closed + discussion_open + user voted */}
+
             {/* Add comment */}
             <div style={{ border: "1px solid #ddd", padding: 12, marginTop: 10 }}>
               <div style={{ fontWeight: 700, marginBottom: 8 }}>
@@ -670,16 +739,12 @@ export default function Quandr3DetailPage() {
                 onChange={(e) => setCommentDraft(e.target.value)}
                 rows={3}
                 style={{ width: "100%", padding: 10 }}
-                placeholder={
-                  user
-                    ? "Share your take (keep it respectful)."
-                    : "Log in to comment."
-                }
-                disabled={!user || postingComment}
+                placeholder="Share your take (keep it respectful)."
+                disabled={postingComment}
               />
 
               <div style={{ marginTop: 8 }}>
-                <button onClick={postComment} disabled={!user || postingComment}>
+                <button onClick={postComment} disabled={postingComment}>
                   {postingComment ? "Posting..." : "Post comment"}
                 </button>
               </div>
