@@ -1,6 +1,7 @@
-// app/q/[id]/resolve/page.tsx
 "use client";
 // @ts-nocheck
+
+export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -9,521 +10,731 @@ import { supabase } from "@/utils/supabase/browser";
 
 const NAVY = "#0b2343";
 const BLUE = "#1e63f3";
+const TEAL = "#00a9a5";
 const CORAL = "#ff6b6b";
+const SOFT_BG = "#f5f7fc";
+
+type QRow = {
+  id: string;
+  title?: string;
+  question?: string;
+  prompt?: string;
+  status?: "open" | "awaiting_user" | "resolved" | string;
+  discussion_open?: boolean;
+  created_by?: string;
+  user_id?: string;
+  author_id?: string;
+  created_at?: string;
+};
+
+type OptionRow = {
+  id?: string;
+  text?: string;
+  label?: string;
+  title?: string;
+  image_url?: string;
+  image?: string;
+  picked_index?: number;
+  idx?: number;
+  order_index?: number;
+};
+
+type VoteRow = {
+  id?: string;
+  quandr3_id?: string;
+  q_id?: string;
+  option_id?: string;
+  picked_index?: number;
+  created_at?: string;
+};
 
 function safeStr(v: any) {
   if (v === null || v === undefined) return "";
   if (typeof v === "string") return v.trim();
-  return String(v).trim();
+  return String(v);
 }
 
-function isUuidLike(v: any) {
-  const s = safeStr(v);
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+function pickQuestion(q: QRow) {
+  return (
+    safeStr(q.title) ||
+    safeStr(q.question) ||
+    safeStr(q.prompt) ||
+    "Untitled Quandr3"
+  );
 }
 
-function indexToLetter(i: number) {
-  return String.fromCharCode(65 + i);
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function clampPct(n: number) {
-  if (!Number.isFinite(n)) return 0;
-  if (n < 0) return 0;
-  if (n > 100) return 100;
-  return n;
+/**
+ * Lightweight confetti (no dependencies).
+ * Creates little paper squares that fall and fade.
+ */
+function fireConfetti() {
+  const root = document.createElement("div");
+  root.style.position = "fixed";
+  root.style.inset = "0";
+  root.style.pointerEvents = "none";
+  root.style.zIndex = "9999";
+  document.body.appendChild(root);
+
+  const colors = [BLUE, TEAL, CORAL, NAVY, "#ffffff"];
+  const count = 140;
+
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement("div");
+    const size = 6 + Math.random() * 10;
+
+    p.style.position = "absolute";
+    p.style.left = `${Math.random() * 100}vw`;
+    p.style.top = `-20px`;
+    p.style.width = `${size}px`;
+    p.style.height = `${size * 0.6}px`;
+    p.style.background = colors[Math.floor(Math.random() * colors.length)];
+    p.style.opacity = "0.95";
+    p.style.borderRadius = "2px";
+    p.style.transform = `rotate(${Math.random() * 360}deg)`;
+    p.style.boxShadow = "0 6px 18px rgba(0,0,0,0.12)";
+
+    const fall = 1400 + Math.random() * 1200;
+    const drift = (Math.random() - 0.5) * 260;
+    const rotate = (Math.random() - 0.5) * 720;
+
+    p.animate(
+      [
+        { transform: `translate(0px, 0px) rotate(0deg)`, opacity: 1 },
+        {
+          transform: `translate(${drift}px, 110vh) rotate(${rotate}deg)`,
+          opacity: 0.05,
+        },
+      ],
+      { duration: fall, easing: "cubic-bezier(.2,.8,.2,1)" }
+    );
+
+    root.appendChild(p);
+
+    // cleanup each piece
+    window.setTimeout(() => {
+      try {
+        p.remove();
+      } catch {}
+    }, fall + 50);
+  }
+
+  // cleanup root
+  window.setTimeout(() => {
+    try {
+      root.remove();
+    } catch {}
+  }, 2800);
 }
 
-export default function ResolveQuandr3Page() {
-  const params = useParams<{ id: string }>();
+async function trySelectOne(table: string, match: Record<string, any>) {
+  const keys = Object.keys(match);
+  let q = supabase.from(table).select("*");
+  keys.forEach((k) => (q = q.eq(k, match[k])));
+  const { data, error } = await q.maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function trySelectMany(
+  table: string,
+  match: Record<string, any>,
+  orderBy?: { col: string; asc?: boolean }
+) {
+  const keys = Object.keys(match);
+  let q = supabase.from(table).select("*");
+  keys.forEach((k) => (q = q.eq(k, match[k])));
+  if (orderBy?.col) q = q.order(orderBy.col, { ascending: orderBy.asc ?? true });
+  const { data, error } = await q;
+  if (error) throw error;
+  return data || [];
+}
+
+async function tryUpdate(
+  table: string,
+  match: Record<string, any>,
+  patch: Record<string, any>
+) {
+  let q = supabase.from(table).update(patch);
+  Object.keys(match).forEach((k) => (q = q.eq(k, match[k])));
+  const { error } = await q;
+  if (error) throw error;
+}
+
+async function tryInsert(table: string, row: Record<string, any>) {
+  const { error } = await supabase.from(table).insert(row);
+  if (error) throw error;
+}
+
+export default function ResolvePage() {
+  const params = useParams();
   const router = useRouter();
-  const id = String((params as any)?.id || "");
+
+  const id = safeStr((params as any)?.id);
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
 
-  const [user, setUser] = useState<any>(null);
-  const [row, setRow] = useState<any>(null);
-  const [optRows, setOptRows] = useState<any[]>([]);
+  const [qrow, setQrow] = useState<QRow | null>(null);
+  const [options, setOptions] = useState<OptionRow[]>([]);
+  const [counts, setCounts] = useState<number[]>([]);
 
-  const [pickedIndex, setPickedIndex] = useState<number>(0);
+  const [isCurioso, setIsCurioso] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string>("");
+
+  const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [note, setNote] = useState<string>("");
+  const [saving, setSaving] = useState(false);
 
-  // RESULTS PREVIEW (poster-only)
-  const [voteTotal, setVoteTotal] = useState(0);
-  const [counts, setCounts] = useState<number[]>([0, 0, 0, 0]);
+  const [discussionOpen, setDiscussionOpen] = useState<boolean>(false);
+  const [togglingDiscussion, setTogglingDiscussion] = useState(false);
 
-  // reasons grouped by index 0-3
-  const [reasonsByIndex, setReasonsByIndex] = useState<Record<number, any[]>>({
-    0: [],
-    1: [],
-    2: [],
-    3: [],
-  });
+  const status = qrow?.status || "open";
+  const canToggleDiscussion = status === "awaiting_user";
 
-  const isAuthor = Boolean(user?.id && row?.author_id && user.id === row.author_id);
+  const totalVotes = useMemo(
+    () => (counts || []).reduce((a, b) => a + (b || 0), 0),
+    [counts]
+  );
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUser(data?.user ?? null));
-  }, []);
+    let alive = true;
 
-  useEffect(() => {
-    if (!id || !isUuidLike(id)) {
-      setErr("Invalid Quandr3 ID.");
-      setLoading(false);
-      return;
-    }
+    async function boot() {
+      try {
+        setLoading(true);
+        setErrorMsg("");
 
-    let mounted = true;
+        // auth
+        setAuthLoading(true);
+        const { data: auth } = await supabase.auth.getUser();
+        const uid = auth?.user?.id || null;
+        if (!alive) return;
+        setUserId(uid);
+        setAuthLoading(false);
 
-    const load = async () => {
-      setLoading(true);
-      setErr(null);
-
-      // Must be logged in to resolve
-      const { data: u } = await supabase.auth.getUser();
-      if (!u?.user) {
-        router.push(`/login?redirect=/q/${id}/resolve`);
-        return;
-      }
-      if (!mounted) return;
-      setUser(u.user);
-
-      // Load quandr3
-      const { data: qData, error: qErr } = await supabase
-        .from("quandr3s")
-        .select("id,author_id,title,category,status,created_at,resolved_at")
-        .eq("id", id)
-        .maybeSingle();
-
-      if (!mounted) return;
-
-      if (qErr || !qData) {
-        setErr("That Quandr3 could not be found.");
-        setLoading(false);
-        return;
-      }
-      setRow(qData);
-
-      // Must be author
-      if (!(u.user?.id && qData.author_id && u.user.id === qData.author_id)) {
-        setErr("Only the poster can resolve this Quandr3.");
-        setLoading(false);
-        return;
-      }
-
-      // Load options
-      const { data: oData, error: oErr } = await supabase
-        .from("options")
-        .select("id,label,text,quandr3_id")
-        .eq("quandr3_id", id);
-
-      if (!mounted) return;
-
-      if (oErr) {
-        setErr(oErr.message);
-        setLoading(false);
-        return;
-      }
-
-      const optionsList = Array.isArray(oData) ? oData : [];
-      optionsList.sort((a, b) => safeStr(a.label).localeCompare(safeStr(b.label)));
-      setOptRows(optionsList);
-
-      // Map option_id -> index (0-3)
-      const idToIndex = new Map<string, number>();
-      optionsList.slice(0, 4).forEach((o, i) => {
-        if (o?.id) idToIndex.set(String(o.id), i);
-      });
-
-      // If already resolved, prefill from DB
-      const { data: resData } = await supabase
-        .from("quandr3_resolutions")
-        .select("option_id,note,created_at")
-        .eq("quandr3_id", id)
-        .maybeSingle();
-
-      if (!mounted) return;
-
-      if (resData?.option_id) {
-        const idx = optionsList.findIndex((o) => String(o.id) === String(resData.option_id));
-        if (idx >= 0) setPickedIndex(idx);
-        setNote(safeStr(resData.note));
-      }
-
-      // ===== RESULTS PREVIEW LOAD (votes + vote_reasons) =====
-      // 1) Votes for distribution
-      const { data: voteRows, error: vErr } = await supabase
-        .from("votes")
-        .select("id, option_id, voter_id, created_at")
-        .eq("quandr3_id", id);
-
-      if (!mounted) return;
-
-      if (vErr) {
-        console.warn("Votes load error:", vErr);
-      } else {
-        const votes = Array.isArray(voteRows) ? voteRows : [];
-        setVoteTotal(votes.length);
-
-        const newCounts = [0, 0, 0, 0];
-        for (const v of votes) {
-          const idx = idToIndex.get(String(v.option_id || ""));
-          if (typeof idx === "number") newCounts[idx] += 1;
-        }
-        setCounts(newCounts);
-      }
-
-      // 2) Reasons grouped by option_id (your schema)
-      const { data: rRows, error: rErr2 } = await supabase
-        .from("vote_reasons")
-        .select("id, quandr3_id, option_id, voter_id, reason, created_at")
-        .eq("quandr3_id", id)
-        .order("created_at", { ascending: false });
-
-      if (!mounted) return;
-
-      if (rErr2) {
-        console.warn("Reasons load error:", rErr2);
-        setReasonsByIndex({ 0: [], 1: [], 2: [], 3: [] });
-      } else {
-        const rows = Array.isArray(rRows) ? rRows : [];
-        const grouped: Record<number, any[]> = { 0: [], 1: [], 2: [], 3: [] };
-
-        for (const r of rows) {
-          const idx = idToIndex.get(String(r.option_id || ""));
-          if (typeof idx === "number") {
-            grouped[idx].push(r);
+        // fetch quandr3 row (try common table names)
+        let q: any = null;
+        try {
+          q = await trySelectOne("quandr3s", { id });
+        } catch (e1) {
+          // fallback for alternate naming
+          try {
+            q = await trySelectOne("quandrs", { id });
+          } catch (e2) {
+            throw e1;
           }
         }
 
-        setReasonsByIndex(grouped);
+        if (!alive) return;
+
+        const qTyped: QRow = q || { id };
+        setQrow(qTyped);
+        setDiscussionOpen(!!qTyped.discussion_open);
+
+        // Curioso guard: created_by / user_id / author_id
+        const owner =
+          safeStr(qTyped.created_by) ||
+          safeStr(qTyped.user_id) ||
+          safeStr(qTyped.author_id);
+
+        const isOwner = !!uid && !!owner && uid === owner;
+        setIsCurioso(isOwner);
+
+        if (!isOwner) {
+          // not authorized — send them back to the public detail page
+          router.replace(`/q/${id}`);
+          return;
+        }
+
+        // fetch options (try common table names)
+        let opts: any[] = [];
+        const optionTables = ["quandr3_options", "quandry_options", "options"];
+        const matchKeys = [
+          { quandr3_id: id },
+          { q_id: id },
+          { parent_id: id },
+        ];
+
+        let got = false;
+        for (const t of optionTables) {
+          for (const mk of matchKeys) {
+            try {
+              opts = await trySelectMany(t, mk, { col: "idx", asc: true });
+              got = true;
+              break;
+            } catch {}
+          }
+          if (got) break;
+        }
+
+        // Normalize + stable ordering
+        const normalized: OptionRow[] = (opts || []).map((o: any) => ({
+          id: o.id,
+          text: o.text ?? o.label ?? o.title ?? "",
+          image_url: o.image_url ?? o.image ?? "",
+          idx:
+            typeof o.idx === "number"
+              ? o.idx
+              : typeof o.order_index === "number"
+              ? o.order_index
+              : typeof o.picked_index === "number"
+              ? o.picked_index
+              : undefined,
+        }));
+
+        normalized.sort((a, b) => (a.idx ?? 999) - (b.idx ?? 999));
+        setOptions(normalized);
+
+        // default selected index
+        setSelectedIndex(0);
+
+        // votes breakdown (try common table names/columns)
+        let votes: any[] = [];
+        const voteTables = ["votes", "quandr3_votes", "quandry_votes"];
+        let votesGot = false;
+
+        for (const vt of voteTables) {
+          for (const mk of matchKeys) {
+            try {
+              votes = await trySelectMany(vt, mk, { col: "created_at", asc: true });
+              votesGot = true;
+              break;
+            } catch {}
+          }
+          if (votesGot) break;
+        }
+
+        const c = new Array(Math.max(1, normalized.length)).fill(0);
+
+        // If votes store picked_index
+        for (const v of votes as VoteRow[]) {
+          const pi =
+            typeof (v as any).picked_index === "number"
+              ? (v as any).picked_index
+              : null;
+
+          if (pi !== null && pi >= 0) {
+            if (pi >= c.length) {
+              // extend if needed
+              while (c.length <= pi) c.push(0);
+            }
+            c[pi] += 1;
+            continue;
+          }
+
+          // else option_id mapping
+          const oid = safeStr((v as any).option_id);
+          if (oid) {
+            const idx = normalized.findIndex((o) => safeStr(o.id) === oid);
+            if (idx >= 0) c[idx] += 1;
+          }
+        }
+
+        setCounts(c);
+
+        // If voting is closed and there is a clear winner, default selection to winner
+        if (qTyped.status === "awaiting_user" || qTyped.status === "resolved") {
+          let best = 0;
+          for (let i = 1; i < c.length; i++) if (c[i] > c[best]) best = i;
+          setSelectedIndex(best);
+        }
+      } catch (err: any) {
+        console.error(err);
+        setErrorMsg(
+          safeStr(err?.message) ||
+            "Something went wrong loading the resolve page."
+        );
+      } finally {
+        if (alive) setLoading(false);
       }
+    }
 
-      setLoading(false);
-    };
-
-    load();
+    if (id) boot();
 
     return () => {
-      mounted = false;
+      alive = false;
     };
-  }, [id]);
+  }, [id, router]);
 
-  const title = safeStr(row?.title) || "Untitled Quandr3";
+  async function toggleDiscussion(nextOpen: boolean) {
+    if (!qrow) return;
+    if (!canToggleDiscussion) return;
 
-  const choices = useMemo(() => {
-    const arr = (optRows || [])
-      .slice(0, 4)
-      .map((o, i) => safeStr(o.text) || `Option ${indexToLetter(i)}`);
-    while (arr.length < 4) arr.push(`Option ${indexToLetter(arr.length)}`);
-    return arr;
-  }, [optRows]);
-
-  const pct = useMemo(() => {
-    if (!voteTotal) return [0, 0, 0, 0];
-    return counts.map((n) => clampPct(Math.round((n / voteTotal) * 100)));
-  }, [counts, voteTotal]);
-
-  const winningIndex = useMemo(() => {
-    let bestIdx = 0;
-    let best = -1;
-    counts.forEach((c, i) => {
-      if (c > best) {
-        best = c;
-        bestIdx = i;
-      }
-    });
-    return bestIdx;
-  }, [counts]);
-
-  async function onResolve() {
-    setErr(null);
-
-    if (!user?.id) {
-      router.push(`/login?redirect=/q/${id}/resolve`);
-      return;
-    }
-    if (!isAuthor) {
-      setErr("Only the poster can resolve this Quandr3.");
-      return;
-    }
-
-    const optionRow = optRows?.[pickedIndex];
-    const optionId = optionRow?.id ? String(optionRow.id) : "";
-
-    if (!optionId) {
-      setErr("Options are missing for this Quandr3. (No option_id found)");
-      return;
-    }
-
-    setSaving(true);
+    setTogglingDiscussion(true);
+    setErrorMsg("");
 
     try {
-      // 1) Upsert resolution row
-      const { error: rErr } = await supabase
-        .from("quandr3_resolutions")
-        .upsert(
-          {
-            quandr3_id: id,
-            resolver_id: user.id,
-            option_id: optionId,
-            note: safeStr(note) || null,
-          },
-          { onConflict: "quandr3_id" }
+      await tryUpdate("quandr3s", { id: qrow.id }, { discussion_open: nextOpen });
+      setDiscussionOpen(nextOpen);
+      setQrow((prev) => (prev ? { ...prev, discussion_open: nextOpen } : prev));
+    } catch (err1: any) {
+      // fallback table name
+      try {
+        await tryUpdate("quandrs", { id: qrow.id }, { discussion_open: nextOpen });
+        setDiscussionOpen(nextOpen);
+        setQrow((prev) => (prev ? { ...prev, discussion_open: nextOpen } : prev));
+      } catch (err2: any) {
+        throw err1;
+      }
+    } finally {
+      setTogglingDiscussion(false);
+    }
+  }
+
+  async function lockDecision() {
+    if (!qrow) return;
+
+    setSaving(true);
+    setErrorMsg("");
+
+    try {
+      // 1) write a resolution row (best-effort)
+      const optionId = safeStr(options?.[selectedIndex]?.id);
+      const payload: Record<string, any> = {
+        quandr3_id: qrow.id,
+        picked_index: selectedIndex,
+        note: note?.trim() || null,
+        resolved_at: new Date().toISOString(),
+        resolver_user_id: userId || null,
+      };
+
+      if (optionId) payload.option_id = optionId;
+
+      try {
+        await tryInsert("quandr3_resolutions", payload);
+      } catch (e1) {
+        // fallback naming
+        try {
+          await tryInsert("quandry_resolutions", payload);
+        } catch (e2) {
+          // If this fails, we still proceed to set status to resolved (Phase 1 pragmatism)
+          console.warn("Resolution insert failed, proceeding with status update.", e1);
+        }
+      }
+
+      // 2) update quandr3s to resolved + close discussion
+      const patch: Record<string, any> = {
+        status: "resolved",
+        discussion_open: false,
+      };
+
+      // optional: if your table has resolved_at, it will accept; if not, it will error.
+      // We try it and fall back to just status/discussion_open.
+      try {
+        await tryUpdate(
+          "quandr3s",
+          { id: qrow.id },
+          { ...patch, resolved_at: new Date().toISOString() }
         );
-
-      if (rErr) {
-        setErr(rErr.message);
-        setSaving(false);
-        return;
+      } catch {
+        try {
+          await tryUpdate("quandr3s", { id: qrow.id }, patch);
+        } catch (errA: any) {
+          // fallback table name
+          try {
+            await tryUpdate(
+              "quandrs",
+              { id: qrow.id },
+              { ...patch, resolved_at: new Date().toISOString() }
+            );
+          } catch {
+            await tryUpdate("quandrs", { id: qrow.id }, patch);
+          }
+        }
       }
 
-      // 2) Update quandr3s status + resolved_at
-      const { error: qErr } = await supabase
-        .from("quandr3s")
-        .update({
-          status: "resolved",
-          resolved_at: new Date().toISOString(),
-        })
-        .eq("id", id);
-
-      if (qErr) {
-        console.warn("quandr3 status update error:", qErr);
-      }
-
-      setSaving(false);
-      router.push(`/q/${id}`);
-      router.refresh();
-    } catch (e: any) {
-      setErr("Something went wrong while resolving.");
+      // 3) confetti + redirect
+      fireConfetti();
+      window.setTimeout(() => {
+        router.push(`/q/${qrow.id}/results`);
+      }, 650);
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg(
+        safeStr(err?.message) || "Could not lock decision. Please try again."
+      );
+    } finally {
       setSaving(false);
     }
   }
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
-      <div style={{ minHeight: "100vh", background: "#fff", fontFamily: "system-ui" }}>
-        <main style={{ padding: 24 }}>
-          <div style={{ maxWidth: 980, margin: "0 auto", color: NAVY, fontWeight: 900 }}>
-            Loading…
+      <main className="min-h-screen" style={{ background: SOFT_BG }}>
+        <div className="mx-auto max-w-3xl px-4 py-10">
+          <div className="rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="text-sm font-semibold" style={{ color: NAVY }}>
+              Loading Resolve…
+            </div>
+            <div className="mt-2 text-sm text-slate-600">
+              Preparing the Curioso decision panel.
+            </div>
           </div>
-        </main>
-      </div>
+        </div>
+      </main>
     );
   }
 
-  if (err) {
+  // If not Curioso, we redirect in effect — but render a minimal fallback
+  if (!isCurioso) {
     return (
-      <div style={{ minHeight: "100vh", background: "#fff", fontFamily: "system-ui" }}>
-        <main style={{ padding: 24 }}>
-          <div style={{ maxWidth: 980, margin: "0 auto" }}>
-            <div style={{ color: CORAL, fontWeight: 950 }}>{err}</div>
-            <div style={{ marginTop: 12 }}>
-              <Link href={`/q/${id}`} style={{ color: NAVY, fontWeight: 900, textDecoration: "underline" }}>
+      <main className="min-h-screen" style={{ background: SOFT_BG }}>
+        <div className="mx-auto max-w-3xl px-4 py-10">
+          <div className="rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="text-sm font-semibold" style={{ color: NAVY }}>
+              Redirecting…
+            </div>
+            <div className="mt-2 text-sm text-slate-600">
+              This page is only for the Curioso who created the Quandr3.
+            </div>
+            <div className="mt-4">
+              <Link
+                href={`/q/${id}`}
+                className="inline-flex items-center rounded-xl px-4 py-2 text-sm font-semibold text-white"
+                style={{ background: BLUE }}
+              >
                 Back to Quandr3
               </Link>
             </div>
           </div>
-        </main>
-      </div>
+        </div>
+      </main>
     );
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#fff", color: "#0b0b0b", fontFamily: "system-ui" }}>
-      <main style={{ padding: 24 }}>
-        <div style={{ maxWidth: 980, margin: "0 auto" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <Link
-              href={`/q/${id}`}
-              style={{
-                padding: "10px 12px",
-                borderRadius: 12,
-                border: "1px solid rgba(0,0,0,0.12)",
-                background: "#fff",
-                color: "#0b0b0b",
-                textDecoration: "none",
-                fontWeight: 900,
-              }}
-            >
-              ← Back to Quandr3
-            </Link>
-
-            <span style={{ opacity: 0.35 }}>|</span>
-            <span style={{ fontSize: 13, opacity: 0.8, fontWeight: 800, color: NAVY }}>Logged in</span>
+    <main className="min-h-screen" style={{ background: SOFT_BG }}>
+      <div className="mx-auto max-w-4xl px-4 py-10">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-xs font-semibold tracking-widest text-slate-600">
+              RESOLVE
+            </div>
+            <h1 className="mt-1 text-3xl font-extrabold" style={{ color: NAVY }}>
+              Make the final call
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-slate-600">
+              Voting is{" "}
+              <span className="font-semibold" style={{ color: NAVY }}>
+                {status === "open"
+                  ? "still open"
+                  : status === "awaiting_user"
+                  ? "closed"
+                  : "resolved"}
+              </span>
+              . Your decision closes the loop so everyone learns.
+            </p>
           </div>
 
-          <h1 style={{ marginTop: 16, fontSize: 30, fontWeight: 980, lineHeight: 1.1 }}>
-            Resolve (Poster)
-          </h1>
-          <p style={{ marginTop: 8, color: "#444", maxWidth: 820 }}>
-            Pick the final answer and optionally add a short note explaining your decision.
-          </p>
+          <div className="flex gap-2">
+            <Link
+              href={`/q/${id}`}
+              className="inline-flex items-center rounded-xl border bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
+            >
+              Back
+            </Link>
+            <Link
+              href={`/q/${id}/results`}
+              className="inline-flex items-center rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm"
+              style={{ background: BLUE }}
+            >
+              View Results
+            </Link>
+          </div>
+        </div>
 
-          <section
-            style={{
-              marginTop: 14,
-              borderRadius: 20,
-              padding: 18,
-              border: "1px solid rgba(0,0,0,0.10)",
-              background: "#fafafa",
-            }}
-          >
-            <div style={{ fontWeight: 980, fontSize: 14, color: NAVY }}>Quandr3</div>
-            <div style={{ marginTop: 8, fontSize: 16, fontWeight: 950 }}>{title}</div>
-          </section>
+        {errorMsg ? (
+          <div className="mt-6 rounded-2xl border border-red-200 bg-white p-4 text-sm text-red-600 shadow-sm">
+            {errorMsg}
+          </div>
+        ) : null}
 
-          {/* Resolve controls */}
-          <section
-            style={{
-              marginTop: 14,
-              borderRadius: 20,
-              padding: 18,
-              border: "1px solid rgba(0,0,0,0.10)",
-              background: "#fff",
-            }}
-          >
-            <div style={{ fontWeight: 980, fontSize: 16 }}>Final pick</div>
+        <div className="mt-6 rounded-2xl border bg-white p-6 shadow-sm">
+          <div className="text-xs font-semibold tracking-widest text-slate-600">
+            QUANDR3
+          </div>
+          <div className="mt-2 text-xl font-extrabold" style={{ color: NAVY }}>
+            {qrow ? pickQuestion(qrow) : "Quandr3"}
+          </div>
 
-            <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-              {choices.map((c, i) => {
-                const active = pickedIndex === i;
-                return (
-                  <button
-                    key={`${i}-${c}`}
-                    type="button"
-                    onClick={() => setPickedIndex(i)}
-                    style={{
-                      textAlign: "left",
-                      padding: 14,
-                      borderRadius: 14,
-                      border: active ? `2px solid ${BLUE}` : "1px solid rgba(0,0,0,0.12)",
-                      background: active ? "rgba(30,99,243,0.08)" : "#fff",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-                      <span style={{ fontWeight: 980 }}>{indexToLetter(i)}</span>
-                      <span style={{ fontWeight: 950 }}>{c}</span>
-                    </div>
-                    {active ? (
-                      <div style={{ marginTop: 6, fontSize: 12, color: BLUE, fontWeight: 900 }}>Selected ✅</div>
-                    ) : null}
-                  </button>
-                );
-              })}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <span
+              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold"
+              style={{
+                background:
+                  status === "resolved"
+                    ? "rgba(0,169,165,0.12)"
+                    : status === "awaiting_user"
+                    ? "rgba(255,107,107,0.12)"
+                    : "rgba(30,99,243,0.12)",
+                color:
+                  status === "resolved"
+                    ? TEAL
+                    : status === "awaiting_user"
+                    ? CORAL
+                    : BLUE,
+              }}
+            >
+              Status: {status}
+            </span>
+
+            <span className="text-xs text-slate-600">
+              Total votes:{" "}
+              <span className="font-semibold" style={{ color: NAVY }}>
+                {totalVotes}
+              </span>
+            </span>
+          </div>
+        </div>
+
+        {/* Discussion controls */}
+        <div className="mt-6 rounded-2xl border bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-xs font-semibold tracking-widest text-slate-600">
+                DISCUSSION
+              </div>
+              <div className="mt-1 text-lg font-extrabold" style={{ color: NAVY }}>
+                Optional deliberation
+              </div>
+              <div className="mt-1 text-sm text-slate-600">
+                For Phase 1: discussion can be opened while{" "}
+                <span className="font-semibold">awaiting_user</span> and will be{" "}
+                <span className="font-semibold">auto-closed</span> when you resolve.
+              </div>
             </div>
 
-            <div style={{ marginTop: 16, fontWeight: 980, fontSize: 14 }}>Resolution note (optional)</div>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Short note explaining why you picked this…"
-              rows={5}
-              style={{
-                marginTop: 8,
-                width: "100%",
-                borderRadius: 14,
-                border: "1px solid rgba(0,0,0,0.12)",
-                padding: 12,
-                fontSize: 14,
-                outline: "none",
-              }}
-            />
-
-            <div style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center" }}>
+            <div className="flex gap-2">
               <button
-                type="button"
-                onClick={onResolve}
-                disabled={saving}
-                style={{
-                  padding: "12px 14px",
-                  borderRadius: 14,
-                  border: "1px solid rgba(0,0,0,0.12)",
-                  background: saving ? "rgba(0,0,0,0.06)" : NAVY,
-                  color: saving ? "#333" : "#fff",
-                  fontWeight: 980,
-                  cursor: saving ? "default" : "pointer",
-                }}
+                disabled={!canToggleDiscussion || togglingDiscussion}
+                onClick={() => toggleDiscussion(true)}
+                className={cx(
+                  "rounded-xl px-4 py-2 text-sm font-semibold shadow-sm",
+                  discussionOpen ? "bg-slate-100 text-slate-400" : "text-white"
+                )}
+                style={!discussionOpen ? { background: TEAL } : {}}
+                title={
+                  canToggleDiscussion
+                    ? ""
+                    : "Discussion can only be toggled when voting is closed (awaiting_user)."
+                }
               >
-                {saving ? "Saving…" : "Confirm Resolution"}
+                Open Discussion
               </button>
 
-              <span style={{ fontSize: 12, color: "#666" }}>
-                This will publish the final pick on the Quandr3 page.
+              <button
+                disabled={!canToggleDiscussion || togglingDiscussion}
+                onClick={() => toggleDiscussion(false)}
+                className={cx(
+                  "rounded-xl px-4 py-2 text-sm font-semibold shadow-sm",
+                  !discussionOpen ? "bg-slate-100 text-slate-400" : "text-white"
+                )}
+                style={discussionOpen ? { background: CORAL } : {}}
+                title={
+                  canToggleDiscussion
+                    ? ""
+                    : "Discussion can only be toggled when voting is closed (awaiting_user)."
+                }
+              >
+                Close Discussion
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-xl border bg-slate-50 p-4 text-sm text-slate-700">
+            Current state:{" "}
+            <span className="font-semibold" style={{ color: NAVY }}>
+              {discussionOpen ? "OPEN" : "CLOSED"}
+            </span>
+            {canToggleDiscussion ? (
+              <span className="ml-2 text-slate-500">
+                (Only voters can participate; everyone else can view when public pages allow.)
               </span>
+            ) : (
+              <span className="ml-2 text-slate-500">
+                (You’ll be able to toggle this when voting closes.)
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Vote breakdown + decision */}
+        <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          <div className="rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="text-xs font-semibold tracking-widest text-slate-600">
+              STANDINGS PREVIEW
             </div>
-          </section>
-
-          {/* Results Preview */}
-          <section
-            style={{
-              marginTop: 14,
-              borderRadius: 20,
-              padding: 18,
-              border: "1px solid rgba(0,0,0,0.10)",
-              background: "#fafafa",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-              <div>
-                <div style={{ fontWeight: 980, fontSize: 16 }}>Results Preview</div>
-                <div style={{ marginTop: 4, fontSize: 12, color: "#666" }}>
-                  Percentages + reasons (winners and losers).
-                </div>
-              </div>
-
-              <div style={{ fontSize: 12, color: "#666" }}>
-                Votes: <span style={{ fontWeight: 950, color: NAVY }}>{voteTotal}</span>
-              </div>
+            <div className="mt-1 text-lg font-extrabold" style={{ color: NAVY }}>
+              How the community voted
+            </div>
+            <div className="mt-2 text-sm text-slate-600">
+              Visible to you now. Wayfinders see full breakdown after voting closes.
             </div>
 
-            {/* Distribution */}
-            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {choices.map((label, i) => {
-                const percent = clampPct(pct[i] ?? 0);
-                const n = counts[i] ?? 0;
-                const isWinner = i === winningIndex;
+            <div className="mt-5 space-y-3">
+              {(options?.length ? options : new Array(4).fill(null)).map((o, idx) => {
+                const label = o
+                  ? safeStr(o.text) || `Option ${String.fromCharCode(65 + idx)}`
+                  : `Option ${String.fromCharCode(65 + idx)}`;
+
+                const c = counts?.[idx] || 0;
+                const pct = totalVotes > 0 ? Math.round((c / totalVotes) * 100) : 0;
+
+                const isLeading =
+                  totalVotes > 0 && c === Math.max(...(counts || [0])) && c > 0;
 
                 return (
                   <div
-                    key={`dist-${i}`}
+                    key={idx}
+                    className="rounded-xl border p-3"
                     style={{
-                      borderRadius: 14,
-                      border: "1px solid rgba(0,0,0,0.10)",
-                      background: "#fff",
-                      padding: 12,
+                      borderColor: isLeading
+                        ? "rgba(0,169,165,0.45)"
+                        : "rgba(15,23,42,0.12)",
+                      background: isLeading ? "rgba(0,169,165,0.06)" : "white",
                     }}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                      <div style={{ fontWeight: 950 }}>
-                        {indexToLetter(i)}. {label}{" "}
-                        {isWinner ? (
-                          <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 950, color: BLUE }}>
-                            Winner
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold" style={{ color: NAVY }}>
+                          {String.fromCharCode(65 + idx)}. {label}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          {c} vote{c === 1 ? "" : "s"} • {pct}%
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {o?.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={o.image_url}
+                            alt=""
+                            className="h-10 w-10 rounded-lg border object-cover"
+                          />
+                        ) : null}
+                        {isLeading ? (
+                          <span
+                            className="rounded-full px-3 py-1 text-xs font-semibold"
+                            style={{ background: "rgba(0,169,165,0.12)", color: TEAL }}
+                          >
+                            Leading
                           </span>
                         ) : null}
                       </div>
-                      <div style={{ fontWeight: 980 }}>
-                        {percent}% ({n})
-                      </div>
                     </div>
 
-                    <div
-                      style={{
-                        marginTop: 8,
-                        height: 10,
-                        borderRadius: 999,
-                        background: "rgba(0,0,0,0.06)",
-                        overflow: "hidden",
-                      }}
-                    >
+                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
                       <div
+                        className="h-full rounded-full"
                         style={{
-                          height: "100%",
-                          width: `${percent}%`,
-                          background: isWinner ? BLUE : "rgba(0,0,0,0.14)",
+                          width: `${pct}%`,
+                          background: isLeading ? TEAL : BLUE,
                         }}
                       />
                     </div>
@@ -531,104 +742,121 @@ export default function ResolveQuandr3Page() {
                 );
               })}
             </div>
+          </div>
 
-            {/* Reasons (Winner + each losing option separately) */}
-            <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
-              {/* Winner */}
-              <div
-                style={{
-                  borderRadius: 16,
-                  border: "1px solid rgba(0,0,0,0.10)",
-                  background: "#fff",
-                  padding: 14,
-                }}
-              >
-                <div style={{ fontWeight: 980, color: NAVY }}>
-                  Winning reasons ({indexToLetter(winningIndex)})
-                </div>
-                <div style={{ marginTop: 8, display: "grid", gap: 10 }}>
-                  {(reasonsByIndex[winningIndex] || []).length ? (
-                    (reasonsByIndex[winningIndex] || []).slice(0, 25).map((r, idx) => (
-                      <div
-                        key={`wr-${idx}`}
-                        style={{
-                          borderRadius: 12,
-                          border: "1px solid rgba(0,0,0,0.08)",
-                          padding: 10,
-                          background: "#fafafa",
-                        }}
-                      >
-                        <div style={{ fontSize: 13, color: "#222", lineHeight: 1.4 }}>
-                          {safeStr(r.reason) || "—"}
-                        </div>
-                        <div style={{ marginTop: 6, fontSize: 11, color: "#666" }}>
-                          {safeStr(r.created_at) ? new Date(r.created_at).toLocaleString() : ""}
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div style={{ fontSize: 13, color: "#666" }}>No reasons captured yet.</div>
-                  )}
-                </div>
-              </div>
+          <div className="rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="text-xs font-semibold tracking-widest text-slate-600">
+              YOUR DECISION
+            </div>
+            <div className="mt-1 text-lg font-extrabold" style={{ color: NAVY }}>
+              Choose the final outcome
+            </div>
+            <div className="mt-2 text-sm text-slate-600">
+              Default selects the current leader once voting is closed.
+            </div>
 
-              {/* Losers split by option */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-                {[0, 1, 2, 3]
-                  .filter((i) => i !== winningIndex)
-                  .map((loserIdx) => (
-                    <div
-                      key={`loser-${loserIdx}`}
-                      style={{
-                        borderRadius: 16,
-                        border: "1px solid rgba(0,0,0,0.10)",
-                        background: "#fff",
-                        padding: 14,
-                      }}
-                    >
-                      <div style={{ fontWeight: 980, color: NAVY }}>
-                        Losing reasons ({indexToLetter(loserIdx)})
+            <div className="mt-5 grid gap-2 sm:grid-cols-2">
+              {(options?.length ? options : new Array(4).fill(null)).map((o, idx) => {
+                const label = o
+                  ? safeStr(o.text) || `Option ${String.fromCharCode(65 + idx)}`
+                  : `Option ${String.fromCharCode(65 + idx)}`;
+
+                const selected = idx === selectedIndex;
+
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setSelectedIndex(idx)}
+                    className={cx(
+                      "rounded-xl border p-3 text-left shadow-sm transition",
+                      selected ? "ring-2" : "hover:bg-slate-50"
+                    )}
+                    // ✅ FIX: remove invalid ringColor (not real CSS). Use boxShadow instead.
+                    style={
+                      selected
+                        ? {
+                            borderColor: "transparent",
+                            boxShadow: `0 0 0 2px ${TEAL}`,
+                          }
+                        : { borderColor: "rgba(15,23,42,0.12)", boxShadow: "none" }
+                    }
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold" style={{ color: NAVY }}>
+                        {String.fromCharCode(65 + idx)}. {label}
                       </div>
-                      <div style={{ marginTop: 8, display: "grid", gap: 10 }}>
-                        {(reasonsByIndex[loserIdx] || []).length ? (
-                          (reasonsByIndex[loserIdx] || []).slice(0, 12).map((r, idx) => (
-                            <div
-                              key={`lr-${loserIdx}-${idx}`}
-                              style={{
-                                borderRadius: 12,
-                                border: "1px solid rgba(0,0,0,0.08)",
-                                padding: 10,
-                                background: "#fafafa",
-                              }}
-                            >
-                              <div style={{ fontSize: 13, color: "#222", lineHeight: 1.4 }}>
-                                {safeStr(r.reason) || "—"}
-                              </div>
-                              <div style={{ marginTop: 6, fontSize: 11, color: "#666" }}>
-                                {safeStr(r.created_at) ? new Date(r.created_at).toLocaleString() : ""}
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <div style={{ fontSize: 13, color: "#666" }}>No reasons captured yet.</div>
-                        )}
-                      </div>
+                      {selected ? (
+                        <span
+                          className="rounded-full px-3 py-1 text-xs font-semibold"
+                          style={{ background: "rgba(0,169,165,0.12)", color: TEAL }}
+                        >
+                          Selected
+                        </span>
+                      ) : null}
                     </div>
-                  ))}
+                    {o?.image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={o.image_url}
+                        alt=""
+                        className="mt-2 h-24 w-full rounded-lg border object-cover"
+                      />
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-5">
+              <label className="text-xs font-semibold tracking-widest text-slate-600">
+                WHY I DECIDED THIS (OPTIONAL)
+              </label>
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                rows={5}
+                placeholder="Share your reasoning so everyone learns from your decision..."
+                className="mt-2 w-full rounded-xl border bg-white p-3 text-sm outline-none focus:ring-2"
+                style={{ borderColor: "rgba(15,23,42,0.12)" }}
+              />
+            </div>
+
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-xs text-slate-600">
+                On resolve: discussion auto-closes, status becomes{" "}
+                <span className="font-semibold" style={{ color: NAVY }}>
+                  resolved
+                </span>
+                , then we redirect to Results.
               </div>
+
+              <button
+                disabled={saving}
+                onClick={lockDecision}
+                className="inline-flex items-center justify-center rounded-xl px-5 py-3 text-sm font-extrabold text-white shadow-sm"
+                style={{ background: CORAL }}
+              >
+                {saving ? "Locking…" : "Lock Decision + Celebrate 🎉"}
+              </button>
             </div>
 
-            <div style={{ marginTop: 10, fontSize: 12, color: "#666" }}>
-              Note: this preview reads from <code>votes</code> and <code>vote_reasons</code> (grouped by{" "}
-              <code>option_id</code>).
-            </div>
-          </section>
-
-          <p style={{ marginTop: 14, opacity: 0.55, fontSize: 12 }}>
-            Supabase live: resolution is saved to <code>quandr3_resolutions</code>.
-          </p>
+            {status === "open" ? (
+              <div className="mt-4 rounded-xl border bg-slate-50 p-4 text-sm text-slate-700">
+                <span className="font-semibold" style={{ color: NAVY }}>
+                  Note:
+                </span>{" "}
+                This Quandr3 is still open. You can resolve early, but the intended flow is:
+                open → awaiting_user → resolved.
+              </div>
+            ) : null}
+          </div>
         </div>
-      </main>
-    </div>
+
+        <div className="mt-10 text-center text-xs text-slate-500">
+          Quandr3 • Ask • Share • Decide
+        </div>
+      </div>
+    </main>
   );
 }

@@ -10,15 +10,20 @@ import ExploreClient from "./_ExploreClient";
 export default function ExploreInner() {
   const sp = useSearchParams();
 
-  const initialCategory = sp.get("category") || "all";
+  // Accept both styles of params:
+  // - your old placeholder used: category/status/scope
+  // - your new explore client used: cat/status/sort
+  const initialCategory = sp.get("cat") || sp.get("category") || "All";
   const initialStatus = sp.get("status") || "all";
   const initialScope = sp.get("scope") || "global";
+  const initialSort = sp.get("sort") || "trending";
 
   return (
     <ExploreClient
       initialCategory={initialCategory}
       initialStatus={initialStatus}
       initialScope={initialScope}
+      initialSort={initialSort}
     />
   );
 }
