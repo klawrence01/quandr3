@@ -1,25 +1,24 @@
+// app/explore/_ExploreInner.tsx
 "use client";
 // @ts-nocheck
 
 import { useSearchParams } from "next/navigation";
+import ExploreClient from "./_ExploreClient";
 
-// ✅ Paste your *current* Explore page UI/code below.
 // IMPORTANT: Anything that uses useSearchParams must live in this file.
 
 export default function ExploreInner() {
   const sp = useSearchParams();
 
-  // Example read (keep or delete)
-  const category = sp.get("category") || "all";
+  const initialCategory = sp.get("category") || "all";
+  const initialStatus = sp.get("status") || "all";
+  const initialScope = sp.get("scope") || "global";
 
   return (
-    <div style={{ padding: 24 }}>
-      <h1>Explore</h1>
-      <p style={{ opacity: 0.7 }}>
-        (ExploreInner) category = <strong>{category}</strong>
-      </p>
-
-      {/* ✅ PASTE YOUR EXISTING EXPLORE UI HERE */}
-    </div>
+    <ExploreClient
+      initialCategory={initialCategory}
+      initialStatus={initialStatus}
+      initialScope={initialScope}
+    />
   );
 }

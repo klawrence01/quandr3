@@ -1,3 +1,4 @@
+// app/explore/page.tsx
 import { Suspense } from "react";
 import ExploreInner from "./_ExploreInner";
 
