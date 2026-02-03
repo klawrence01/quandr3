@@ -21,31 +21,49 @@ export default function ExploreClient() {
       setLoading(true);
       setErr("");
 
+      // IMPORTANT: we never select "question" from the DB.
+      // "question" is a UI field mapped from title.
       const { data, error } = await supabase
         .from("quandr3s")
         .select(`
           id,
+          author_id,
+          category,
           title,
           context,
-          category,
+          media_url,
+          media_type,
           status,
-          city,
-          state,
-          hero_image_url,
           created_at,
           closes_at,
           voting_duration_hours,
-          discussion_open
+          discussion_open,
+          hero_image_url,
+          city,
+          state,
+          region,
+          country,
+          visibility,
+          sponsored_start,
+          sponsored_end,
+          sponsored_bid,
+          sponsored_owner_id
         `)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .limit(200);
 
       if (!alive) return;
 
       if (error) {
-        setErr(error.message);
+        setErr(error.message || "Couldn’t load Explore.");
         setRows([]);
       } else {
-        setRows(data || []);
+        const normalized = (data || []).map((r: any) => ({
+          ...r,
+          // ✅ Canonical mapping: UI expects "question"
+          question: r.title,
+        }));
+        setRows(normalized);
       }
 
       setLoading(false);
@@ -60,18 +78,24 @@ export default function ExploreClient() {
   const filtered = useMemo(() => {
     let list = [...rows];
 
-    if (status !== "all") {
-      list = list.filter((r) => r.status === status);
-    }
+    if (status !== "all") list = list.filter((r) => r.status === status);
 
     const needle = q.trim().toLowerCase();
     if (needle) {
       list = list.filter((r) => {
+        const title = (r.title || "").toLowerCase();
+        const question = (r.question || "").toLowerCase(); // = title
+        const context = (r.context || "").toLowerCase();
+        const city = (r.city || "").toLowerCase();
+        const state = (r.state || "").toLowerCase();
+        const id = String(r.id || "");
         return (
-          (r.title || "").toLowerCase().includes(needle) ||
-          (r.context || "").toLowerCase().includes(needle) ||
-          (r.city || "").toLowerCase().includes(needle) ||
-          (r.state || "").toLowerCase().includes(needle)
+          title.includes(needle) ||
+          question.includes(needle) ||
+          context.includes(needle) ||
+          city.includes(needle) ||
+          state.includes(needle) ||
+          id.includes(needle)
         );
       });
     }
