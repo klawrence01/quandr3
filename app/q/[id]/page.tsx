@@ -21,6 +21,24 @@ const SOFT_BG = "#f5f7fc";
 
 const LETTER = ["A", "B", "C", "D"];
 
+/** ✅ Category hero mapping (set-and-forget)
+ *  Place images in: /public/quandr3/placeholders/
+ *  money.jpg, career.jpg, relationships.jpg, health.jpg, family.jpg, tech.jpg, default.jpg
+ */
+const CATEGORY_HERO: Record<string, string> = {
+  money: "/quandr3/placeholders/money.jpg",
+  career: "/quandr3/placeholders/career.jpg",
+  relationships: "/quandr3/placeholders/relationships.jpg",
+  health: "/quandr3/placeholders/health.jpg",
+  family: "/quandr3/placeholders/family.jpg",
+  tech: "/quandr3/placeholders/tech.jpg",
+};
+
+function heroForCategory(category?: string) {
+  const key = (category || "").toLowerCase().trim();
+  return CATEGORY_HERO[key] || "/quandr3/placeholders/default.jpg";
+}
+
 function fmt(ts?: string) {
   if (!ts) return "";
   try {
@@ -66,14 +84,20 @@ function pillStyle(kind: "open" | "awaiting_user" | "resolved") {
   return { bg: "rgba(0,169,165,0.12)", fg: TEAL, label: "Resolved" };
 }
 
+/** Backward/loose matching so categories like "Money & Finance" still land properly */
 function categoryFallback(category?: string) {
   const c = (category || "").toLowerCase();
+
   if (c.includes("career")) return "/quandr3/placeholders/career.jpg";
   if (c.includes("money") || c.includes("finance")) return "/quandr3/placeholders/money.jpg";
-  if (c.includes("love") || c.includes("relationship")) return "/quandr3/placeholders/relationships.jpg";
-  if (c.includes("health") || c.includes("fitness")) return "/quandr3/placeholders/lifestyle.jpg";
+  if (c.includes("love") || c.includes("relationship") || c.includes("dating"))
+    return "/quandr3/placeholders/relationships.jpg";
+  if (c.includes("health") || c.includes("fitness") || c.includes("wellness"))
+    return "/quandr3/placeholders/health.jpg";
+  if (c.includes("family") || c.includes("parent") || c.includes("kids"))
+    return "/quandr3/placeholders/family.jpg";
   if (c.includes("tech")) return "/quandr3/placeholders/tech.jpg";
-  if (c.includes("travel")) return "/quandr3/placeholders/travel.jpg";
+
   return "/quandr3/placeholders/default.jpg";
 }
 
@@ -365,8 +389,13 @@ export default function Quandr3DetailPage() {
 
   const statusPill = useMemo(() => pillStyle(status as any), [status]);
 
+  /** ✅ HERO IMAGE RULE:
+   *  1) If q.media_url exists, use it
+   *  2) Else use category hero mapping (hard set)
+   *  3) Else default
+   */
   const heroImg = useMemo(() => {
-    return q?.media_url || categoryFallback(q?.category);
+    return q?.media_url ? q.media_url : heroForCategory(q?.category);
   }, [q]);
 
   const discussionBadge = useMemo(() => {
