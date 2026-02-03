@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import Link from "next/link";
+import Image from "next/image";
 
 const NAVY = "#0b2343";
 const TEAL = "#00a9a5";
@@ -10,14 +11,10 @@ const SOFT_BG = "#f5f7fc";
 
 function fmtDateTime(ts?: string) {
   if (!ts) return "";
-  try {
-    return new Date(ts).toLocaleString();
-  } catch {
-    return "";
-  }
+  return new Date(ts).toLocaleString();
 }
 
-function hoursLeft(closesAt: string) {
+function hoursLeft(closesAt?: string) {
   if (!closesAt) return 0;
   const diff = new Date(closesAt).getTime() - Date.now();
   return Math.max(0, Math.ceil(diff / 36e5));
@@ -29,26 +26,78 @@ function statusPill(status: string) {
   return { label: "Resolved", color: BLUE };
 }
 
-function prettyCategory(c?: string) {
-  const s = String(c || "").trim();
-  if (!s) return "";
-  return s.toUpperCase();
+/**
+ * Phase 1 placeholder:
+ * - No Supabase dependency.
+ * - Generates a clean banner image with the category label.
+ * - When Phase 2 is ready, we can replace this with category image URLs from DB.
+ */
+function svgBannerDataUrl(categoryLabel: string) {
+  const label = (categoryLabel || "QUANDR3").toUpperCase();
+  const safe = label.replace(/[^A-Z0-9 \-_.]/g, "");
+  const bg1 = "#0b2343";
+  const bg2 = "#1e63f3";
+  const bg3 = "#00a9a5";
+  const fg = "#ffffff";
+
+  const svg = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="${bg1}"/>
+        <stop offset="0.55" stop-color="${bg2}"/>
+        <stop offset="1" stop-color="${bg3}"/>
+      </linearGradient>
+      <filter id="s" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#000" flood-opacity="0.25"/>
+      </filter>
+    </defs>
+
+    <rect width="1200" height="420" rx="40" fill="url(#g)"/>
+
+    <g filter="url(#s)">
+      <rect x="56" y="64" width="1088" height="292" rx="28" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.18)"/>
+    </g>
+
+    <text x="88" y="140" fill="${fg}" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" opacity="0.95">
+      REAL PEOPLE. REAL DILEMMAS.
+    </text>
+
+    <text x="88" y="220" fill="${fg}" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="900">
+      ${safe}
+    </text>
+
+    <text x="88" y="282" fill="${fg}" font-family="Arial, Helvetica, sans-serif" font-size="26" opacity="0.92">
+      Ask • Share • Decide
+    </text>
+
+    <circle cx="1120" cy="112" r="28" fill="rgba(255,255,255,0.18)"/>
+    <text x="1106" y="122" fill="${fg}" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="800">?</text>
+  </svg>`.trim();
+
+  // encode for data url
+  const encoded = encodeURIComponent(svg)
+    .replace(/'/g, "%27")
+    .replace(/"/g, "%22");
+
+  return `data:image/svg+xml;charset=utf-8,${encoded}`;
 }
 
-async function doShare(url: string, title: string) {
-  try {
-    // If native share exists
-    // @ts-ignore
-    if (navigator?.share) {
-      // @ts-ignore
-      await navigator.share({ title: "Quandr3", text: title, url });
-      return true;
-    }
-  } catch {}
-  try {
-    await navigator.clipboard.writeText(url);
-    return true;
-  } catch {}
+function pickCardImageSrc(r: any) {
+  // Prefer real images first (Phase 1)
+  if (r?.media_url) return r.media_url;
+  if (r?.hero_image_url) return r.hero_image_url;
+
+  // Otherwise show a placeholder banner based on category
+  const cat = r?.category || "QUANDR3";
+  return svgBannerDataUrl(cat);
+}
+
+function canShowDiscussionHint(r: any) {
+  // Your rule: discussion is NOT during open.
+  // It only happens after resolve, and only for voters (viewable by others).
+  // On Explore, we only show a hint (not actual access control).
+  if (r?.status === "resolved") return true;
   return false;
 }
 
@@ -64,90 +113,89 @@ export default function ExploreInner({
   setSort,
   scope,
   setScope,
-  categories,
   activeCategory,
   setActiveCategory,
+  categories,
 }: any) {
   return (
     <div style={{ minHeight: "100vh", background: SOFT_BG }}>
       <div className="mx-auto max-w-6xl px-4 py-8">
-
-        {/* SOUL / EXPLAINER + CONTROLS */}
+        {/* SOUL HEADER */}
         <div className="rounded-3xl bg-white border p-6">
           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-            <div className="max-w-2xl">
-              <div className="text-xs font-semibold tracking-widest text-slate-500">
+            <div>
+              <div className="text-xs tracking-widest font-semibold text-slate-500">
                 REAL PEOPLE. REAL DILEMMAS.
               </div>
-              <h1 className="mt-2 text-3xl md:text-4xl font-extrabold" style={{ color: NAVY }}>
+              <h1 className="mt-1 text-4xl font-extrabold" style={{ color: NAVY }}>
                 Explore
               </h1>
-              <p className="mt-2 text-slate-700">
+              <p className="mt-2 text-slate-600 max-w-2xl">
                 This is where decisions live. Browse open Quandr3s, see what the internet decided,
                 and learn from final outcomes — real questions, real reasoning, real closure.
               </p>
 
-              <div className="mt-4 flex flex-wrap items-center gap-2">
+              <div className="mt-4 flex flex-wrap gap-3">
                 <Link
                   href="/q/create"
-                  className="inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold text-white"
-                  style={{ background: `linear-gradient(90deg, ${BLUE}, ${CORAL})` }}
+                  className="inline-flex items-center rounded-full px-5 py-3 text-white font-semibold"
+                  style={{
+                    background: "linear-gradient(90deg, #1e63f3 0%, #ff6b6b 100%)",
+                  }}
                 >
                   Create a Quandr3
                 </Link>
+
                 <Link
                   href="/about"
-                  className="inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold border"
-                  style={{ color: NAVY, borderColor: "#e5e7eb" }}
+                  className="inline-flex items-center rounded-full px-5 py-3 border font-semibold"
+                  style={{ color: NAVY }}
                 >
                   About
                 </Link>
+
                 <Link
                   href="/contact"
-                  className="inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold border"
-                  style={{ color: NAVY, borderColor: "#e5e7eb" }}
+                  className="inline-flex items-center rounded-full px-5 py-3 border font-semibold"
+                  style={{ color: NAVY }}
                 >
                   Contact
                 </Link>
               </div>
             </div>
 
-            {/* Local/Global toggle */}
-            <div className="w-full md:w-auto">
-              <div className="rounded-2xl border p-2 bg-white">
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setScope("all")}
-                    className="px-4 py-2 rounded-xl text-sm font-semibold border"
-                    style={{
-                      background: scope === "all" ? NAVY : "white",
-                      color: scope === "all" ? "white" : NAVY,
-                      borderColor: "#e5e7eb",
-                    }}
-                  >
-                    Global
-                  </button>
-                  <button
-                    onClick={() => setScope("local")}
-                    className="px-4 py-2 rounded-xl text-sm font-semibold border"
-                    style={{
-                      background: scope === "local" ? NAVY : "white",
-                      color: scope === "local" ? "white" : NAVY,
-                      borderColor: "#e5e7eb",
-                    }}
-                  >
-                    Local
-                  </button>
-                </div>
-                <div className="mt-2 text-xs text-slate-500">
-                  Local shows posts with a city/state attached.
-                </div>
+            {/* Global / Local toggle */}
+            <div className="rounded-2xl border p-3 w-full md:w-[320px]">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setScope?.("global")}
+                  className="flex-1 rounded-xl px-4 py-2 font-semibold border"
+                  style={{
+                    background: scope === "global" ? NAVY : "white",
+                    color: scope === "global" ? "white" : NAVY,
+                  }}
+                >
+                  Global
+                </button>
+                <button
+                  onClick={() => setScope?.("local")}
+                  className="flex-1 rounded-xl px-4 py-2 font-semibold border"
+                  style={{
+                    background: scope === "local" ? NAVY : "white",
+                    color: scope === "local" ? "white" : NAVY,
+                  }}
+                >
+                  Local
+                </button>
+              </div>
+              <div className="mt-2 text-xs text-slate-600">
+                Local shows posts with a city/state attached.
               </div>
             </div>
           </div>
 
-          {/* Search + Filters */}
-          <div className="mt-5 grid grid-cols-1 md:grid-cols-12 gap-3">
+          {/* Search row */}
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-12 gap-3">
             <input
               className="md:col-span-7 rounded-2xl border px-4 py-3"
               placeholder="Search title, context, city, or id…"
@@ -177,206 +225,141 @@ export default function ExploreInner({
           </div>
         </div>
 
-        {/* CATEGORY PILLS (right under top block) */}
-        <div className="mt-4 rounded-3xl border bg-white p-4">
+        {/* CATEGORY PILLS (jump row) */}
+        <div className="mt-6 rounded-3xl bg-white border p-4">
           <div className="flex flex-wrap gap-2">
-            {(categories || ["all"]).map((c: string) => {
-              const active = c === activeCategory;
-              const label = c === "all" ? "All" : c;
+            {(categories || ["All"]).map((c: string) => {
+              const selected = (activeCategory || "All") === c;
               return (
                 <button
                   key={c}
-                  onClick={() => setActiveCategory(c)}
-                  className="px-4 py-2 rounded-full text-sm font-semibold border"
+                  onClick={() => setActiveCategory?.(c)}
+                  className="rounded-full px-4 py-2 border font-semibold text-sm"
                   style={{
-                    background: active ? NAVY : "white",
-                    color: active ? "white" : NAVY,
-                    borderColor: "#e5e7eb",
+                    background: selected ? NAVY : "white",
+                    color: selected ? "white" : NAVY,
                   }}
                 >
-                  {label}
+                  {c}
                 </button>
               );
             })}
           </div>
         </div>
 
-        {/* OPTIONAL: Top stats boxes (stub for now) */}
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
-          {["Top Curioso", "Top Wayfinder", "Top Quandr3", "Trending"].map((t) => (
-            <div key={t} className="rounded-3xl border bg-white p-4">
-              <div className="text-xs font-semibold tracking-widest text-slate-500">{t.toUpperCase()}</div>
-              <div className="mt-2 text-sm text-slate-600">
-                Coming soon (needs stats wiring).
+        {/* 4 STAT BOXES (placeholder for now) */}
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+          {[
+            { title: "TOP CURIOSO", note: "Coming soon (needs stats wiring)." },
+            { title: "TOP WAYFINDER", note: "Coming soon (needs stats wiring)." },
+            { title: "TOP QUANDR3", note: "Coming soon (needs stats wiring)." },
+            { title: "TRENDING", note: "Coming soon (needs stats wiring)." },
+          ].map((b) => (
+            <div key={b.title} className="rounded-3xl bg-white border p-5">
+              <div className="text-xs tracking-widest font-semibold text-slate-500">
+                {b.title}
               </div>
+              <div className="mt-2 text-slate-700">{b.note}</div>
             </div>
           ))}
         </div>
 
-        {/* BODY */}
+        {/* FEED */}
         <div className="mt-6">
           {loading && <div className="text-slate-600">Loading…</div>}
           {err && <div className="text-red-600">{err}</div>}
 
-          {/* ✅ VERTICAL FEED (Reddit-like) */}
-          <div className="flex flex-col gap-4">
+          {/* IMPORTANT: vertical, Reddit-like list */}
+          <div className="flex flex-col gap-5">
             {rows.map((r: any) => {
               const pill = statusPill(r.status);
-
-              // ✅ DISCUSSION RULE:
-              // Discussion cannot be open during "open" or "awaiting_user"
-              // Only matters after "resolved"
-              const discussionIsEligible = r.status === "resolved";
-              const showDiscussionOpen = discussionIsEligible && !!r.discussion_open;
-
-              const media = r.media_url || r.hero_image_url || "";
-              const categoryLabel = prettyCategory(r.category);
+              const imgSrc = pickCardImageSrc(r);
 
               return (
                 <div key={r.id} className="rounded-3xl bg-white border overflow-hidden">
-                  {/* Media block (bigger / full width) */}
-                  {media ? (
-                    <div className="relative w-full" style={{ background: NAVY }}>
-                      <div className="w-full" style={{ paddingTop: "40%" }} />
-                      {/* Use plain img to avoid Next Image config issues */}
-                      <img
-                        src={media}
-                        alt="Quandr3 media"
-                        className="absolute inset-0 w-full h-full object-cover"
-                      />
-                      {/* Gradient overlay for interest */}
-                      <div
-                        className="absolute inset-0"
-                        style={{
-                          background:
-                            "linear-gradient(180deg, rgba(11,35,67,0.10) 0%, rgba(11,35,67,0.65) 100%)",
-                        }}
-                      />
-                      <div className="absolute left-4 bottom-3 flex items-center gap-2">
-                        {categoryLabel ? (
-                          <span className="text-xs font-semibold px-3 py-1 rounded-full text-white"
-                            style={{ background: "rgba(255,255,255,0.16)" }}>
-                            {categoryLabel}
-                          </span>
-                        ) : null}
-                        <span
-                          className="text-xs px-3 py-1 rounded-full text-white font-semibold"
-                          style={{ background: pill.color }}
-                        >
-                          {pill.label}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="px-5 pt-5">
-                      <div className="flex items-center gap-2">
-                        {categoryLabel ? (
-                          <span className="text-xs font-semibold px-3 py-1 rounded-full"
-                            style={{ color: NAVY, background: "#eef2ff" }}>
-                            {categoryLabel}
-                          </span>
-                        ) : null}
-                        <span
-                          className="text-xs px-3 py-1 rounded-full text-white font-semibold"
-                          style={{ background: pill.color }}
-                        >
-                          {pill.label}
-                        </span>
-                      </div>
-                    </div>
-                  )}
+                  {/* IMAGE BANNER (full width) */}
+                  <div className="relative w-full h-[220px] md:h-[260px]">
+                    <Image
+                      src={imgSrc}
+                      alt={r.category || "Quandr3"}
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 768px) 100vw, 1100px"
+                      priority={false}
+                    />
 
-                  {/* Content */}
-                  <div className="p-5">
-                    <div className="flex flex-col gap-2">
-                      <Link href={`/q/${r.id}`} className="block">
-                        <h2 className="font-extrabold text-xl md:text-2xl leading-tight" style={{ color: NAVY }}>
-                          {r.title}
-                        </h2>
-                      </Link>
+                    {/* top-left chips */}
+                    <div className="absolute left-4 top-4 flex gap-2">
+                      {r.category && (
+                        <span className="text-xs px-3 py-1 rounded-full bg-white/90 border font-semibold" style={{ color: NAVY }}>
+                          {String(r.category).toUpperCase()}
+                        </span>
+                      )}
+                      <span
+                        className="text-xs px-3 py-1 rounded-full text-white font-semibold"
+                        style={{ background: pill.color }}
+                      >
+                        {pill.label}
+                      </span>
+                    </div>
+                  </div>
 
-                      {r.context ? (
-                        <p className="text-sm md:text-base text-slate-700">
-                          {r.context}
-                        </p>
-                      ) : (
-                        <p className="text-sm text-slate-500 italic">
-                          (No context yet.)
-                        </p>
+                  {/* CONTENT */}
+                  <div className="p-6">
+                    <Link href={`/q/${r.id}`}>
+                      <h2 className="text-3xl font-extrabold leading-tight" style={{ color: NAVY }}>
+                        {r.title}
+                      </h2>
+                    </Link>
+
+                    {r.context && (
+                      <p className="mt-2 text-slate-700 text-base">
+                        {r.context}
+                      </p>
+                    )}
+
+                    {/* Meta row */}
+                    <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
+                      <span>{fmtDateTime(r.created_at)}</span>
+
+                      {/* location */}
+                      {(r.city || r.state) && (
+                        <span>
+                          {r.city}
+                          {r.state ? `, ${r.state}` : ""}
+                        </span>
                       )}
 
-                      {/* Meta row */}
-                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span>{r.city}{r.state ? `, ${r.state}` : ""}</span>
-                          <span>•</span>
-                          <span>{fmtDateTime(r.created_at)}</span>
-                          {r.status === "open" && r.closes_at ? (
-                            <>
-                              <span>•</span>
-                              <span className="font-semibold">{hoursLeft(r.closes_at)}h left</span>
-                            </>
-                          ) : null}
-                          {discussionIsEligible ? (
-                            <>
-                              <span>•</span>
-                              <span className="font-semibold" style={{ color: showDiscussionOpen ? TEAL : NAVY }}>
-                                {showDiscussionOpen ? "Discussion Open" : "Discussion After Resolve"}
-                              </span>
-                            </>
-                          ) : (
-                            <>
-                              <span>•</span>
-                              <span className="font-semibold" style={{ color: NAVY }}>
-                                Discussion After Resolve
-                              </span>
-                            </>
-                          )}
-                        </div>
+                      {/* time left */}
+                      {r.status === "open" && (
+                        <span>{hoursLeft(r.closes_at)}h left</span>
+                      )}
 
-                        {/* Action buttons */}
-                        <div className="flex items-center gap-2">
-                          <button
-                            className="rounded-full px-3 py-1 border text-xs font-semibold"
-                            style={{ color: NAVY, borderColor: "#e5e7eb" }}
-                            onClick={async (e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              const url = `${window.location.origin}/q/${r.id}`;
-                              const ok = await doShare(url, r.title || "Quandr3");
-                              if (!ok) alert("Couldn’t share/copy link on this device.");
-                              else alert("Link copied / shared.");
-                            }}
-                          >
-                            Share
-                          </button>
+                      {/* discussion rule hint */}
+                      {canShowDiscussionHint(r) ? (
+                        <span className="text-slate-500">Discussion available after resolve (voters only to post)</span>
+                      ) : (
+                        <span className="text-slate-500">Discussion after resolve</span>
+                      )}
+                    </div>
 
-                          <button
-                            className="rounded-full px-3 py-1 border text-xs font-semibold"
-                            style={{ color: CORAL, borderColor: "#fde2e2" }}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              const url = `${window.location.origin}/q/${r.id}`;
-                              // Basic “report” placeholder. We’ll wire this to quandr3_reports next.
-                              window.location.href =
-                                `mailto:support@quandr3.com?subject=Report%20Quandr3&body=` +
-                                encodeURIComponent(`I want to report this Quandr3:\n\n${url}\n\nReason:\n`);
-                            }}
-                          >
-                            Report
-                          </button>
-                        </div>
-                      </div>
+                    {/* Actions */}
+                    <div className="mt-5 flex items-center justify-between gap-3">
+                      <Link
+                        href={`/q/${r.id}`}
+                        className="rounded-full px-5 py-3 font-semibold text-white"
+                        style={{ background: NAVY }}
+                      >
+                        View Quandr3
+                      </Link>
 
-                      <div className="mt-3">
-                        <Link
-                          href={`/q/${r.id}`}
-                          className="inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold text-white"
-                          style={{ background: NAVY }}
-                        >
-                          View Quandr3
-                        </Link>
+                      <div className="flex items-center gap-3">
+                        <button className="rounded-full px-5 py-3 border font-semibold" style={{ color: NAVY }}>
+                          Share
+                        </button>
+                        <button className="rounded-full px-5 py-3 border font-semibold text-red-500">
+                          Report
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -384,11 +367,11 @@ export default function ExploreInner({
               );
             })}
 
-            {!loading && !err && (!rows || rows.length === 0) ? (
-              <div className="rounded-3xl border bg-white p-6 text-slate-600">
-                No results yet. Try changing filters or create the first Quandr3 for this category.
+            {!loading && !err && (!rows || rows.length === 0) && (
+              <div className="rounded-3xl bg-white border p-6 text-slate-600">
+                No results yet.
               </div>
-            ) : null}
+            )}
           </div>
         </div>
       </div>
