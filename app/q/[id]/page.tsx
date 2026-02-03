@@ -51,6 +51,8 @@ export default function Quandr3DetailPage() {
     return Array.isArray(raw) ? raw[0] : raw;
   }, [params]);
 
+  const isDevOnly = useMemo(() => process.env.NODE_ENV !== "production", []);
+
   const [user, setUser] = useState<any>(null);
   const [q, setQ] = useState<any>(null);
   const [options, setOptions] = useState<any[]>([]);
@@ -511,9 +513,24 @@ export default function Quandr3DetailPage() {
   return (
     <div style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
       {/* Top Bar */}
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <Link href="/explore">Browse Quandr3s</Link>
-        <Link href="/q/create">Create Quandr3</Link>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ display: "flex", gap: 12 }}>
+          <Link href="/explore">Browse Quandr3s</Link>
+          <Link href="/q/create">Create Quandr3</Link>
+        </div>
+
+        {/* ✅ DEV-only shortcuts */}
+        {isDevOnly && id ? (
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <span style={{ fontSize: 12, color: "#666" }}>DEV:</span>
+            <Link href={`/q/${id}/resolve?dev=1`} style={{ fontSize: 12 }}>
+              Resolve Preview
+            </Link>
+            <Link href={`/q/${id}/results?dev=1`} style={{ fontSize: 12 }}>
+              Results Preview
+            </Link>
+          </div>
+        ) : null}
       </div>
 
       {/* Header */}
