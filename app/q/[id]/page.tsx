@@ -38,6 +38,12 @@ function hoursLeft(createdAt: string, duration: number) {
   return Math.max(0, Math.ceil(diff / 3600000));
 }
 
+function safeStr(v: any) {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v.trim();
+  return String(v);
+}
+
 function cleanReason(s?: string) {
   if (!s) return "";
   const t = String(s).trim();
@@ -46,20 +52,39 @@ function cleanReason(s?: string) {
   return t;
 }
 
-function safeStr(v: any) {
-  if (v === null || v === undefined) return "";
-  if (typeof v === "string") return v.trim();
-  return String(v);
-}
-
 function pillStyle(kind: "open" | "awaiting_user" | "resolved") {
   if (kind === "open") {
     return { bg: "rgba(30,99,243,0.12)", fg: BLUE, label: "Open" };
   }
   if (kind === "awaiting_user") {
-    return { bg: "rgba(255,107,107,0.12)", fg: CORAL, label: "Closed (Awaiting Curioso)" };
+    return {
+      bg: "rgba(255,107,107,0.12)",
+      fg: CORAL,
+      label: "Closed (Awaiting Curioso)",
+    };
   }
   return { bg: "rgba(0,169,165,0.12)", fg: TEAL, label: "Resolved" };
+}
+
+function categoryFallback(category?: string) {
+  const c = (category || "").toLowerCase();
+  if (c.includes("career")) return "/quandr3/placeholders/career.jpg";
+  if (c.includes("money") || c.includes("finance")) return "/quandr3/placeholders/money.jpg";
+  if (c.includes("love") || c.includes("relationship")) return "/quandr3/placeholders/relationships.jpg";
+  if (c.includes("health") || c.includes("fitness")) return "/quandr3/placeholders/lifestyle.jpg";
+  if (c.includes("tech")) return "/quandr3/placeholders/tech.jpg";
+  if (c.includes("travel")) return "/quandr3/placeholders/travel.jpg";
+  return "/quandr3/placeholders/default.jpg";
+}
+
+function getOptImage(opt: any, qCategory?: string) {
+  return (
+    opt?.image_url ||
+    opt?.media_url ||
+    opt?.photo_url ||
+    opt?.img_url ||
+    categoryFallback(qCategory)
+  );
 }
 
 /* =========================
@@ -86,21 +111,15 @@ export default function Quandr3DetailPage() {
   const [loading, setLoading] = useState(true);
 
   // Vote reasons
-  const [reasonsByVoteId, setReasonsByVoteId] = useState<Record<string, string>>(
-    {}
-  );
-  const [reasonDraftByVoteId, setReasonDraftByVoteId] = useState<
-    Record<string, string>
-  >({});
+  const [reasonsByVoteId, setReasonsByVoteId] = useState<Record<string, string>>({});
+  const [reasonDraftByVoteId, setReasonDraftByVoteId] = useState<Record<string, string>>({});
   const [savingReason, setSavingReason] = useState(false);
 
   // Discussion
   const [comments, setComments] = useState<any[]>([]);
   const [commentDraft, setCommentDraft] = useState("");
   const [postingComment, setPostingComment] = useState(false);
-  const [commentProfilesById, setCommentProfilesById] = useState<Record<string, any>>(
-    {}
-  );
+  const [commentProfilesById, setCommentProfilesById] = useState<Record<string, any>>({});
 
   // Curioso toggles
   const [togglingDiscussion, setTogglingDiscussion] = useState(false);
@@ -120,11 +139,7 @@ export default function Quandr3DetailPage() {
   ========================= */
 
   async function refreshVotesAndReasons(qid: string) {
-    const { data: v } = await supabase
-      .from("quandr3_votes")
-      .select("*")
-      .eq("quandr3_id", qid);
-
+    const { data: v } = await supabase.from("quandr3_votes").select("*").eq("quandr3_id", qid);
     const vRows = v ?? [];
     setVotes(vRows);
 
@@ -179,12 +194,7 @@ export default function Quandr3DetailPage() {
   }
 
   async function refreshCore(qid: string) {
-    const { data: qRow } = await supabase
-      .from("quandr3s")
-      .select("*")
-      .eq("id", qid)
-      .single();
-
+    const { data: qRow } = await supabase.from("quandr3s").select("*").eq("id", qid).single();
     setQ(qRow ?? null);
 
     if (qRow?.author_id) {
@@ -232,8 +242,7 @@ export default function Quandr3DetailPage() {
 
     const votingEnded = timeExpired || voteCapReached || !!r;
 
-    const didVote =
-      !!user?.id && vRows.some((x: any) => x.user_id === user.id);
+    const didVote = !!user?.id && vRows.some((x: any) => x.user_id === user.id);
 
     if (qRow?.discussion_open && votingEnded && didVote) {
       await refreshComments(qid);
@@ -246,7 +255,6 @@ export default function Quandr3DetailPage() {
 
   useEffect(() => {
     if (!id) return;
-
     (async () => {
       setLoading(true);
       await refreshCore(id);
@@ -292,8 +300,7 @@ export default function Quandr3DetailPage() {
         ? Date.now() > new Date(createdAt).getTime() + duration * 3600 * 1000
         : false;
 
-    const voteCapReached =
-      q.voting_max_votes ? totalVotes >= Number(q.voting_max_votes) : false;
+    const voteCapReached = q.voting_max_votes ? totalVotes >= Number(q.voting_max_votes) : false;
 
     return timeExpired || voteCapReached;
   }, [q, totalVotes]);
@@ -358,6 +365,21 @@ export default function Quandr3DetailPage() {
 
   const statusPill = useMemo(() => pillStyle(status as any), [status]);
 
+  const heroImg = useMemo(() => {
+    return q?.media_url || categoryFallback(q?.category);
+  }, [q]);
+
+  const discussionBadge = useMemo(() => {
+    // Never show "Open" while voting is open — even if the DB flag is true.
+    if (status === "open") {
+      return { label: "Discussion: Locked", bg: "rgba(148,163,184,0.18)", fg: "rgb(100 116 139)" };
+    }
+    if (!!q?.discussion_open) {
+      return { label: "Discussion: Open", bg: "rgba(0,169,165,0.12)", fg: TEAL };
+    }
+    return { label: "Discussion: Closed", bg: "rgba(148,163,184,0.18)", fg: "rgb(100 116 139)" };
+  }, [status, q]);
+
   /* =========================
      Actions
   ========================= */
@@ -417,13 +439,7 @@ export default function Quandr3DetailPage() {
 
     const { error } = await supabase
       .from("vote_reasons")
-      .upsert(
-        {
-          vote_id: myVote.id,
-          reason: draft,
-        },
-        { onConflict: "vote_id" }
-      );
+      .upsert({ vote_id: myVote.id, reason: draft }, { onConflict: "vote_id" });
 
     setSavingReason(false);
 
@@ -442,7 +458,6 @@ export default function Quandr3DetailPage() {
       router.push(`/login?next=/q/${id}`);
       return;
     }
-
     if (!canShowDiscussion) return;
 
     const body = commentDraft.trim();
@@ -497,10 +512,7 @@ export default function Quandr3DetailPage() {
 
     setTogglingDiscussion(true);
 
-    const { error } = await supabase
-      .from("quandr3s")
-      .update({ discussion_open: nextOpen })
-      .eq("id", id);
+    const { error } = await supabase.from("quandr3s").update({ discussion_open: nextOpen }).eq("id", id);
 
     setTogglingDiscussion(false);
 
@@ -522,14 +534,12 @@ export default function Quandr3DetailPage() {
   if (loading) {
     return (
       <main className="min-h-screen" style={{ background: SOFT_BG }}>
-        <div className="mx-auto max-w-5xl px-4 py-10">
-          <div className="rounded-2xl border bg-white p-6 shadow-sm">
+        <div className="mx-auto max-w-6xl px-4 py-10">
+          <div className="rounded-3xl border bg-white p-6 shadow-sm">
             <div className="text-sm font-semibold" style={{ color: NAVY }}>
               Loading Quandr3…
             </div>
-            <div className="mt-2 text-sm text-slate-600">
-              Pulling the question, options, and current votes.
-            </div>
+            <div className="mt-2 text-sm text-slate-600">Pulling the question, options, and current votes.</div>
           </div>
         </div>
       </main>
@@ -539,14 +549,12 @@ export default function Quandr3DetailPage() {
   if (!q) {
     return (
       <main className="min-h-screen" style={{ background: SOFT_BG }}>
-        <div className="mx-auto max-w-5xl px-4 py-10">
-          <div className="rounded-2xl border bg-white p-6 shadow-sm">
+        <div className="mx-auto max-w-6xl px-4 py-10">
+          <div className="rounded-3xl border bg-white p-6 shadow-sm">
             <div className="text-sm font-semibold" style={{ color: NAVY }}>
               Not found
             </div>
-            <div className="mt-2 text-sm text-slate-600">
-              That Quandr3 ID doesn’t exist (or RLS is blocking it).
-            </div>
+            <div className="mt-2 text-sm text-slate-600">That Quandr3 ID doesn’t exist (or RLS is blocking it).</div>
             <div className="mt-4">
               <Link
                 href="/explore"
@@ -568,15 +576,11 @@ export default function Quandr3DetailPage() {
 
   return (
     <main className="min-h-screen" style={{ background: SOFT_BG }}>
-      {/* Top header (simple, clean) */}
+      {/* Top header */}
       <header className="border-b bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
           <Link href="/explore" className="flex items-center gap-3">
-            <div
-              className="flex h-9 w-9 items-center justify-center rounded-xl border"
-              style={{ borderColor: "rgba(15,23,42,0.12)" }}
-              title="Quandr3"
-            >
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl border" style={{ borderColor: "rgba(15,23,42,0.12)" }}>
               <span className="text-lg" style={{ color: NAVY }}>
                 ?
               </span>
@@ -585,9 +589,7 @@ export default function Quandr3DetailPage() {
               <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                 Quandr3
               </div>
-              <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">
-                ASK. SHARE. DECIDE.
-              </div>
+              <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">ASK. SHARE. DECIDE.</div>
             </div>
           </Link>
 
@@ -617,11 +619,7 @@ export default function Quandr3DetailPage() {
                 >
                   Log in
                 </Link>
-                <Link
-                  href="/signup"
-                  className="rounded-full px-4 py-2 text-sm font-extrabold text-white"
-                  style={{ background: NAVY }}
-                >
+                <Link href="/signup" className="rounded-full px-4 py-2 text-sm font-extrabold text-white" style={{ background: NAVY }}>
                   Sign up
                 </Link>
               </>
@@ -631,198 +629,180 @@ export default function Quandr3DetailPage() {
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-8">
-        {/* HERO */}
-        <div className="grid gap-6 lg:grid-cols-[1.55fr_0.85fr]">
-          <section className="rounded-3xl border bg-white p-7 shadow-sm">
-            <div className="flex flex-wrap items-center gap-3">
-              <span
-                className="inline-flex items-center rounded-full px-3 py-1 text-xs font-extrabold"
-                style={{ background: statusPill.bg, color: statusPill.fg }}
-              >
+        {/* HERO BANNER (Explore-style) */}
+        <section className="overflow-hidden rounded-[28px] border bg-white shadow-sm">
+          <div className="relative h-[240px] w-full">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={heroImg} alt="" className="h-full w-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-r from-[#0b2343cc] via-[#0b234388] to-[#0b234320]" />
+
+            <div className="absolute left-5 top-5 flex items-center gap-3">
+              <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
+                {safeStr(q.category || "Category")}
+              </span>
+              <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: statusPill.bg, color: statusPill.fg }}>
                 {statusPill.label}
               </span>
-
-              <span className="text-xs text-slate-600">
-                {totalVotes} vote{totalVotes === 1 ? "" : "s"}
-                {status === "open" ? (
-                  <>
-                    {" "}
-                    •{" "}
-                    <span className="font-semibold" style={{ color: NAVY }}>
-                      {left}h
-                    </span>{" "}
-                    left
-                  </>
-                ) : null}
-              </span>
-
-              <span className="text-xs text-slate-400">•</span>
-
-              <span className="text-xs text-slate-600">
-                Created{" "}
-                <span className="font-semibold" style={{ color: NAVY }}>
-                  {fmt(q.created_at)}
-                </span>
-              </span>
             </div>
 
-            <h1 className="mt-4 text-3xl font-extrabold leading-tight" style={{ color: NAVY }}>
-              {q.title || "Untitled Quandr3"}
-            </h1>
-
-            <p className="mt-3 max-w-2xl text-sm text-slate-600">
-              One person decides. Everyone learns. Vote while it’s open, then see the outcome and
-              the reasons behind it.
-            </p>
-
-            {/* Reasoning */}
-            {q.reasoning ? (
-              <div className="mt-6 rounded-2xl border bg-slate-50 p-5">
-                <div className="text-xs font-semibold tracking-widest text-slate-600">
-                  WHY I ASKED THIS
-                </div>
-                <div className="mt-2 whitespace-pre-wrap text-sm text-slate-800">
-                  {q.reasoning}
-                </div>
-              </div>
-            ) : null}
-          </section>
-
-          {/* Curioso Card */}
-          <aside className="rounded-3xl border bg-white p-7 shadow-sm">
-            <div className="text-xs font-semibold tracking-widest text-slate-600">
-              CURIOSO
+            <div className="absolute right-5 top-5 flex items-center gap-2">
+              <button
+                className="rounded-full border bg-white/90 px-4 py-2 text-xs font-extrabold"
+                style={{ borderColor: "rgba(255,255,255,0.55)", color: NAVY }}
+                onClick={() => {
+                  try {
+                    navigator.clipboard.writeText(window.location.href);
+                    alert("Link copied!");
+                  } catch {
+                    alert("Could not copy link.");
+                  }
+                }}
+              >
+                Share
+              </button>
+              <button
+                className="rounded-full border bg-white/90 px-4 py-2 text-xs font-extrabold"
+                style={{ borderColor: "rgba(255,255,255,0.55)", color: CORAL }}
+                onClick={() => alert("Report flow coming next.")}
+              >
+                Report
+              </button>
             </div>
 
-            <div className="mt-4 flex items-center gap-4">
-              <div className="relative h-14 w-14 overflow-hidden rounded-2xl border bg-slate-50">
-                {profile?.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={profile.avatar_url}
-                    alt=""
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-xl font-extrabold text-slate-500">
-                    ?
-                  </div>
-                )}
-              </div>
-
-              <div className="min-w-0">
-                <div className="text-sm font-extrabold" style={{ color: NAVY }}>
-                  {profile?.display_name ?? "Unknown"}
-                </div>
-                <div className="mt-1 text-xs text-slate-600">
-                  Category:{" "}
-                  <span className="font-semibold" style={{ color: NAVY }}>
-                    {q.category ?? "—"}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-6 grid grid-cols-2 gap-3">
-              <div className="rounded-2xl border bg-slate-50 p-4">
-                <div className="text-[11px] font-semibold tracking-widest text-slate-500">
-                  VOTES
-                </div>
-                <div className="mt-1 text-2xl font-extrabold" style={{ color: NAVY }}>
-                  {totalVotes}
-                </div>
-              </div>
-              <div className="rounded-2xl border bg-slate-50 p-4">
-                <div className="text-[11px] font-semibold tracking-widest text-slate-500">
-                  STATUS
-                </div>
-                <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
-                  {status}
-                </div>
-              </div>
-            </div>
-
-            {/* Curioso-only controls */}
-            {isCurioso ? (
-              <div className="mt-5 rounded-2xl border bg-white p-4">
-                <div className="text-xs font-semibold tracking-widest text-slate-600">
-                  CURIOSO CONTROLS
-                </div>
-
-                <div className="mt-3 text-xs text-slate-600">
-                  You can open discussion <span className="font-semibold">after voting closes</span>.
-                </div>
-
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    className="rounded-xl px-3 py-2 text-xs font-extrabold text-white"
-                    style={{ background: TEAL, opacity: canToggleDiscussion ? 1 : 0.45 }}
-                    disabled={!canToggleDiscussion || togglingDiscussion}
-                    onClick={() => setDiscussionOpen(true)}
-                    title={!canToggleDiscussion ? "Available after voting ends." : ""}
-                  >
-                    {togglingDiscussion ? "Working…" : "Open Discussion"}
-                  </button>
-
-                  <button
-                    className="rounded-xl px-3 py-2 text-xs font-extrabold text-white"
-                    style={{ background: CORAL, opacity: canToggleDiscussion ? 1 : 0.45 }}
-                    disabled={!canToggleDiscussion || togglingDiscussion}
-                    onClick={() => setDiscussionOpen(false)}
-                    title={!canToggleDiscussion ? "Available after voting ends." : ""}
-                  >
-                    {togglingDiscussion ? "Working…" : "Close Discussion"}
-                  </button>
-
-                  {/* Resolve link appears once closed OR resolved (Curioso flow) */}
-                  {(status === "awaiting_user" || status === "resolved") ? (
-                    <Link
-                      href={`/q/${id}/resolve`}
-                      className="rounded-xl px-3 py-2 text-xs font-extrabold text-white"
-                      style={{ background: NAVY }}
-                      title="Curioso decision panel"
-                    >
-                      Go to Resolve
-                    </Link>
+            <div className="absolute bottom-5 left-5 right-5">
+              <div className="flex flex-wrap items-center gap-3 text-white/90">
+                <span className="text-xs font-semibold">
+                  {totalVotes} vote{totalVotes === 1 ? "" : "s"}
+                  {status === "open" ? (
+                    <>
+                      {" "}
+                      • <span className="font-extrabold text-white">{left}h</span> left
+                    </>
                   ) : null}
+                </span>
+                <span className="text-xs text-white/60">•</span>
+                <span className="text-xs font-semibold">Created {fmt(q.created_at)}</span>
+              </div>
+
+              <h1 className="mt-2 text-3xl font-extrabold leading-tight text-white">{safeStr(q.title) || "Untitled Quandr3"}</h1>
+
+              {safeStr(q.context) ? (
+                <p className="mt-2 max-w-3xl text-sm text-white/90">{safeStr(q.context)}</p>
+              ) : (
+                <p className="mt-2 max-w-3xl text-sm text-white/80">No context provided.</p>
+              )}
+            </div>
+          </div>
+
+          {/* META STRIP */}
+          <div className="grid gap-4 p-6 lg:grid-cols-[1.4fr_0.6fr]">
+            <div className="rounded-2xl border bg-slate-50 p-5">
+              <div className="text-xs font-semibold tracking-widest text-slate-600">HOW IT WORKS</div>
+              <div className="mt-2 text-sm text-slate-700">
+                Vote while it’s open. After it closes, results unlock so everyone learns. Discussion (if opened) is <b>after close</b> and <b>voters only</b>.
+              </div>
+            </div>
+
+            <div className="rounded-2xl border bg-white p-5">
+              <div className="text-xs font-semibold tracking-widest text-slate-600">CURIOSO</div>
+              <div className="mt-3 flex items-center gap-4">
+                <div className="relative h-12 w-12 overflow-hidden rounded-2xl border bg-slate-50">
+                  {profile?.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-lg font-extrabold text-slate-500">?</div>
+                  )}
                 </div>
-
-                <div className="mt-3 text-xs text-slate-600">
-                  Discussion is currently{" "}
-                  <span className="font-extrabold" style={{ color: NAVY }}>
-                    {q.discussion_open ? "OPEN" : "CLOSED"}
-                  </span>
-                  .
+                <div className="min-w-0">
+                  <div className="text-sm font-extrabold" style={{ color: NAVY }}>
+                    {profile?.display_name ?? "Unknown"}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-600">
+                    Category: <span className="font-semibold" style={{ color: NAVY }}>{q.category ?? "—"}</span>
+                  </div>
                 </div>
               </div>
-            ) : null}
 
-            {/* Results shortcut after close for everyone */}
-            {canShowResults ? (
-              <div className="mt-5">
-                <Link
-                  href={`/q/${id}/results`}
-                  className="inline-flex w-full items-center justify-center rounded-2xl px-4 py-3 text-sm font-extrabold text-white shadow-sm"
-                  style={{ background: BLUE }}
-                >
-                  View Results
-                </Link>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className="rounded-2xl border bg-slate-50 p-4">
+                  <div className="text-[11px] font-semibold tracking-widest text-slate-500">VOTES</div>
+                  <div className="mt-1 text-2xl font-extrabold" style={{ color: NAVY }}>{totalVotes}</div>
+                </div>
+                <div className="rounded-2xl border bg-slate-50 p-4">
+                  <div className="text-[11px] font-semibold tracking-widest text-slate-500">STATUS</div>
+                  <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>{status}</div>
+                </div>
               </div>
-            ) : (
-              <div className="mt-5 rounded-2xl border bg-slate-50 p-4 text-xs text-slate-600">
-                Results unlock after voting closes.
-              </div>
-            )}
-          </aside>
-        </div>
 
-        {/* OPTIONS */}
-        <section className="mt-7 rounded-3xl border bg-white p-7 shadow-sm">
+              {canShowResults ? (
+                <div className="mt-4">
+                  <Link
+                    href={`/q/${id}/results`}
+                    className="inline-flex w-full items-center justify-center rounded-2xl px-4 py-3 text-sm font-extrabold text-white shadow-sm"
+                    style={{ background: BLUE }}
+                  >
+                    View Results
+                  </Link>
+                </div>
+              ) : (
+                <div className="mt-4 rounded-2xl border bg-slate-50 p-4 text-xs text-slate-600">Results unlock after voting closes.</div>
+              )}
+
+              {isCurioso ? (
+                <div className="mt-4 rounded-2xl border bg-white p-4">
+                  <div className="text-xs font-semibold tracking-widest text-slate-600">CURIOSO CONTROLS</div>
+                  <div className="mt-2 text-xs text-slate-600">
+                    You can open discussion <b>after voting ends</b>.
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      className="rounded-xl px-3 py-2 text-xs font-extrabold text-white"
+                      style={{ background: TEAL, opacity: canToggleDiscussion ? 1 : 0.45 }}
+                      disabled={!canToggleDiscussion || togglingDiscussion}
+                      onClick={() => setDiscussionOpen(true)}
+                      title={!canToggleDiscussion ? "Available after voting ends." : ""}
+                    >
+                      {togglingDiscussion ? "Working…" : "Open Discussion"}
+                    </button>
+
+                    <button
+                      className="rounded-xl px-3 py-2 text-xs font-extrabold text-white"
+                      style={{ background: CORAL, opacity: canToggleDiscussion ? 1 : 0.45 }}
+                      disabled={!canToggleDiscussion || togglingDiscussion}
+                      onClick={() => setDiscussionOpen(false)}
+                      title={!canToggleDiscussion ? "Available after voting ends." : ""}
+                    >
+                      {togglingDiscussion ? "Working…" : "Close Discussion"}
+                    </button>
+
+                    {(status === "awaiting_user" || status === "resolved") ? (
+                      <Link
+                        href={`/q/${id}/resolve`}
+                        className="rounded-xl px-3 py-2 text-xs font-extrabold text-white"
+                        style={{ background: NAVY }}
+                        title="Curioso decision panel"
+                      >
+                        Go to Resolve
+                      </Link>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-3 text-xs text-slate-600">
+                    Discussion flag is <b style={{ color: NAVY }}>{q?.discussion_open ? "ON" : "OFF"}</b> (but it’s still locked until close).
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </section>
+
+        {/* OPTIONS (image tiles) */}
+        <section className="mt-7 rounded-[28px] border bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <div className="text-xs font-semibold tracking-widest text-slate-600">
-                OPTIONS
-              </div>
+              <div className="text-xs font-semibold tracking-widest text-slate-600">OPTIONS</div>
               <div className="mt-1 text-xl font-extrabold" style={{ color: NAVY }}>
                 {status === "open" ? "Pick your answer" : "See how it played out"}
               </div>
@@ -840,175 +820,148 @@ export default function Quandr3DetailPage() {
             ) : null}
           </div>
 
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            {(options?.length ? options : []).map((opt: any, i: number) => {
-              const count = voteCounts[opt.order] || 0;
-              const pct = totalVotes ? Math.round((count / totalVotes) * 100) : 0;
-
-              const isWinner = opt.order === winningOrder;
-              const optReasons = reasonsByChoiceIndex[opt.order] ?? [];
-              const isMyPicked = myVote?.choice_index === opt.order;
-
-              const showReasonBox = !!myVote?.id && isMyPicked && canEditReason;
-              const voteIdForMyVote = myVote?.id;
-
-              const reasonDraft =
-                voteIdForMyVote != null
-                  ? (reasonDraftByVoteId[voteIdForMyVote] ?? myReason ?? "")
-                  : "";
-
-              return (
-                <div
-                  key={opt.id}
-                  className="rounded-3xl border p-5 shadow-sm"
-                  style={{
-                    borderColor: isWinner ? "rgba(0,169,165,0.55)" : "rgba(15,23,42,0.12)",
-                    background: isWinner ? "rgba(0,169,165,0.05)" : "white",
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex min-w-0 items-start gap-3">
-                      <div
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-sm font-extrabold text-white"
-                        style={{ background: isWinner ? TEAL : NAVY }}
-                        title="Option"
-                      >
-                        {LETTER[opt.order - 1] ?? String.fromCharCode(65 + i)}
-                      </div>
-
-                      <div className="min-w-0">
-                        <div className="text-base font-extrabold leading-snug" style={{ color: NAVY }}>
-                          {safeStr(opt.label) || `Option ${LETTER[opt.order - 1] ?? "?"}`}
-                        </div>
-
-                        {status !== "open" ? (
-                          <div className="mt-1 text-xs text-slate-600">
-                            {count} vote{count === 1 ? "" : "s"} • {pct}%
-                            {isWinner ? (
-                              <span className="ml-2 font-extrabold" style={{ color: TEAL }}>
-                                • Winning path
-                              </span>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <div className="mt-1 text-xs text-slate-600">
-                            Choose and (optionally) add your reason.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Right side: image / vote button */}
-                    <div className="flex shrink-0 flex-col items-end gap-2">
-                      <div className="h-16 w-16 overflow-hidden rounded-2xl border bg-slate-50">
-                        {opt.image_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={opt.image_url}
-                            alt=""
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-slate-400">
-                            image
-                          </div>
-                        )}
-                      </div>
-
-                      {status === "open" ? (
-                        <button
-                          onClick={() => vote(opt.order)}
-                          className="rounded-xl px-4 py-2 text-xs font-extrabold text-white shadow-sm"
-                          style={{ background: BLUE }}
-                        >
-                          Vote
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {/* Progress bar after close */}
-                  {status !== "open" ? (
-                    <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${pct}%`,
-                          background: isWinner ? TEAL : BLUE,
-                        }}
-                      />
-                    </div>
-                  ) : null}
-
-                  {/* Reasons list (only after close) */}
-                  {optReasons.length > 0 && canShowResults ? (
-                    <div className="mt-4 rounded-2xl border bg-white p-4">
-                      <div className="text-xs font-semibold tracking-widest text-slate-600">
-                        WHY PEOPLE CHOSE THIS
-                      </div>
-                      <ul className="mt-2 list-disc space-y-2 pl-5 text-sm text-slate-800">
-                        {optReasons.slice(0, 5).map((txt: string, idx: number) => (
-                          <li key={`${opt.id}-r-${idx}`} className="leading-snug">
-                            {txt}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-
-                  {/* My reason editor (only while open, only for my pick) */}
-                  {showReasonBox ? (
-                    <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
-                      <div className="text-xs font-semibold tracking-widest text-slate-600">
-                        {myReason ? "EDIT YOUR REASON" : "WHY DID YOU CHOOSE THIS?"}
-                      </div>
-
-                      <textarea
-                        value={reasonDraft}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setReasonDraftByVoteId((prev: any) => ({
-                            ...prev,
-                            [voteIdForMyVote]: val,
-                          }));
-                        }}
-                        rows={3}
-                        className="mt-2 w-full rounded-xl border bg-white p-3 text-sm outline-none focus:ring-2"
-                        style={{ borderColor: "rgba(15,23,42,0.12)" }}
-                        placeholder="Write a short reason (1–2 sentences is perfect)."
-                      />
-
-                      <div className="mt-2">
-                        <button
-                          onClick={saveMyReason}
-                          disabled={savingReason}
-                          className="rounded-xl px-4 py-2 text-xs font-extrabold text-white shadow-sm"
-                          style={{ background: NAVY, opacity: savingReason ? 0.7 : 1 }}
-                        >
-                          {savingReason ? "Saving…" : "Save reason"}
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* If no options */}
           {!options?.length ? (
             <div className="mt-6 rounded-2xl border bg-slate-50 p-4 text-sm text-slate-600">
               No options found for this Quandr3 yet.
             </div>
-          ) : null}
+          ) : (
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              {options.map((opt: any, i: number) => {
+                const count = voteCounts[opt.order] || 0;
+                const pct = totalVotes ? Math.round((count / totalVotes) * 100) : 0;
+
+                const isWinner = opt.order === winningOrder;
+                const optReasons = reasonsByChoiceIndex[opt.order] ?? [];
+                const isMyPicked = myVote?.choice_index === opt.order;
+
+                const showReasonBox = !!myVote?.id && isMyPicked && canEditReason;
+                const voteIdForMyVote = myVote?.id;
+
+                const reasonDraft =
+                  voteIdForMyVote != null ? reasonDraftByVoteId[voteIdForMyVote] ?? myReason ?? "" : "";
+
+                const img = getOptImage(opt, q?.category);
+
+                return (
+                  <div
+                    key={opt.id}
+                    className="overflow-hidden rounded-[26px] border shadow-sm"
+                    style={{
+                      borderColor: isWinner ? "rgba(0,169,165,0.55)" : "rgba(15,23,42,0.12)",
+                      background: "white",
+                    }}
+                  >
+                    <div className="relative h-[170px] w-full">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={img} alt="" className="h-full w-full object-cover" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#0b2343cc] via-[#0b234355] to-transparent" />
+
+                      <div className="absolute left-4 top-4 flex items-center gap-2">
+                        <span
+                          className="flex h-10 w-10 items-center justify-center rounded-2xl text-sm font-extrabold text-white"
+                          style={{ background: isWinner ? TEAL : NAVY }}
+                        >
+                          {LETTER[opt.order - 1] ?? String.fromCharCode(65 + i)}
+                        </span>
+                        {isWinner && status !== "open" ? (
+                          <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold" style={{ color: TEAL }}>
+                            Winning path
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="absolute bottom-4 left-4 right-4">
+                        <div className="text-lg font-extrabold text-white">{safeStr(opt.label) || `Option ${LETTER[opt.order - 1] ?? "?"}`}</div>
+
+                        {status !== "open" ? (
+                          <div className="mt-1 text-xs text-white/90">
+                            {count} vote{count === 1 ? "" : "s"} • {pct}%
+                          </div>
+                        ) : (
+                          <div className="mt-1 text-xs text-white/80">Choose and (optionally) add your reason.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="p-5">
+                      {status === "open" ? (
+                        <button
+                          onClick={() => vote(opt.order)}
+                          className="w-full rounded-2xl px-4 py-3 text-sm font-extrabold text-white shadow-sm"
+                          style={{ background: BLUE }}
+                        >
+                          Vote
+                        </button>
+                      ) : (
+                        <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${pct}%`,
+                              background: isWinner ? TEAL : BLUE,
+                            }}
+                          />
+                        </div>
+                      )}
+
+                      {optReasons.length > 0 && canShowResults ? (
+                        <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
+                          <div className="text-xs font-semibold tracking-widest text-slate-600">WHY PEOPLE CHOSE THIS</div>
+                          <ul className="mt-2 list-disc space-y-2 pl-5 text-sm text-slate-800">
+                            {optReasons.slice(0, 5).map((txt: string, idx: number) => (
+                              <li key={`${opt.id}-r-${idx}`} className="leading-snug">
+                                {txt}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {showReasonBox ? (
+                        <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
+                          <div className="text-xs font-semibold tracking-widest text-slate-600">
+                            {myReason ? "EDIT YOUR REASON" : "WHY DID YOU CHOOSE THIS?"}
+                          </div>
+
+                          <textarea
+                            value={reasonDraft}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setReasonDraftByVoteId((prev: any) => ({
+                                ...prev,
+                                [voteIdForMyVote]: val,
+                              }));
+                            }}
+                            rows={3}
+                            className="mt-2 w-full rounded-xl border bg-white p-3 text-sm outline-none focus:ring-2"
+                            style={{ borderColor: "rgba(15,23,42,0.12)" }}
+                            placeholder="Write a short reason (1–2 sentences is perfect)."
+                          />
+
+                          <div className="mt-2">
+                            <button
+                              onClick={saveMyReason}
+                              disabled={savingReason}
+                              className="rounded-xl px-4 py-2 text-xs font-extrabold text-white shadow-sm"
+                              style={{ background: NAVY, opacity: savingReason ? 0.7 : 1 }}
+                            >
+                              {savingReason ? "Saving…" : "Save reason"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
 
-        {/* Resolution (if exists) */}
+        {/* RESOLUTION */}
         {resolution ? (
-          <section className="mt-7 rounded-3xl border bg-white p-7 shadow-sm">
-            <div className="text-xs font-semibold tracking-widest text-slate-600">
-              RESOLUTION
-            </div>
+          <section className="mt-7 rounded-[28px] border bg-white p-6 shadow-sm">
+            <div className="text-xs font-semibold tracking-widest text-slate-600">RESOLUTION</div>
             <div className="mt-1 text-xl font-extrabold" style={{ color: NAVY }}>
               The Curioso decided
             </div>
@@ -1024,56 +977,38 @@ export default function Quandr3DetailPage() {
           </section>
         ) : null}
 
-        {/* DISCUSSION */}
-        <section className="mt-7 rounded-3xl border bg-white p-7 shadow-sm">
+        {/* DISCUSSION (visually cohesive + locked while open) */}
+        <section className="mt-7 rounded-[28px] border bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-xs font-semibold tracking-widest text-slate-600">
-                DISCUSSION
-              </div>
+              <div className="text-xs font-semibold tracking-widest text-slate-600">DISCUSSION</div>
               <div className="mt-1 text-xl font-extrabold" style={{ color: NAVY }}>
                 Deliberate after the close (voters only)
               </div>
               <div className="mt-1 text-sm text-slate-600">
-                Discussion is optional and can be opened by the Curioso after voting ends.
+                Discussion is optional. If opened, only voters can post. Everyone else can learn from the results.
               </div>
             </div>
 
-            <div
-              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-extrabold"
-              style={{
-                background: q?.discussion_open ? "rgba(0,169,165,0.12)" : "rgba(148,163,184,0.18)",
-                color: q?.discussion_open ? TEAL : "rgb(100 116 139)",
-              }}
-            >
-              {q?.discussion_open ? "Discussion: Open" : "Discussion: Closed"}
+            <div className="inline-flex items-center rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: discussionBadge.bg, color: discussionBadge.fg }}>
+              {discussionBadge.label}
             </div>
           </div>
 
-          {/* Gate messages */}
           {status === "open" ? (
             <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
-              Discussion opens after voting closes.
+              Discussion is locked while voting is open.
             </div>
           ) : !q.discussion_open ? (
-            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
-              Discussion is closed.
-            </div>
+            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Discussion is closed.</div>
           ) : !user ? (
-            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
-              Log in to see if you’re invited to the discussion.
-            </div>
+            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Log in to see if you’re invited to the discussion.</div>
           ) : !didVote ? (
-            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
-              Discussion is for voters only on this Quandr3.
-            </div>
+            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Discussion is for voters only on this Quandr3.</div>
           ) : (
             <>
-              {/* Add comment */}
               <div className="mt-5 rounded-3xl border bg-slate-50 p-5">
-                <div className="text-xs font-semibold tracking-widest text-slate-600">
-                  ADD YOUR TAKE
-                </div>
+                <div className="text-xs font-semibold tracking-widest text-slate-600">ADD YOUR TAKE</div>
 
                 <textarea
                   value={commentDraft}
@@ -1089,7 +1024,7 @@ export default function Quandr3DetailPage() {
                   <button
                     onClick={postComment}
                     disabled={postingComment}
-                    className="rounded-xl px-4 py-2 text-xs font-extrabold text-white shadow-sm"
+                    className="rounded-2xl px-5 py-3 text-sm font-extrabold text-white shadow-sm"
                     style={{ background: BLUE, opacity: postingComment ? 0.7 : 1 }}
                   >
                     {postingComment ? "Posting…" : "Post comment"}
@@ -1097,12 +1032,9 @@ export default function Quandr3DetailPage() {
                 </div>
               </div>
 
-              {/* Comments */}
               <div className="mt-5 space-y-3">
                 {comments.length === 0 ? (
-                  <div className="rounded-2xl border bg-white p-5 text-sm text-slate-600">
-                    No comments yet.
-                  </div>
+                  <div className="rounded-2xl border bg-white p-5 text-sm text-slate-600">No comments yet.</div>
                 ) : (
                   comments.map((c: any) => {
                     const p = commentProfilesById[c.user_id];
@@ -1115,15 +1047,9 @@ export default function Quandr3DetailPage() {
                             <div className="h-10 w-10 overflow-hidden rounded-2xl border bg-slate-50">
                               {p?.avatar_url ? (
                                 // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={p.avatar_url}
-                                  alt=""
-                                  className="h-full w-full object-cover"
-                                />
+                                <img src={p.avatar_url} alt="" className="h-full w-full object-cover" />
                               ) : (
-                                <div className="flex h-full w-full items-center justify-center text-xs font-extrabold text-slate-500">
-                                  ?
-                                </div>
+                                <div className="flex h-full w-full items-center justify-center text-xs font-extrabold text-slate-500">?</div>
                               )}
                             </div>
 
@@ -1131,9 +1057,7 @@ export default function Quandr3DetailPage() {
                               <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                                 {p?.display_name ?? "Member"}
                               </div>
-                              <div className="mt-0.5 text-xs text-slate-500">
-                                {fmt(c.created_at)}
-                              </div>
+                              <div className="mt-0.5 text-xs text-slate-500">{fmt(c.created_at)}</div>
                             </div>
                           </div>
 
@@ -1148,9 +1072,7 @@ export default function Quandr3DetailPage() {
                           ) : null}
                         </div>
 
-                        <div className="mt-3 whitespace-pre-wrap text-sm text-slate-800">
-                          {c.body}
-                        </div>
+                        <div className="mt-3 whitespace-pre-wrap text-sm text-slate-800">{c.body}</div>
                       </div>
                     );
                   })
@@ -1160,9 +1082,7 @@ export default function Quandr3DetailPage() {
           )}
         </section>
 
-        <div className="mt-10 pb-8 text-center text-xs text-slate-500">
-          Quandr3 • Ask • Share • Decide
-        </div>
+        <div className="mt-10 pb-8 text-center text-xs text-slate-500">Quandr3 • Ask • Share • Decide</div>
       </div>
     </main>
   );
