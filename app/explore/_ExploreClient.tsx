@@ -12,7 +12,7 @@ export default function ExploreClient() {
 
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | "open" | "awaiting_user" | "resolved">("all");
-  const [sort, setSort] = useState<"new" | "old">("new");
+  const [sort, setSort] = useState<"new" | "closing">("new");
 
   useEffect(() => {
     let alive = true;
@@ -23,16 +23,26 @@ export default function ExploreClient() {
 
       const { data, error } = await supabase
         .from("quandr3s")
-        .select(
-          "id,title,question,status,created_at,created_by,voting_duration_hours,voting_max_votes,discussion_open"
-        )
-        .order("created_at", { ascending: false })
-        .limit(200);
+        .select(`
+          id,
+          title,
+          context,
+          category,
+          status,
+          city,
+          state,
+          hero_image_url,
+          created_at,
+          closes_at,
+          voting_duration_hours,
+          discussion_open
+        `)
+        .order("created_at", { ascending: false });
 
       if (!alive) return;
 
       if (error) {
-        setErr(error.message || "Failed to load Explore.");
+        setErr(error.message);
         setRows([]);
       } else {
         setRows(data || []);
@@ -42,7 +52,6 @@ export default function ExploreClient() {
     }
 
     load();
-
     return () => {
       alive = false;
     };
@@ -58,17 +67,20 @@ export default function ExploreClient() {
     const needle = q.trim().toLowerCase();
     if (needle) {
       list = list.filter((r) => {
-        const t = (r.title || "").toLowerCase();
-        const qu = (r.question || "").toLowerCase();
-        return t.includes(needle) || qu.includes(needle) || String(r.id).includes(needle);
+        return (
+          (r.title || "").toLowerCase().includes(needle) ||
+          (r.context || "").toLowerCase().includes(needle) ||
+          (r.city || "").toLowerCase().includes(needle) ||
+          (r.state || "").toLowerCase().includes(needle)
+        );
       });
     }
 
-    list.sort((a, b) => {
-      const ta = new Date(a.created_at).getTime();
-      const tb = new Date(b.created_at).getTime();
-      return sort === "new" ? tb - ta : ta - tb;
-    });
+    if (sort === "closing") {
+      list.sort((a, b) => new Date(a.closes_at).getTime() - new Date(b.closes_at).getTime());
+    } else {
+      list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
 
     return list;
   }, [rows, q, status, sort]);

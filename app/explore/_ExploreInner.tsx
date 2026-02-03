@@ -1,230 +1,124 @@
 // @ts-nocheck
 
 import Link from "next/link";
-import { useMemo } from "react";
 
 const NAVY = "#0b2343";
-const BLUE = "#1e63f3";
 const TEAL = "#00a9a5";
 const CORAL = "#ff6b6b";
+const BLUE = "#1e63f3";
 const SOFT_BG = "#f5f7fc";
 
 function fmt(ts?: string) {
-  if (!ts) return "";
-  try {
-    return new Date(ts).toLocaleString();
-  } catch {
-    return ts || "";
-  }
+  return ts ? new Date(ts).toLocaleDateString() : "";
 }
 
-function hoursLeft(createdAt: string, durationHours: number) {
-  const end = new Date(createdAt).getTime() + durationHours * 3600 * 1000;
-  const diff = end - Date.now();
-  return Math.max(0, Math.ceil(diff / 3600000));
+function hoursLeft(closesAt: string) {
+  const diff = new Date(closesAt).getTime() - Date.now();
+  return Math.max(0, Math.ceil(diff / 36e5));
 }
 
-function pillColor(status: string) {
-  if (status === "open")
-    return { bg: "rgba(0,169,165,0.12)", fg: TEAL, bd: "rgba(0,169,165,0.35)", label: "Open" };
-  if (status === "awaiting_user")
-    return { bg: "rgba(255,107,107,0.12)", fg: CORAL, bd: "rgba(255,107,107,0.35)", label: "Internet Decided" };
-  return { bg: "rgba(30,99,243,0.10)", fg: BLUE, bd: "rgba(30,99,243,0.25)", label: "Resolved" };
+function statusPill(status: string) {
+  if (status === "open") return { label: "Open", color: TEAL };
+  if (status === "awaiting_user") return { label: "Internet Decided", color: CORAL };
+  return { label: "Resolved", color: BLUE };
 }
 
-export default function ExploreInner(props: any) {
-  const { loading, err, rows, q, setQ, status, setStatus, sort, setSort } = props;
-
-  const countText = useMemo(() => {
-    if (loading) return "";
-    return `${rows?.length || 0} result${(rows?.length || 0) === 1 ? "" : "s"}`;
-  }, [loading, rows]);
-
+export default function ExploreInner({
+  loading,
+  err,
+  rows,
+  q,
+  setQ,
+  status,
+  setStatus,
+  sort,
+  setSort,
+}: any) {
   return (
     <div style={{ minHeight: "100vh", background: SOFT_BG }}>
       <div className="mx-auto max-w-6xl px-4 py-8">
+
         {/* Header */}
-        <div
-          className="rounded-3xl border shadow-sm p-6"
-          style={{ background: "white", borderColor: "rgba(11,35,67,0.10)" }}
-        >
-          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-            <div>
-              <div className="text-sm" style={{ color: NAVY, opacity: 0.7 }}>
-                QUANDR3
-              </div>
-              <h1 className="text-2xl md:text-3xl font-semibold" style={{ color: NAVY }}>
-                Explore
-              </h1>
-              <p className="mt-1 text-sm md:text-base" style={{ color: NAVY, opacity: 0.75 }}>
-                Browse open decisions, “Internet Decided” posts awaiting the Curioso, and resolved outcomes.
-              </p>
-              <div className="mt-2 text-xs" style={{ color: NAVY, opacity: 0.6 }}>
-                {countText}
-              </div>
-            </div>
+        <div className="rounded-3xl bg-white border p-6">
+          <h1 className="text-3xl font-semibold" style={{ color: NAVY }}>
+            Explore
+          </h1>
+          <p className="mt-1 text-sm text-slate-600">
+            Open decisions, Internet-Decided Quandr3s, and resolved outcomes.
+          </p>
 
-            <div className="flex gap-2">
-              <Link
-                href="/q/create"
-                className="px-4 py-2 rounded-xl font-medium border"
-                style={{ background: NAVY, borderColor: NAVY, color: "white" }}
-              >
-                Create a Quandr3
-              </Link>
-              <Link
-                href="/"
-                className="px-4 py-2 rounded-xl font-medium border"
-                style={{ background: "white", borderColor: "rgba(11,35,67,0.20)", color: NAVY }}
-              >
-                Home
-              </Link>
-            </div>
-          </div>
-
-          {/* Controls */}
           <div className="mt-5 grid grid-cols-1 md:grid-cols-12 gap-3">
-            <div className="md:col-span-7">
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search by title, question, or id…"
-                className="w-full rounded-2xl border px-4 py-3 outline-none"
-                style={{ borderColor: "rgba(11,35,67,0.15)" }}
-              />
-            </div>
+            <input
+              className="md:col-span-7 rounded-2xl border px-4 py-3"
+              placeholder="Search title, context, or city…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
 
-            <div className="md:col-span-3">
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-                className="w-full rounded-2xl border px-4 py-3"
-                style={{ borderColor: "rgba(11,35,67,0.15)", background: "white" }}
-              >
-                <option value="all">All statuses</option>
-                <option value="open">Open</option>
-                <option value="awaiting_user">Awaiting Curioso</option>
-                <option value="resolved">Resolved</option>
-              </select>
-            </div>
+            <select
+              className="md:col-span-3 rounded-2xl border px-4 py-3"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+            >
+              <option value="all">All statuses</option>
+              <option value="open">Open</option>
+              <option value="awaiting_user">Internet Decided</option>
+              <option value="resolved">Resolved</option>
+            </select>
 
-            <div className="md:col-span-2">
-              <select
-                value={sort}
-                onChange={(e) => setSort(e.target.value)}
-                className="w-full rounded-2xl border px-4 py-3"
-                style={{ borderColor: "rgba(11,35,67,0.15)", background: "white" }}
-              >
-                <option value="new">Newest</option>
-                <option value="old">Oldest</option>
-              </select>
-            </div>
+            <select
+              className="md:col-span-2 rounded-2xl border px-4 py-3"
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+            >
+              <option value="new">Newest</option>
+              <option value="closing">Closing Soon</option>
+            </select>
           </div>
         </div>
 
-        {/* List */}
+        {/* Body */}
         <div className="mt-6">
-          {loading ? (
-            <div className="rounded-3xl border p-6" style={{ background: "white", borderColor: "rgba(11,35,67,0.10)" }}>
-              <div className="text-sm" style={{ color: NAVY, opacity: 0.7 }}>
-                Loading…
-              </div>
-            </div>
-          ) : err ? (
-            <div className="rounded-3xl border p-6" style={{ background: "white", borderColor: "rgba(255,107,107,0.35)" }}>
-              <div className="font-semibold" style={{ color: CORAL }}>
-                Couldn’t load Explore
-              </div>
-              <div className="mt-1 text-sm" style={{ color: NAVY, opacity: 0.8 }}>
-                {err}
-              </div>
-            </div>
-          ) : rows?.length === 0 ? (
-            <div className="rounded-3xl border p-6" style={{ background: "white", borderColor: "rgba(11,35,67,0.10)" }}>
-              <div className="font-semibold" style={{ color: NAVY }}>
-                Nothing found
-              </div>
-              <div className="mt-1 text-sm" style={{ color: NAVY, opacity: 0.75 }}>
-                Try a different search or remove filters.
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {rows.map((r: any) => {
-                const pill = pillColor(r.status);
-                const duration = Number(r.voting_duration_hours || 24);
-                const left = r.status === "open" ? hoursLeft(r.created_at, duration) : 0;
+          {loading && <div>Loading…</div>}
+          {err && <div className="text-red-600">{err}</div>}
 
-                return (
-                  <Link
-                    key={r.id}
-                    href={`/q/${r.id}`}
-                    className="block rounded-3xl border shadow-sm hover:shadow-md transition p-5"
-                    style={{ background: "white", borderColor: "rgba(11,35,67,0.10)" }}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm" style={{ color: NAVY, opacity: 0.6 }}>
-                          {fmt(r.created_at)}
-                        </div>
-                        <div className="mt-1 text-lg font-semibold line-clamp-2" style={{ color: NAVY }}>
-                          {r.title || "Untitled Quandr3"}
-                        </div>
-                      </div>
+          <div className="grid md:grid-cols-2 gap-4">
+            {rows.map((r: any) => {
+              const pill = statusPill(r.status);
+              return (
+                <Link
+                  key={r.id}
+                  href={`/q/${r.id}`}
+                  className="rounded-3xl bg-white border p-5 hover:shadow"
+                >
+                  <div className="flex justify-between items-start">
+                    <h2 className="font-semibold text-lg" style={{ color: NAVY }}>
+                      {r.title}
+                    </h2>
+                    <span
+                      className="text-xs px-3 py-1 rounded-full text-white"
+                      style={{ background: pill.color }}
+                    >
+                      {pill.label}
+                    </span>
+                  </div>
 
-                      <div
-                        className="shrink-0 text-xs font-semibold px-3 py-1 rounded-full border"
-                        style={{ background: pill.bg, color: pill.fg, borderColor: pill.bd }}
-                      >
-                        {pill.label}
-                      </div>
-                    </div>
+                  <p className="mt-2 text-sm text-slate-700 line-clamp-3">
+                    {r.context}
+                  </p>
 
-                    <div className="mt-3 text-sm line-clamp-3" style={{ color: NAVY, opacity: 0.8 }}>
-                      {r.question || "—"}
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap gap-2 items-center">
-                      {r.status === "open" ? (
-                        <span className="text-xs font-medium" style={{ color: TEAL }}>
-                          {left}h left
-                        </span>
-                      ) : null}
-
-                      {r.discussion_open ? (
-                        <span
-                          className="text-xs font-semibold px-2 py-1 rounded-full border"
-                          style={{
-                            color: BLUE,
-                            background: "rgba(30,99,243,0.08)",
-                            borderColor: "rgba(30,99,243,0.20)",
-                          }}
-                        >
-                          Discussion open
-                        </span>
-                      ) : (
-                        <span
-                          className="text-xs font-semibold px-2 py-1 rounded-full border"
-                          style={{
-                            color: NAVY,
-                            opacity: 0.75,
-                            background: "rgba(11,35,67,0.04)",
-                            borderColor: "rgba(11,35,67,0.10)",
-                          }}
-                        >
-                          Discussion closed
-                        </span>
-                      )}
-
-                      <span className="text-xs" style={{ color: NAVY, opacity: 0.55 }}>
-                        ID: {String(r.id).slice(0, 8)}…
-                      </span>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
+                  <div className="mt-4 flex justify-between text-xs text-slate-500">
+                    <span>
+                      {r.city}{r.state ? `, ${r.state}` : ""}
+                    </span>
+                    {r.status === "open" && (
+                      <span>{hoursLeft(r.closes_at)}h left</span>
+                    )}
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
