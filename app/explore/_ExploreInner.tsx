@@ -75,30 +75,53 @@ function svgBannerDataUrl(categoryLabel: string) {
     <text x="1106" y="122" fill="${fg}" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="800">?</text>
   </svg>`.trim();
 
-  // encode for data url
-  const encoded = encodeURIComponent(svg)
-    .replace(/'/g, "%27")
-    .replace(/"/g, "%22");
-
+  const encoded = encodeURIComponent(svg).replace(/'/g, "%27").replace(/"/g, "%22");
   return `data:image/svg+xml;charset=utf-8,${encoded}`;
 }
 
 function pickCardImageSrc(r: any) {
-  // Prefer real images first (Phase 1)
   if (r?.media_url) return r.media_url;
   if (r?.hero_image_url) return r.hero_image_url;
 
-  // Otherwise show a placeholder banner based on category
   const cat = r?.category || "QUANDR3";
   return svgBannerDataUrl(cat);
 }
 
 function canShowDiscussionHint(r: any) {
-  // Your rule: discussion is NOT during open.
-  // It only happens after resolve, and only for voters (viewable by others).
-  // On Explore, we only show a hint (not actual access control).
-  if (r?.status === "resolved") return true;
-  return false;
+  // Rule: discussion is NOT during open.
+  // It is after resolve; voters can post (others can learn/view later).
+  // On Explore, we only show a hint.
+  return r?.status === "resolved";
+}
+
+function StatusPills({ status, setStatus }: any) {
+  const items = [
+    { key: "all", label: "All" },
+    { key: "open", label: "Open" },
+    { key: "awaiting_user", label: "Internet Decided" },
+    { key: "resolved", label: "Resolved" },
+  ];
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {items.map((it) => {
+        const selected = status === it.key;
+        return (
+          <button
+            key={it.key}
+            onClick={() => setStatus?.(it.key)}
+            className="rounded-full px-4 py-2 border font-semibold text-sm"
+            style={{
+              background: selected ? NAVY : "white",
+              color: selected ? "white" : NAVY,
+            }}
+          >
+            {it.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function ExploreInner({
@@ -117,13 +140,17 @@ export default function ExploreInner({
   setActiveCategory,
   categories,
 }: any) {
+  // Normalize category “all” always
+  const cats = Array.isArray(categories) && categories.length ? categories : ["all"];
+  const selectedCategory = activeCategory || "all";
+
   return (
     <div style={{ minHeight: "100vh", background: SOFT_BG }}>
       <div className="mx-auto max-w-6xl px-4 py-8">
         {/* SOUL HEADER */}
         <div className="rounded-3xl bg-white border p-6">
           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-            <div>
+            <div className="min-w-0">
               <div className="text-xs tracking-widest font-semibold text-slate-500">
                 REAL PEOPLE. REAL DILEMMAS.
               </div>
@@ -162,17 +189,32 @@ export default function ExploreInner({
                   Contact
                 </Link>
               </div>
+
+              {/* EXPLORE RULES (now includes status filter) */}
+              <div className="mt-5 rounded-2xl border bg-slate-50 p-4">
+                <div className="text-xs tracking-widest font-semibold text-slate-600">
+                  WHAT’S ON THE EXPLORE PAGE
+                </div>
+                <ul className="mt-2 list-disc pl-5 text-sm text-slate-700 space-y-1">
+                  <li>Search by title, context, city/state, category, or ID</li>
+                  <li>Filter by category</li>
+                  <li><b>Filter by status:</b> Open, Internet Decided (Closed), or Resolved</li>
+                  <li>Sort by Newest or Closing Soon</li>
+                  <li>Global vs Local toggle (Local requires city/state)</li>
+                  <li>Discussion only happens after resolution (voters can post)</li>
+                </ul>
+              </div>
             </div>
 
             {/* Global / Local toggle */}
             <div className="rounded-2xl border p-3 w-full md:w-[320px]">
               <div className="flex gap-2">
                 <button
-                  onClick={() => setScope?.("global")}
+                  onClick={() => setScope?.("all")}
                   className="flex-1 rounded-xl px-4 py-2 font-semibold border"
                   style={{
-                    background: scope === "global" ? NAVY : "white",
-                    color: scope === "global" ? "white" : NAVY,
+                    background: scope === "all" ? NAVY : "white",
+                    color: scope === "all" ? "white" : NAVY,
                   }}
                 >
                   Global
@@ -194,8 +236,18 @@ export default function ExploreInner({
             </div>
           </div>
 
+          {/* STATUS PILLS (fast filter) */}
+          <div className="mt-6 rounded-2xl border p-4">
+            <div className="text-xs tracking-widest font-semibold text-slate-600">
+              FILTER BY STATUS
+            </div>
+            <div className="mt-3">
+              <StatusPills status={status} setStatus={setStatus} />
+            </div>
+          </div>
+
           {/* Search row */}
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-12 gap-3">
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-12 gap-3">
             <input
               className="md:col-span-7 rounded-2xl border px-4 py-3"
               placeholder="Search title, context, city, or id…"
@@ -203,6 +255,7 @@ export default function ExploreInner({
               onChange={(e) => setQ(e.target.value)}
             />
 
+            {/* Keep dropdown too (clarity / accessibility) */}
             <select
               className="md:col-span-3 rounded-2xl border px-4 py-3"
               value={status}
@@ -228,19 +281,20 @@ export default function ExploreInner({
         {/* CATEGORY PILLS (jump row) */}
         <div className="mt-6 rounded-3xl bg-white border p-4">
           <div className="flex flex-wrap gap-2">
-            {(categories || ["All"]).map((c: string) => {
-              const selected = (activeCategory || "All") === c;
+            {cats.map((c: string) => {
+              const key = (c || "").trim() || "all";
+              const selected = selectedCategory === key;
               return (
                 <button
-                  key={c}
-                  onClick={() => setActiveCategory?.(c)}
+                  key={key}
+                  onClick={() => setActiveCategory?.(key)}
                   className="rounded-full px-4 py-2 border font-semibold text-sm"
                   style={{
                     background: selected ? NAVY : "white",
                     color: selected ? "white" : NAVY,
                   }}
                 >
-                  {c}
+                  {key}
                 </button>
               );
             })}
@@ -271,7 +325,7 @@ export default function ExploreInner({
 
           {/* IMPORTANT: vertical, Reddit-like list */}
           <div className="flex flex-col gap-5">
-            {rows.map((r: any) => {
+            {(rows || []).map((r: any) => {
               const pill = statusPill(r.status);
               const imgSrc = pickCardImageSrc(r);
 
@@ -291,7 +345,10 @@ export default function ExploreInner({
                     {/* top-left chips */}
                     <div className="absolute left-4 top-4 flex gap-2">
                       {r.category && (
-                        <span className="text-xs px-3 py-1 rounded-full bg-white/90 border font-semibold" style={{ color: NAVY }}>
+                        <span
+                          className="text-xs px-3 py-1 rounded-full bg-white/90 border font-semibold"
+                          style={{ color: NAVY }}
+                        >
                           {String(r.category).toUpperCase()}
                         </span>
                       )}
@@ -312,17 +369,12 @@ export default function ExploreInner({
                       </h2>
                     </Link>
 
-                    {r.context && (
-                      <p className="mt-2 text-slate-700 text-base">
-                        {r.context}
-                      </p>
-                    )}
+                    {r.context && <p className="mt-2 text-slate-700 text-base">{r.context}</p>}
 
                     {/* Meta row */}
                     <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
                       <span>{fmtDateTime(r.created_at)}</span>
 
-                      {/* location */}
                       {(r.city || r.state) && (
                         <span>
                           {r.city}
@@ -330,14 +382,12 @@ export default function ExploreInner({
                         </span>
                       )}
 
-                      {/* time left */}
-                      {r.status === "open" && (
-                        <span>{hoursLeft(r.closes_at)}h left</span>
-                      )}
+                      {r.status === "open" && <span>{hoursLeft(r.closes_at)}h left</span>}
 
-                      {/* discussion rule hint */}
                       {canShowDiscussionHint(r) ? (
-                        <span className="text-slate-500">Discussion available after resolve (voters only to post)</span>
+                        <span className="text-slate-500">
+                          Discussion available after resolve (voters only to post)
+                        </span>
                       ) : (
                         <span className="text-slate-500">Discussion after resolve</span>
                       )}
@@ -354,10 +404,24 @@ export default function ExploreInner({
                       </Link>
 
                       <div className="flex items-center gap-3">
-                        <button className="rounded-full px-5 py-3 border font-semibold" style={{ color: NAVY }}>
+                        <button
+                          className="rounded-full px-5 py-3 border font-semibold"
+                          style={{ color: NAVY }}
+                          onClick={() => {
+                            try {
+                              navigator.clipboard.writeText(`${window.location.origin}/q/${r.id}`);
+                              alert("Link copied!");
+                            } catch {
+                              alert("Could not copy link.");
+                            }
+                          }}
+                        >
                           Share
                         </button>
-                        <button className="rounded-full px-5 py-3 border font-semibold text-red-500">
+                        <button
+                          className="rounded-full px-5 py-3 border font-semibold text-red-500"
+                          onClick={() => alert("Report flow coming next.")}
+                        >
                           Report
                         </button>
                       </div>
