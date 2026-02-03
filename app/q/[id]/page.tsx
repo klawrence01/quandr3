@@ -10,9 +10,19 @@ import Link from "next/link";
 import { supabase } from "@/utils/supabase/browser";
 
 /* =========================
+   Style
+========================= */
+const NAVY = "#0b2343";
+const BLUE = "#1e63f3";
+const TEAL = "#00a9a5";
+const CORAL = "#ff6b6b";
+const SOFT_BG = "#f5f7fc";
+
+const LETTER = ["A", "B", "C", "D"];
+
+/* =========================
    Helpers
 ========================= */
-
 function fmt(ts?: string) {
   if (!ts) return "";
   return new Date(ts).toLocaleString();
@@ -34,24 +44,50 @@ function cleanReason(s?: string) {
   return t;
 }
 
-const LETTER = ["A", "B", "C", "D"];
+function pct(n: number, d: number) {
+  if (!d) return 0;
+  return Math.round((n / d) * 100);
+}
+
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+async function safeShare(url: string, title: string) {
+  try {
+    if ((navigator as any).share) {
+      await (navigator as any).share({ title, url });
+      return;
+    }
+  } catch {}
+  try {
+    await navigator.clipboard.writeText(url);
+    alert("Link copied.");
+  } catch {
+    prompt("Copy this link:", url);
+  }
+}
+
+function reportMailto(qid: string) {
+  const subject = encodeURIComponent(`Report Quandr3: ${qid}`);
+  const body = encodeURIComponent(
+    `I’d like to report this Quandr3 for review.\n\nQuandr3 ID: ${qid}\nReason:\n`
+  );
+  return `mailto:support@quandr3.com?subject=${subject}&body=${body}`;
+}
 
 /* =========================
    Page
 ========================= */
-
 export default function Quandr3DetailPage() {
   const params = useParams();
   const router = useRouter();
 
-  // Normalize id (Next can give string|string[])
   const id = useMemo(() => {
-    const raw: any = params?.id;
+    const raw: any = (params as any)?.id;
     if (!raw) return null;
     return Array.isArray(raw) ? raw[0] : raw;
   }, [params]);
-
-  const isDevOnly = useMemo(() => process.env.NODE_ENV !== "production", []);
 
   const [user, setUser] = useState<any>(null);
   const [q, setQ] = useState<any>(null);
@@ -70,7 +106,7 @@ export default function Quandr3DetailPage() {
   >({});
   const [savingReason, setSavingReason] = useState(false);
 
-  // Discussion (B)
+  // Discussion
   const [comments, setComments] = useState<any[]>([]);
   const [commentDraft, setCommentDraft] = useState("");
   const [postingComment, setPostingComment] = useState(false);
@@ -78,23 +114,19 @@ export default function Quandr3DetailPage() {
     Record<string, any>
   >({});
 
-  // Curioso toggles
+  // Curioso toggle
   const [togglingDiscussion, setTogglingDiscussion] = useState(false);
 
   /* =========================
      Load Auth
   ========================= */
-
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data?.user ?? null);
-    });
+    supabase.auth.getUser().then(({ data }) => setUser(data?.user ?? null));
   }, []);
 
   /* =========================
-     Load / Refresh Helpers
+     Refresh Helpers
   ========================= */
-
   async function refreshVotesAndReasons(qid: string) {
     const { data: v } = await supabase
       .from("quandr3_votes")
@@ -150,9 +182,7 @@ export default function Quandr3DetailPage() {
       .in("id", userIds);
 
     const map: Record<string, any> = {};
-    (profs ?? []).forEach((p: any) => {
-      map[p.id] = p;
-    });
+    (profs ?? []).forEach((p: any) => (map[p.id] = p));
     setCommentProfilesById(map);
   }
 
@@ -194,12 +224,10 @@ export default function Quandr3DetailPage() {
 
     setResolution(r ?? null);
 
-    // ✅ Discussion fetch ONLY if:
-    // - discussion is open
-    // - voting is NOT open anymore (expired OR resolved)
-    // - and this viewer has voted (invited)
+    // Voting ended?
     const duration = Number(qRow?.voting_duration_hours || 0);
     const createdAt = qRow?.created_at;
+
     const timeExpired =
       !!createdAt && !!duration
         ? Date.now() > new Date(createdAt).getTime() + duration * 3600 * 1000
@@ -210,10 +238,9 @@ export default function Quandr3DetailPage() {
 
     const votingEnded = timeExpired || voteCapReached || !!r;
 
-    const didVote =
-      !!user?.id && vRows.some((x: any) => x.user_id === user.id);
-
-    if (qRow?.discussion_open && votingEnded && didVote) {
+    // ✅ Show discussion READ-ONLY to everyone AFTER close if author opened it.
+    // Posting is gated later (voters only).
+    if (qRow?.discussion_open && votingEnded) {
       await refreshComments(qid);
     } else {
       setComments([]);
@@ -224,38 +251,27 @@ export default function Quandr3DetailPage() {
 
   useEffect(() => {
     if (!id) return;
-
     (async () => {
       setLoading(true);
       await refreshCore(id);
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, user?.id]); // ✅ re-evaluate invite gating after login loads
+  }, [id, user?.id]);
 
   /* =========================
-     Derived Logic
+     Derived
   ========================= */
-
   const myVote = useMemo(() => {
     if (!user) return null;
     return votes.find((v: any) => v.user_id === user.id) ?? null;
   }, [votes, user]);
 
-  const didVote = useMemo(() => {
-    return !!myVote?.id;
-  }, [myVote]);
-
-  const myReason = useMemo(() => {
-    if (!myVote?.id) return "";
-    return cleanReason(reasonsByVoteId[myVote.id] ?? "");
-  }, [myVote, reasonsByVoteId]);
+  const didVote = useMemo(() => !!myVote?.id, [myVote]);
 
   const voteCounts = useMemo(() => {
     const map: Record<number, number> = {};
-    votes.forEach((v: any) => {
-      map[v.choice_index] = (map[v.choice_index] || 0) + 1;
-    });
+    votes.forEach((v: any) => (map[v.choice_index] = (map[v.choice_index] || 0) + 1));
     return map;
   }, [votes]);
 
@@ -263,7 +279,6 @@ export default function Quandr3DetailPage() {
 
   const votingExpired = useMemo(() => {
     if (!q) return false;
-
     const duration = Number(q.voting_duration_hours || 0);
     const createdAt = q.created_at;
 
@@ -284,50 +299,20 @@ export default function Quandr3DetailPage() {
     return "open";
   }, [resolution, votingExpired]);
 
-  const canShowResults = useMemo(() => {
-    // Results is for closed quandr3s (awaiting_user or resolved)
-    return status !== "open";
-  }, [status]);
-
-  const canShowDiscussion = useMemo(() => {
-    // ✅ your rule:
-    // discussion only after close AND only for those who voted AND only if author opened it
-    return status !== "open" && !!q?.discussion_open && didVote;
-  }, [status, q, didVote]);
-
-  const winningOrder = useMemo(() => {
-    if (resolution) {
-      const opt = options.find((o: any) => o.id === resolution.option_id);
-      return opt?.order;
-    }
-    let max = 0;
-    let win: any = null;
-    Object.entries(voteCounts).forEach(([k, v]: any) => {
-      if (v > max) {
-        max = v;
-        win = Number(k);
-      }
-    });
-    return win;
-  }, [voteCounts, resolution, options]);
+  const canShowResults = status !== "open";
 
   const reasonsByChoiceIndex = useMemo(() => {
     const grouped: Record<number, string[]> = {};
     votes.forEach((v: any) => {
-      const rid = v.id;
-      const txt = cleanReason(reasonsByVoteId[rid]);
+      const txt = cleanReason(reasonsByVoteId[v.id]);
       if (!txt) return;
-      const idx = v.choice_index;
-      grouped[idx] = grouped[idx] || [];
-      grouped[idx].push(txt);
+      grouped[v.choice_index] = grouped[v.choice_index] || [];
+      grouped[v.choice_index].push(txt);
     });
     return grouped;
   }, [votes, reasonsByVoteId]);
 
-  // Only allow editing reasons while voting is open (not expired, not resolved)
-  const canEditReason = useMemo(() => {
-    return !!user && status === "open" && !votingExpired && !resolution;
-  }, [user, status, votingExpired, resolution]);
+  const canEditReason = !!user && status === "open" && !votingExpired && !resolution;
 
   const isCurioso = useMemo(() => {
     if (!user?.id || !q?.author_id) return false;
@@ -335,18 +320,26 @@ export default function Quandr3DetailPage() {
   }, [user, q]);
 
   const canToggleDiscussion = useMemo(() => {
-    // Curioso can open/close discussion after voting ends OR after resolution.
     if (!isCurioso) return false;
+    // Curioso can open/close discussion after voting ends OR after resolution
     return votingExpired || !!resolution;
   }, [isCurioso, votingExpired, resolution]);
+
+  // ✅ Discussion visibility rule (read-only for non-voters)
+  const discussionVisible = useMemo(() => {
+    return status !== "open" && !!q?.discussion_open;
+  }, [status, q]);
+
+  const canPostDiscussion = useMemo(() => {
+    // only voters can post
+    return discussionVisible && !!user && didVote;
+  }, [discussionVisible, user, didVote]);
 
   /* =========================
      Actions
   ========================= */
-
   async function vote(order: number) {
     if (!id) return;
-
     if (!user) {
       router.push(`/login?next=/q/${id}`);
       return;
@@ -355,11 +348,7 @@ export default function Quandr3DetailPage() {
 
     const { data: inserted, error } = await supabase
       .from("quandr3_votes")
-      .insert({
-        quandr3_id: id,
-        user_id: user.id,
-        choice_index: order,
-      })
+      .insert({ quandr3_id: id, user_id: user.id, choice_index: order })
       .select("id, user_id, choice_index, quandr3_id, created_at")
       .single();
 
@@ -368,7 +357,6 @@ export default function Quandr3DetailPage() {
       return;
     }
 
-    // ✅ mark “invited” locally too (optional but useful)
     try {
       localStorage.setItem(`quandr3-voted-${id}`, "1");
     } catch {}
@@ -385,7 +373,6 @@ export default function Quandr3DetailPage() {
 
   async function saveMyReason() {
     if (!id) return;
-
     if (!user) {
       router.push(`/login?next=/q/${id}`);
       return;
@@ -400,13 +387,7 @@ export default function Quandr3DetailPage() {
 
     const { error } = await supabase
       .from("vote_reasons")
-      .upsert(
-        {
-          vote_id: myVote.id,
-          reason: draft,
-        },
-        { onConflict: "vote_id" }
-      );
+      .upsert({ vote_id: myVote.id, reason: draft }, { onConflict: "vote_id" });
 
     setSavingReason(false);
 
@@ -420,14 +401,11 @@ export default function Quandr3DetailPage() {
 
   async function postComment() {
     if (!id) return;
-
     if (!user) {
       router.push(`/login?next=/q/${id}`);
       return;
     }
-
-    // ✅ enforce invite rule client-side too
-    if (!canShowDiscussion) return;
+    if (!canPostDiscussion) return;
 
     const body = commentDraft.trim();
     if (!body) return;
@@ -453,16 +431,12 @@ export default function Quandr3DetailPage() {
 
   async function deleteComment(commentId: string) {
     if (!id) return;
-
     if (!user) {
       router.push(`/login?next=/q/${id}`);
       return;
     }
 
-    const { error } = await supabase
-      .from("quandr3_comments")
-      .delete()
-      .eq("id", commentId);
+    const { error } = await supabase.from("quandr3_comments").delete().eq("id", commentId);
 
     if (error) {
       alert(error.message || "Could not delete comment.");
@@ -474,7 +448,6 @@ export default function Quandr3DetailPage() {
 
   async function setDiscussionOpen(nextOpen: boolean) {
     if (!id) return;
-
     if (!user) {
       router.push(`/login?next=/q/${id}`);
       return;
@@ -499,350 +472,518 @@ export default function Quandr3DetailPage() {
       return;
     }
 
-    // Always re-pull the core row so UI is 100% consistent
     await refreshCore(id);
   }
 
   /* =========================
      Render
   ========================= */
+  if (loading) {
+    return (
+      <main className="min-h-screen" style={{ background: SOFT_BG }}>
+        <div className="mx-auto max-w-5xl px-4 py-10">
+          <div className="rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="text-sm font-semibold" style={{ color: NAVY }}>
+              Loading Quandr3…
+            </div>
+            <div className="mt-2 text-sm text-slate-600">Pulling votes, options, and context.</div>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
-  if (loading) return <div>Loading…</div>;
-  if (!q) return <div>Not found</div>;
+  if (!q) {
+    return (
+      <main className="min-h-screen" style={{ background: SOFT_BG }}>
+        <div className="mx-auto max-w-5xl px-4 py-10">
+          <div className="rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="text-sm font-semibold" style={{ color: NAVY }}>
+              Not found
+            </div>
+            <div className="mt-2 text-sm text-slate-600">This Quandr3 doesn’t exist.</div>
+            <div className="mt-4">
+              <Link
+                href="/explore"
+                className="inline-flex items-center rounded-xl px-4 py-2 text-sm font-semibold text-white"
+                style={{ background: BLUE }}
+              >
+                Back to Explore
+              </Link>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const pageUrl =
+    typeof window !== "undefined" ? window.location.href : `https://quandr3.vercel.app/q/${id}`;
 
   return (
-    <div style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
-      {/* Top Bar */}
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ display: "flex", gap: 12 }}>
-          <Link href="/explore">Browse Quandr3s</Link>
-          <Link href="/q/create">Create Quandr3</Link>
-        </div>
-
-        {/* ✅ DEV-only shortcuts */}
-        {isDevOnly && id ? (
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <span style={{ fontSize: 12, color: "#666" }}>DEV:</span>
-            <Link href={`/q/${id}/resolve?dev=1`} style={{ fontSize: 12 }}>
-              Resolve Preview
+    <main className="min-h-screen" style={{ background: SOFT_BG }}>
+      <div className="mx-auto max-w-5xl px-4 py-8">
+        {/* Top nav */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Link href="/" className="text-sm font-extrabold" style={{ color: NAVY }}>
+              Quandr3
             </Link>
-            <Link href={`/q/${id}/results?dev=1`} style={{ fontSize: 12 }}>
-              Results Preview
+            <span className="text-xs tracking-widest text-slate-500">ASK • SHARE • DECIDE</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <Link href="/explore" className="text-sm font-semibold text-slate-700 hover:underline">
+              Explore
             </Link>
-          </div>
-        ) : null}
-      </div>
-
-      {/* Header */}
-      <h1 style={{ marginTop: 18 }}>{q.title}</h1>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
-        {/* Avatar (simple MVP) */}
-        <div
-          style={{
-            width: 48,
-            height: 48,
-            borderRadius: 999,
-            background: "#eee",
-            overflow: "hidden",
-          }}
-        >
-          {profile?.avatar_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={profile.avatar_url}
-              alt=""
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            />
-          ) : null}
-        </div>
-
-        <div>
-          <div>
-            Asked by <strong>{profile?.display_name ?? "Unknown"}</strong> •{" "}
-            {fmt(q.created_at)}
-          </div>
-          <div>
-            Category: <strong>{q.category}</strong>
-          </div>
-        </div>
-      </div>
-
-      {/* Status */}
-      <div style={{ marginTop: 14 }}>
-        Status: <strong>{status}</strong> • {totalVotes}{" "}
-        {totalVotes === 1 ? "vote" : "votes"}
-        {status === "open" && (
-          <> • {hoursLeft(q.created_at, q.voting_duration_hours)}h left</>
-        )}
-      </div>
-
-      {/* Curioso Reasoning */}
-      {q.reasoning && (
-        <div style={{ marginTop: 16 }}>
-          <h3>Why I asked this</h3>
-          <p>{q.reasoning}</p>
-        </div>
-      )}
-
-      {/* Options */}
-      <div style={{ marginTop: 24 }}>
-        {options.map((opt: any) => {
-          const count = voteCounts[opt.order] || 0;
-          const pct = totalVotes ? Math.round((count / totalVotes) * 100) : 0;
-
-          const isWinner = opt.order === winningOrder;
-          const optReasons = reasonsByChoiceIndex[opt.order] ?? [];
-          const isMyPicked = myVote?.choice_index === opt.order;
-
-          // Only show reason box if voting is currently open AND this is my pick
-          const showReasonBox = !!myVote?.id && isMyPicked && canEditReason;
-
-          const voteIdForMyVote = myVote?.id;
-
-          const reasonDraft =
-            voteIdForMyVote != null
-              ? (reasonDraftByVoteId[voteIdForMyVote] ?? myReason ?? "")
-              : "";
-
-          return (
-            <div
-              key={opt.id}
-              style={{
-                border: "1px solid #ddd",
-                padding: 14,
-                marginBottom: 12,
-                background: isWinner ? "#f0f7ff" : "white",
-              }}
+            <Link
+              href="/q/create"
+              className="inline-flex items-center rounded-xl px-4 py-2 text-sm font-bold text-white shadow-sm"
+              style={{ background: `linear-gradient(90deg, ${BLUE}, ${TEAL})` }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <strong>
-                  {LETTER[opt.order - 1]}. {opt.label}
-                </strong>
+              Create a Quandr3
+            </Link>
+            {!user ? (
+              <>
+                <Link href="/login" className="text-sm font-semibold text-slate-700 hover:underline">
+                  Log in
+                </Link>
+                <Link
+                  href="/signup"
+                  className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
+                >
+                  Sign up
+                </Link>
+              </>
+            ) : null}
+          </div>
+        </div>
 
-                {status === "open" ? (
-                  <button onClick={() => vote(opt.order)}>Vote</button>
-                ) : (
-                  <div>
-                    {count} votes ({pct}%)
+        {/* Hero card */}
+        <div className="mt-6 rounded-3xl border bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold tracking-widest text-slate-600">
+                REAL PEOPLE. REAL DILEMMAS.
+              </div>
+
+              <h1 className="mt-2 text-3xl font-extrabold" style={{ color: NAVY }}>
+                {q.title || "Untitled Quandr3"}
+              </h1>
+
+              <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                <div className="flex items-center gap-2">
+                  <div
+                    className="h-10 w-10 overflow-hidden rounded-full border"
+                    style={{ background: "rgba(15,23,42,0.06)" }}
+                    title={profile?.display_name ?? "Curioso"}
+                  >
+                    {profile?.avatar_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={profile.avatar_url}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-xs font-bold text-slate-500">
+                        ?
+                      </div>
+                    )}
                   </div>
+                  <div>
+                    <div>
+                      Asked by{" "}
+                      <span className="font-semibold" style={{ color: NAVY }}>
+                        {profile?.display_name ?? "Unknown"}
+                      </span>{" "}
+                      • {fmt(q.created_at)}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Category: <span className="font-semibold">{q.category || "General"}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <span
+                  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold"
+                  style={{
+                    background:
+                      status === "resolved"
+                        ? "rgba(0,169,165,0.12)"
+                        : status === "awaiting_user"
+                        ? "rgba(255,107,107,0.12)"
+                        : "rgba(30,99,243,0.12)",
+                    color: status === "resolved" ? TEAL : status === "awaiting_user" ? CORAL : BLUE,
+                  }}
+                >
+                  {status.toUpperCase()}
+                </span>
+
+                <span className="text-xs text-slate-600">
+                  {totalVotes} {totalVotes === 1 ? "vote" : "votes"}
+                  {status === "open" ? (
+                    <> • {hoursLeft(q.created_at, q.voting_duration_hours)}h left</>
+                  ) : null}
+                </span>
+              </div>
+
+              {q.reasoning ? (
+                <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
+                  <div className="text-xs font-semibold tracking-widest text-slate-600">
+                    WHY I’M ASKING
+                  </div>
+                  <div className="mt-2 text-sm text-slate-700">{q.reasoning}</div>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => safeShare(pageUrl, q.title || "Quandr3")}
+                className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
+              >
+                Share
+              </button>
+              <a
+                href={reportMailto(id)}
+                className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
+              >
+                Report
+              </a>
+
+              {status !== "open" ? (
+                <Link
+                  href={`/q/${id}/results`}
+                  className="rounded-xl px-4 py-2 text-sm font-extrabold text-white shadow-sm"
+                  style={{ background: BLUE }}
+                >
+                  View Results
+                </Link>
+              ) : null}
+
+              {/* Curioso-only shortcut */}
+              {isCurioso ? (
+                <Link
+                  href={`/q/${id}/resolve`}
+                  className="rounded-xl px-4 py-2 text-sm font-extrabold text-white shadow-sm"
+                  style={{ background: CORAL }}
+                >
+                  Resolve
+                </Link>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        {/* Options */}
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          {options.map((opt: any) => {
+            const count = voteCounts[opt.order] || 0;
+            const p = pct(count, totalVotes);
+            const optReasons = reasonsByChoiceIndex[opt.order] ?? [];
+
+            const isMyPicked = myVote?.choice_index === opt.order;
+            const showReasonBox = !!myVote?.id && isMyPicked && canEditReason;
+            const voteIdForMyVote = myVote?.id;
+            const reasonDraft =
+              voteIdForMyVote != null
+                ? (reasonDraftByVoteId[voteIdForMyVote] ?? cleanReason(reasonsByVoteId[voteIdForMyVote] ?? ""))
+                : "";
+
+            return (
+              <div key={opt.id} className="overflow-hidden rounded-3xl border bg-white shadow-sm">
+                {/* image */}
+                <div className="relative h-40 w-full bg-slate-100">
+                  {opt.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={opt.image_url} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-slate-500">
+                      {q.category || "Category"} placeholder
+                    </div>
+                  )}
+
+                  <div className="absolute left-4 top-4 flex items-center gap-2">
+                    <span
+                      className="rounded-full px-3 py-1 text-xs font-extrabold"
+                      style={{ background: "rgba(255,255,255,0.85)", color: NAVY }}
+                    >
+                      {LETTER[opt.order - 1] ?? "?"}
+                    </span>
+                    <span
+                      className="rounded-full px-3 py-1 text-xs font-semibold"
+                      style={{ background: "rgba(255,255,255,0.85)", color: BLUE }}
+                    >
+                      {q.category || "General"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-lg font-extrabold" style={{ color: NAVY }}>
+                        {opt.label}
+                      </div>
+                      <div className="mt-1 text-sm text-slate-600">
+                        {status === "open"
+                          ? "Vote to help the Curioso decide."
+                          : `${count} vote${count === 1 ? "" : "s"} • ${p}%`}
+                      </div>
+                    </div>
+
+                    {status === "open" ? (
+                      <button
+                        onClick={() => vote(opt.order)}
+                        className="rounded-xl px-4 py-2 text-sm font-extrabold text-white shadow-sm"
+                        style={{ background: isMyPicked ? TEAL : BLUE }}
+                      >
+                        {isMyPicked ? "Voted" : "Vote"}
+                      </button>
+                    ) : (
+                      <div
+                        className="rounded-xl px-4 py-2 text-sm font-extrabold"
+                        style={{
+                          background: "rgba(15,23,42,0.06)",
+                          color: NAVY,
+                        }}
+                      >
+                        Closed
+                      </div>
+                    )}
+                  </div>
+
+                  {/* results bar */}
+                  {canShowResults ? (
+                    <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${p}%`,
+                          background: `linear-gradient(90deg, ${BLUE}, ${TEAL})`,
+                        }}
+                      />
+                    </div>
+                  ) : null}
+
+                  {/* reasons preview after close */}
+                  {canShowResults && optReasons.length > 0 ? (
+                    <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
+                      <div className="text-xs font-semibold tracking-widest text-slate-600">
+                        WHY PEOPLE CHOSE THIS
+                      </div>
+                      <ul className="mt-2 list-disc pl-5 text-sm text-slate-700">
+                        {optReasons.slice(0, 4).map((txt: string, idx: number) => (
+                          <li key={`${opt.id}-r-${idx}`}>{txt}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {/* write reason while open */}
+                  {showReasonBox ? (
+                    <div className="mt-4 rounded-2xl border bg-white p-4">
+                      <div className="text-xs font-semibold tracking-widest text-slate-600">
+                        YOUR REASON (OPTIONAL)
+                      </div>
+                      <textarea
+                        value={reasonDraft}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setReasonDraftByVoteId((prev: any) => ({
+                            ...prev,
+                            [voteIdForMyVote]: val,
+                          }));
+                        }}
+                        rows={3}
+                        className="mt-2 w-full rounded-xl border bg-white p-3 text-sm outline-none focus:ring-2"
+                        style={{ borderColor: "rgba(15,23,42,0.12)" }}
+                        placeholder="Write a short reason (1–2 sentences is perfect)."
+                      />
+                      <div className="mt-2">
+                        <button
+                          onClick={saveMyReason}
+                          disabled={savingReason}
+                          className="rounded-xl px-4 py-2 text-sm font-extrabold text-white shadow-sm"
+                          style={{ background: TEAL }}
+                        >
+                          {savingReason ? "Saving…" : "Save reason"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Discussion */}
+        <div className="mt-8 rounded-3xl border bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-xs font-semibold tracking-widest text-slate-600">DISCUSSION</div>
+              <div className="mt-1 text-lg font-extrabold" style={{ color: NAVY }}>
+                After the decision, the learning continues
+              </div>
+              <div className="mt-1 text-sm text-slate-600">
+                Discussion only happens after voting ends, and only if the Curioso opens it.
+                <span className="font-semibold"> Voters can post</span>; everyone else can read.
+              </div>
+            </div>
+
+            {isCurioso ? (
+              <div className="flex gap-2">
+                {!canToggleDiscussion ? (
+                  <div className="text-xs text-slate-500">
+                    (You can open discussion after voting ends.)
+                  </div>
+                ) : q.discussion_open ? (
+                  <button
+                    onClick={() => setDiscussionOpen(false)}
+                    disabled={togglingDiscussion}
+                    className="rounded-xl px-4 py-2 text-sm font-extrabold text-white shadow-sm"
+                    style={{ background: CORAL }}
+                  >
+                    {togglingDiscussion ? "Closing…" : "Close"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setDiscussionOpen(true)}
+                    disabled={togglingDiscussion}
+                    className="rounded-xl px-4 py-2 text-sm font-extrabold text-white shadow-sm"
+                    style={{ background: TEAL }}
+                  >
+                    {togglingDiscussion ? "Opening…" : "Open"}
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </div>
+
+          {status === "open" ? (
+            <div className="mt-4 rounded-2xl border bg-slate-50 p-4 text-sm text-slate-700">
+              Discussion opens after voting closes.
+            </div>
+          ) : !q.discussion_open ? (
+            <div className="mt-4 rounded-2xl border bg-slate-50 p-4 text-sm text-slate-700">
+              Discussion is closed.
+            </div>
+          ) : (
+            <>
+              {/* Post box */}
+              <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
+                {!user ? (
+                  <div className="text-sm text-slate-700">
+                    Log in to see if you’re invited to post. (You can still read below.)
+                    <div className="mt-3">
+                      <Link
+                        href={`/login?next=/q/${id}`}
+                        className="inline-flex items-center rounded-xl px-4 py-2 text-sm font-extrabold text-white shadow-sm"
+                        style={{ background: BLUE }}
+                      >
+                        Log in
+                      </Link>
+                    </div>
+                  </div>
+                ) : !didVote ? (
+                  <div className="text-sm text-slate-700">
+                    You can read this discussion, but only voters can post.
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-xs font-semibold tracking-widest text-slate-600">
+                      ADD TO THE DISCUSSION
+                    </div>
+                    <textarea
+                      value={commentDraft}
+                      onChange={(e) => setCommentDraft(e.target.value)}
+                      rows={3}
+                      className="mt-2 w-full rounded-xl border bg-white p-3 text-sm outline-none focus:ring-2"
+                      style={{ borderColor: "rgba(15,23,42,0.12)" }}
+                      placeholder="Share your take (keep it respectful)."
+                      disabled={postingComment}
+                    />
+                    <div className="mt-2">
+                      <button
+                        onClick={postComment}
+                        disabled={postingComment}
+                        className="rounded-xl px-4 py-2 text-sm font-extrabold text-white shadow-sm"
+                        style={{ background: TEAL }}
+                      >
+                        {postingComment ? "Posting…" : "Post"}
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
 
-              {/* Only show when there are real reasons */}
-              {optReasons.length > 0 && canShowResults && (
-                <div style={{ marginTop: 12 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                    Why people chose this
-                  </div>
-                  <ul style={{ margin: 0, paddingLeft: 18 }}>
-                    {optReasons.slice(0, 5).map((txt: string, idx: number) => (
-                      <li key={`${opt.id}-r-${idx}`}>{txt}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              {/* Comment list (readable by anyone once open) */}
+              <div className="mt-5 space-y-3">
+                {comments.length === 0 ? (
+                  <div className="text-sm text-slate-600">No comments yet.</div>
+                ) : (
+                  comments.map((c: any) => {
+                    const p = commentProfilesById[c.user_id];
+                    const canDelete = user?.id && c.user_id === user.id;
 
-              {/* Reason UI (only for the voter, only while voting is open) */}
-              {showReasonBox && (
-                <div style={{ marginTop: 14 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                    {myReason ? "Edit your reason" : "Why did you choose this?"}
-                  </div>
+                    return (
+                      <div key={c.id} className="rounded-2xl border bg-white p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className="h-10 w-10 overflow-hidden rounded-full border"
+                              style={{ background: "rgba(15,23,42,0.06)" }}
+                            >
+                              {p?.avatar_url ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={p.avatar_url}
+                                  alt=""
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-xs font-bold text-slate-500">
+                                  ?
+                                </div>
+                              )}
+                            </div>
 
-                  <textarea
-                    value={reasonDraft}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setReasonDraftByVoteId((prev: any) => ({
-                        ...prev,
-                        [voteIdForMyVote]: val,
-                      }));
-                    }}
-                    rows={3}
-                    style={{ width: "100%", padding: 10 }}
-                    placeholder="Write a short reason (1–2 sentences is perfect)."
-                  />
+                            <div>
+                              <div className="text-sm font-extrabold" style={{ color: NAVY }}>
+                                {p?.display_name ?? "Member"}
+                              </div>
+                              <div className="text-xs text-slate-500">{fmt(c.created_at)}</div>
+                            </div>
+                          </div>
 
-                  <div style={{ marginTop: 8 }}>
-                    <button onClick={saveMyReason} disabled={savingReason}>
-                      {savingReason ? "Saving..." : "Save reason"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                          {canDelete ? (
+                            <button
+                              onClick={() => deleteComment(c.id)}
+                              className="rounded-xl border bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                            >
+                              Delete
+                            </button>
+                          ) : null}
+                        </div>
 
-      {/* Resolution */}
-      {resolution && (
-        <div style={{ marginTop: 24 }}>
-          <h3>Curioso Resolution</h3>
-          <p>{resolution.note}</p>
-          <div>Resolved on {fmt(resolution.created_at)}</div>
-        </div>
-      )}
-
-      {/* =========================
-          Discussion (GATED)
-         ========================= */}
-
-      <div style={{ marginTop: 32 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
-          }}
-        >
-          <h3 style={{ margin: 0 }}>Discussion</h3>
-
-          {/* Curioso Open/Close buttons (only after close) */}
-          {isCurioso && (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {!canToggleDiscussion ? (
-                <div style={{ fontSize: 12, color: "#666" }}>
-                  (You can open discussion after voting ends.)
-                </div>
-              ) : q.discussion_open ? (
-                <button
-                  onClick={() => setDiscussionOpen(false)}
-                  disabled={togglingDiscussion}
-                >
-                  {togglingDiscussion ? "Closing..." : "Close Discussion"}
-                </button>
-              ) : (
-                <button
-                  onClick={() => setDiscussionOpen(true)}
-                  disabled={togglingDiscussion}
-                >
-                  {togglingDiscussion ? "Opening..." : "Open Discussion"}
-                </button>
-              )}
-            </div>
+                        <div className="mt-3 whitespace-pre-wrap text-sm text-slate-700">
+                          {c.body}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </>
           )}
         </div>
 
-        {/* Rule 1: never show discussion while open */}
-        {status === "open" ? (
-          <div style={{ color: "#666", marginTop: 8 }}>
-            Discussion opens after voting closes.
-          </div>
-        ) : !q.discussion_open ? (
-          <div style={{ color: "#666", marginTop: 8 }}>Discussion is closed.</div>
-        ) : !user ? (
-          <div style={{ color: "#666", marginTop: 8 }}>
-            Log in to see if you’re invited to the discussion.
-          </div>
-        ) : !didVote ? (
-          <div style={{ color: "#666", marginTop: 8 }}>
-            Discussion is for voters only on this Quandr3.
-          </div>
-        ) : (
-          <>
-            {/* ✅ Only reaches here if: closed + discussion_open + user voted */}
-
-            {/* Add comment */}
-            <div style={{ border: "1px solid #ddd", padding: 12, marginTop: 10 }}>
-              <div style={{ fontWeight: 700, marginBottom: 8 }}>
-                Add to the discussion
-              </div>
-
-              <textarea
-                value={commentDraft}
-                onChange={(e) => setCommentDraft(e.target.value)}
-                rows={3}
-                style={{ width: "100%", padding: 10 }}
-                placeholder="Share your take (keep it respectful)."
-                disabled={postingComment}
-              />
-
-              <div style={{ marginTop: 8 }}>
-                <button onClick={postComment} disabled={postingComment}>
-                  {postingComment ? "Posting..." : "Post comment"}
-                </button>
-              </div>
-            </div>
-
-            {/* Comments list */}
-            <div style={{ marginTop: 14 }}>
-              {comments.length === 0 ? (
-                <div style={{ color: "#666" }}>No comments yet.</div>
-              ) : (
-                comments.map((c: any) => {
-                  const p = commentProfilesById[c.user_id];
-                  const canDelete = user?.id && c.user_id === user.id;
-
-                  return (
-                    <div
-                      key={c.id}
-                      style={{
-                        border: "1px solid #eee",
-                        padding: 12,
-                        marginBottom: 10,
-                        background: "white",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          gap: 12,
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <div
-                            style={{
-                              width: 34,
-                              height: 34,
-                              borderRadius: 999,
-                              background: "#eee",
-                              overflow: "hidden",
-                            }}
-                          >
-                            {p?.avatar_url ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={p.avatar_url}
-                                alt=""
-                                style={{
-                                  width: "100%",
-                                  height: "100%",
-                                  objectFit: "cover",
-                                }}
-                              />
-                            ) : null}
-                          </div>
-
-                          <div>
-                            <div style={{ fontWeight: 700 }}>
-                              {p?.display_name ?? "Member"}
-                            </div>
-                            <div style={{ fontSize: 12, color: "#666" }}>
-                              {fmt(c.created_at)}
-                            </div>
-                          </div>
-                        </div>
-
-                        {canDelete ? (
-                          <button onClick={() => deleteComment(c.id)}>Delete</button>
-                        ) : null}
-                      </div>
-
-                      <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>
-                        {c.body}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </>
-        )}
+        <div className="mt-10 text-center text-xs text-slate-500">
+          Quandr3 • Ask • Share • Decide
+        </div>
       </div>
-    </div>
+    </main>
   );
 }
