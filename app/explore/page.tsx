@@ -1,7 +1,6 @@
-// app/explore/page.tsx
-import ExploreClient from "./_ExploreClient";
-
 export const dynamic = "force-dynamic";
+
+import ExploreClient from "./_ExploreClient";
 
 export default function ExplorePage() {
   return <ExploreClient />;
