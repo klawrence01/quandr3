@@ -204,11 +204,13 @@ export default function ExploreInner({
               <option value="resolved">Resolved</option>
             </select>
 
+            {/* ✅ UPDATED: Added Trending */}
             <select
               className="md:col-span-2 rounded-2xl border px-4 py-3"
               value={sort}
               onChange={(e) => setSort(e.target.value)}
             >
+              <option value="trending">Trending</option>
               <option value="new">Newest</option>
               <option value="closing">Closing Soon</option>
             </select>
