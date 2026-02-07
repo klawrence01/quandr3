@@ -9,7 +9,6 @@ import ExploreInner from "./_ExploreInner";
 
 const SAFE_LIMIT = 200;
 
-// vote lookback windows
 const MS_HOUR = 36e5;
 const MS_DAY = 24 * MS_HOUR;
 const MS_7D = 7 * MS_DAY;
@@ -25,35 +24,48 @@ function includesLoose(hay?: string, needle?: string) {
   return String(hay).toLowerCase().includes(String(needle).toLowerCase());
 }
 
-function clamp(n: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, n));
-}
-
-// Simple recency factor: newer posts get a boost, older ones decay
 function recencyFactor(createdAt?: string) {
   if (!createdAt) return 1;
   const ageMs = Date.now() - new Date(createdAt).getTime();
   const ageDays = Math.max(0, ageMs / MS_DAY);
-  // 0 days => ~1.0, 3 days => ~0.5, 9 days => ~0.25 (soft decay)
   return 1 / (1 + ageDays / 3);
 }
 
-// Trend score combines velocity + total interest + recency boost
 function computeTrendScore(r: any, voteStats: any) {
   const v24 = voteStats?.votes_24h || 0;
   const v7 = voteStats?.votes_7d || 0;
   const v30 = voteStats?.votes_30d || 0;
 
-  // Weighting: 24h velocity matters most
   const base = v24 * 5 + v7 * 2 + v30 * 1;
-
-  // Boost open slightly (people can still influence)
   const openBoost = r?.status === "open" ? 1.15 : 1.0;
 
-  // Soft cap to avoid one monster post dominating forever
-  const capped = Math.sqrt(base) * 10;
+  // If no votes at all, score is 0 (so it will look like Newest)
+  const capped = base > 0 ? Math.sqrt(base) * 10 : 0;
 
   return capped * openBoost * recencyFactor(r?.created_at);
+}
+
+async function tryLoadVotes(tableName: string, sinceISO: string) {
+  // We try common columns: (quandr3_id, created_at) OR (q_id, created_at)
+  const r1 = await supabase
+    .from(tableName)
+    .select("quandr3_id, created_at")
+    .gte("created_at", sinceISO)
+    .order("created_at", { ascending: false })
+    .limit(5000);
+
+  if (!r1.error) return { table: tableName, key: "quandr3_id", res: r1 };
+
+  const r2 = await supabase
+    .from(tableName)
+    .select("q_id, created_at")
+    .gte("created_at", sinceISO)
+    .order("created_at", { ascending: false })
+    .limit(5000);
+
+  if (!r2.error) return { table: tableName, key: "q_id", res: r2 };
+
+  return { table: tableName, key: null, res: r2 };
 }
 
 export default function ExploreClient() {
@@ -61,13 +73,14 @@ export default function ExploreClient() {
   const [err, setErr] = useState("");
 
   const [raw, setRaw] = useState<any[]>([]);
-  const [voteMap, setVoteMap] = useState<Record<string, any>>({}); // {quandr3_id: {votes_24h, votes_7d, votes_30d, trendScore}}
+  const [voteMap, setVoteMap] = useState<Record<string, any>>({});
+  const [trendInfo, setTrendInfo] = useState<string>(""); // shows whether trending is real or blocked
 
   // UI state
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState("all"); // all|open|awaiting_user|resolved
+  const [status, setStatus] = useState("all");
   const [sort, setSort] = useState("trending"); // trending|new|closing
-  const [scope, setScope] = useState("global"); // global|local
+  const [scope, setScope] = useState("global");
   const [activeCategory, setActiveCategory] = useState("all");
 
   useEffect(() => {
@@ -76,8 +89,9 @@ export default function ExploreClient() {
     async function load() {
       setLoading(true);
       setErr("");
+      setTrendInfo("");
 
-      // 1) Load Quandr3s (safe fallback select)
+      // 1) Load Quandr3s
       const primarySelect =
         "id,title,context,created_at,status,closes_at,category,city,state,media_url,hero_image_url";
 
@@ -96,7 +110,7 @@ export default function ExploreClient() {
       if (qErr) {
         const r2 = await supabase
           .from("quandr3s")
-          .select("id,title,created_at,status,closes_at,category,city,state")
+          .select("id,title,context,created_at,status,closes_at,category,city,state")
           .order("created_at", { ascending: false })
           .limit(SAFE_LIMIT);
 
@@ -117,28 +131,34 @@ export default function ExploreClient() {
       const quandr3s = qData || [];
       setRaw(quandr3s);
 
-      // 2) Load recent votes (to compute Trending)
-      // We’ll compute vote velocity client-side to avoid GROUP BY/RPC for now.
+      // 2) Load recent votes for Trending (auto-detect table/column)
       const since30dISO = new Date(Date.now() - MS_30D).toISOString();
 
-      const vRes = await supabase
-        .from("quandr3_votes")
-        .select("quandr3_id, created_at")
-        .gte("created_at", since30dISO)
-        .order("created_at", { ascending: false })
-        .limit(5000);
+      const tableCandidates = ["quandr3_votes", "votes", "quandr3_votes_view"];
+      let picked: any = null;
 
-      // If votes table doesn’t exist or RLS blocks it, Trending will fall back gracefully.
-      const votes = vRes?.data || [];
-      const vErr = vRes?.error;
+      for (const t of tableCandidates) {
+        const attempt = await tryLoadVotes(t, since30dISO);
+        if (!attempt?.res?.error) {
+          picked = attempt;
+          break;
+        }
+      }
 
-      // Build stats map
       const map: Record<string, any> = {};
 
-      if (!vErr && votes.length) {
+      if (!picked) {
+        // no table found OR all blocked
+        setTrendInfo("Trending: vote table not readable (RLS or name mismatch). Showing Newest behavior.");
+      } else {
+        const votes = picked?.res?.data || [];
+        const idKey = picked?.key; // "quandr3_id" or "q_id"
+
+        setTrendInfo(`Trending source: ${picked.table}.${idKey}`);
+
         const now = Date.now();
         for (const v of votes) {
-          const id = v?.quandr3_id;
+          const id = v?.[idKey];
           const ts = v?.created_at ? new Date(v.created_at).getTime() : null;
           if (!id || !ts) continue;
 
@@ -151,7 +171,7 @@ export default function ExploreClient() {
         }
       }
 
-      // Compute trendScore for each post
+      // 3) Compute trendScore for each post
       for (const r of quandr3s) {
         const id = r?.id;
         const stats = map[id] || { votes_24h: 0, votes_7d: 0, votes_30d: 0, trendScore: 0 };
@@ -160,13 +180,6 @@ export default function ExploreClient() {
       }
 
       setVoteMap(map);
-
-      // Optional: if votes table is blocked, show a soft warning only in console
-      if (vErr) {
-        // eslint-disable-next-line no-console
-        console.warn("Trending: could not read quandr3_votes:", vErr?.message);
-      }
-
       setLoading(false);
     }
 
@@ -176,7 +189,6 @@ export default function ExploreClient() {
     };
   }, []);
 
-  // Categories
   const categories = useMemo(() => {
     const cats = uniq(
       (raw || [])
@@ -192,11 +204,9 @@ export default function ExploreClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categories.join("|")]);
 
-  // Apply scope/status/category/search + sorting (incl trending)
   const rows = useMemo(() => {
     let out = [...(raw || [])];
 
-    // Scope
     if (scope === "local") {
       out = out.filter(
         (r: any) =>
@@ -204,17 +214,14 @@ export default function ExploreClient() {
       );
     }
 
-    // Status
     if (status && status !== "all") {
       out = out.filter((r: any) => r?.status === status);
     }
 
-    // Category
     if (activeCategory && activeCategory !== "all") {
       out = out.filter((r: any) => String(r?.category || "").trim() === activeCategory);
     }
 
-    // Search
     const needle = (q || "").trim();
     if (needle) {
       out = out.filter((r: any) => {
@@ -228,7 +235,6 @@ export default function ExploreClient() {
       });
     }
 
-    // Sort
     if (sort === "closing") {
       out.sort((a: any, b: any) => {
         const aOpen = a?.status === "open";
@@ -244,7 +250,6 @@ export default function ExploreClient() {
       out.sort((a: any, b: any) => {
         const aS = voteMap?.[a?.id]?.trendScore || 0;
         const bS = voteMap?.[b?.id]?.trendScore || 0;
-        // tie-breaker: newest
         if (bS !== aS) return bS - aS;
 
         const aT = a?.created_at ? new Date(a.created_at).getTime() : 0;
@@ -259,7 +264,6 @@ export default function ExploreClient() {
       });
     }
 
-    // Attach vote stats so Inner can show later if you want (optional)
     return out.map((r: any) => ({
       ...r,
       _votes24h: voteMap?.[r?.id]?.votes_24h || 0,
@@ -272,7 +276,7 @@ export default function ExploreClient() {
   return (
     <ExploreInner
       loading={loading}
-      err={err}
+      err={err || trendInfo}
       rows={rows || []}
       q={q}
       setQ={setQ}
