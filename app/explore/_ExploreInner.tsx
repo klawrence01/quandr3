@@ -263,23 +263,44 @@ export default function ExploreInner({
 
         {/* 4 STAT BOXES */}
         <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-          {[
-            { title: "TOP CURIOSO", note: "Coming soon (needs stats wiring)." },
-            { title: "TOP WAYFINDER", note: "Coming soon (needs stats wiring)." },
-            { title: "TOP QUANDR3", note: "Coming soon (needs stats wiring)." },
-            { title: "TRENDING", note: "Coming soon (needs stats wiring)." },
-          ].map((b) => (
-            <div key={b.title} className="rounded-3xl bg-white border p-5">
-              <div className="text-xs tracking-widest font-semibold text-slate-500">
-                {b.title}
-              </div>
-              <div className="mt-2 text-slate-700">{b.note}</div>
+          {/* TOP CURIOSO */}
+          <div className="rounded-3xl bg-white border p-5">
+            <div className="text-xs tracking-widest font-semibold text-slate-500">TOP CURIOSO</div>
+            <div className="mt-2 text-slate-700">Coming soon (needs stats wiring).</div>
+          </div>
+
+          {/* TOP WAYFINDER */}
+          <div className="rounded-3xl bg-white border p-5">
+            <div className="text-xs tracking-widest font-semibold text-slate-500">TOP WAYFINDER</div>
+            <div className="mt-2 text-slate-700">Coming soon (needs stats wiring).</div>
+          </div>
+
+          {/* TOP QUANDR3 */}
+          <div className="rounded-3xl bg-white border p-5">
+            <div className="text-xs tracking-widest font-semibold text-slate-500">TOP QUANDR3</div>
+            <div className="mt-2 text-slate-700">Coming soon (needs stats wiring).</div>
+          </div>
+
+          {/* ✅ TRENDING TILE (CLICKABLE) */}
+          <button
+            type="button"
+            onClick={() => {
+              setSort?.("trending");
+              const el = document.getElementById("feed");
+              if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+            className="rounded-3xl bg-white border p-5 text-left hover:shadow-sm transition"
+          >
+            <div className="text-xs tracking-widest font-semibold text-slate-500">TRENDING</div>
+            <div className="mt-2 text-slate-700">Click to sort the feed by Trending.</div>
+            <div className="mt-3 text-sm font-semibold" style={{ color: NAVY }}>
+              {sort === "trending" ? "✓ Trending is active" : "Switch to Trending"}
             </div>
-          ))}
+          </button>
         </div>
 
         {/* FEED */}
-        <div className="mt-6">
+        <div id="feed" className="mt-6">
           {loading && <div className="text-slate-600">Loading…</div>}
           {err && <div className="text-red-600">{err}</div>}
 
@@ -380,9 +401,7 @@ export default function ExploreInner({
             })}
 
             {!loading && !err && safeRows.length === 0 && (
-              <div className="rounded-3xl bg-white border p-6 text-slate-600">
-                No results yet.
-              </div>
+              <div className="rounded-3xl bg-white border p-6 text-slate-600">No results yet.</div>
             )}
           </div>
         </div>
