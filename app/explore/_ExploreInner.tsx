@@ -1,3 +1,4 @@
+// /app/explore/_ExploreInner.tsx
 // @ts-nocheck
 
 import Link from "next/link";
@@ -26,10 +27,6 @@ function statusPill(status: string) {
   return { label: "Resolved", color: BLUE };
 }
 
-/**
- * Phase 1 placeholder banner:
- * - generates a clean banner image with category label
- */
 function svgBannerDataUrl(categoryLabel: string) {
   const label = (categoryLabel || "QUANDR3").toUpperCase();
   const safe = label.replace(/[^A-Z0-9 \-_.]/g, "");
@@ -110,6 +107,8 @@ export default function ExploreInner({
     { key: "resolved", label: "Resolved" },
   ];
 
+  const safeRows = rows || [];
+
   return (
     <div style={{ minHeight: "100vh", background: SOFT_BG }}>
       <div className="mx-auto max-w-6xl px-4 py-8">
@@ -132,9 +131,7 @@ export default function ExploreInner({
                 <Link
                   href="/q/create"
                   className="inline-flex items-center rounded-full px-5 py-3 text-white font-semibold"
-                  style={{
-                    background: "linear-gradient(90deg, #1e63f3 0%, #ff6b6b 100%)",
-                  }}
+                  style={{ background: "linear-gradient(90deg, #1e63f3 0%, #ff6b6b 100%)" }}
                 >
                   Create a Quandr3
                 </Link>
@@ -196,7 +193,6 @@ export default function ExploreInner({
               onChange={(e) => setQ(e.target.value)}
             />
 
-            {/* Keep dropdown too (optional), but the buttons below are the main UI */}
             <select
               className="md:col-span-3 rounded-2xl border px-4 py-3"
               value={status}
@@ -218,7 +214,7 @@ export default function ExploreInner({
             </select>
           </div>
 
-          {/* ✅ STATUS BUTTON ROW (what you asked for) */}
+          {/* Status buttons */}
           <div className="mt-4 rounded-2xl border bg-white p-2">
             <div className="flex flex-wrap gap-2">
               {STATUS_TABS.map((t) => {
@@ -286,7 +282,7 @@ export default function ExploreInner({
           {err && <div className="text-red-600">{err}</div>}
 
           <div className="flex flex-col gap-5">
-            {rows.map((r: any) => {
+            {safeRows.map((r: any) => {
               const pill = statusPill(r.status);
               const imgSrc = pickCardImageSrc(r);
 
@@ -299,6 +295,7 @@ export default function ExploreInner({
                       fill
                       className="object-cover"
                       sizes="(max-width: 768px) 100vw, 1100px"
+                      unoptimized
                       priority={false}
                     />
 
@@ -323,7 +320,7 @@ export default function ExploreInner({
                   <div className="p-6">
                     <Link href={`/q/${r.id}`}>
                       <h2 className="text-3xl font-extrabold leading-tight" style={{ color: NAVY }}>
-                        {r.title}
+                        {r.title || "Untitled Quandr3"}
                       </h2>
                     </Link>
 
@@ -339,7 +336,7 @@ export default function ExploreInner({
                         </span>
                       )}
 
-                      {r.status === "open" && <span>{hoursLeft(r.closes_at)}h left</span>}
+                      {r.status === "open" && r.closes_at && <span>{hoursLeft(r.closes_at)}h left</span>}
 
                       {canShowDiscussionHint(r) ? (
                         <span className="text-slate-500">
@@ -373,7 +370,7 @@ export default function ExploreInner({
               );
             })}
 
-            {!loading && !err && (!rows || rows.length === 0) && (
+            {!loading && !err && safeRows.length === 0 && (
               <div className="rounded-3xl bg-white border p-6 text-slate-600">
                 No results yet.
               </div>
