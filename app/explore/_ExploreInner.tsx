@@ -331,6 +331,13 @@ export default function ExploreInner({
                     <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
                       <span>{fmtDateTime(r.created_at)}</span>
 
+                      {/* ✅ TRENDING DEBUG LINE */}
+                      {sort === "trending" && (
+                        <span className="text-slate-500">
+                          🔥 {Number(r._trendScore || 0).toFixed(1)} · {r._votes24h || 0} votes (24h)
+                        </span>
+                      )}
+
                       {(r.city || r.state) && (
                         <span>
                           {r.city}

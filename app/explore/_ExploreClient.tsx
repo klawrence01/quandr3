@@ -31,18 +31,28 @@ function recencyFactor(createdAt?: string) {
   return 1 / (1 + ageDays / 3);
 }
 
+/**
+ * ✅ UPDATED: stronger Trending formula (vote velocity matters most)
+ * - 24h votes dominate
+ * - open posts get a boost
+ * - recency matters but less than velocity
+ */
 function computeTrendScore(r: any, voteStats: any) {
   const v24 = voteStats?.votes_24h || 0;
   const v7 = voteStats?.votes_7d || 0;
   const v30 = voteStats?.votes_30d || 0;
 
-  const base = v24 * 5 + v7 * 2 + v30 * 1;
-  const openBoost = r?.status === "open" ? 1.15 : 1.0;
+  // HARD bias to velocity so Trending changes even with small vote counts
+  const base = v24 * 50 + v7 * 10 + v30 * 2;
 
-  // If no votes at all, score is 0 (so it will look like Newest)
-  const capped = base > 0 ? Math.sqrt(base) * 10 : 0;
+  // Open gets extra boost because it's “live”
+  const openBoost = r?.status === "open" ? 1.35 : 1.0;
 
-  return capped * openBoost * recencyFactor(r?.created_at);
+  // Recency still matters but less than velocity
+  const rf = recencyFactor(r?.created_at);
+
+  // Keep stable / readable
+  return base * openBoost * (0.6 + 0.4 * rf);
 }
 
 async function tryLoadVotes(tableName: string, sinceISO: string) {
@@ -74,7 +84,7 @@ export default function ExploreClient() {
 
   const [raw, setRaw] = useState<any[]>([]);
   const [voteMap, setVoteMap] = useState<Record<string, any>>({});
-  const [trendInfo, setTrendInfo] = useState<string>(""); // shows whether trending is real or blocked
+  const [trendInfo, setTrendInfo] = useState<string>("");
 
   // UI state
   const [q, setQ] = useState("");
@@ -148,11 +158,12 @@ export default function ExploreClient() {
       const map: Record<string, any> = {};
 
       if (!picked) {
-        // no table found OR all blocked
-        setTrendInfo("Trending: vote table not readable (RLS or name mismatch). Showing Newest behavior.");
+        setTrendInfo(
+          "Trending: vote table not readable (RLS or name mismatch). Trending will use fallback ordering."
+        );
       } else {
         const votes = picked?.res?.data || [];
-        const idKey = picked?.key; // "quandr3_id" or "q_id"
+        const idKey = picked?.key;
 
         setTrendInfo(`Trending source: ${picked.table}.${idKey}`);
 
@@ -209,8 +220,7 @@ export default function ExploreClient() {
 
     if (scope === "local") {
       out = out.filter(
-        (r: any) =>
-          (r?.city && String(r.city).trim()) || (r?.state && String(r.state).trim())
+        (r: any) => (r?.city && String(r.city).trim()) || (r?.state && String(r.state).trim())
       );
     }
 
@@ -235,6 +245,18 @@ export default function ExploreClient() {
       });
     }
 
+    // ✅ helper for “fallback trending” when votes are flat
+    function fallbackTrendingSort(a: any, b: any) {
+      const aOpen = a?.status === "open";
+      const bOpen = b?.status === "open";
+      if (aOpen && !bOpen) return -1;
+      if (!aOpen && bOpen) return 1;
+
+      const aT = a?.created_at ? new Date(a.created_at).getTime() : 0;
+      const bT = b?.created_at ? new Date(b.created_at).getTime() : 0;
+      return bT - aT;
+    }
+
     if (sort === "closing") {
       out.sort((a: any, b: any) => {
         const aOpen = a?.status === "open";
@@ -247,15 +269,22 @@ export default function ExploreClient() {
         return aT - bT;
       });
     } else if (sort === "trending") {
-      out.sort((a: any, b: any) => {
-        const aS = voteMap?.[a?.id]?.trendScore || 0;
-        const bS = voteMap?.[b?.id]?.trendScore || 0;
-        if (bS !== aS) return bS - aS;
+      // ✅ Determine if trending is “flat” (all scores are 0)
+      const anyTrending = out.some((r: any) => (voteMap?.[r?.id]?.trendScore || 0) > 0);
 
-        const aT = a?.created_at ? new Date(a.created_at).getTime() : 0;
-        const bT = b?.created_at ? new Date(b.created_at).getTime() : 0;
-        return bT - aT;
-      });
+      if (!anyTrending) {
+        // Fallback so Trending ALWAYS changes visibly
+        out.sort(fallbackTrendingSort);
+      } else {
+        out.sort((a: any, b: any) => {
+          const aS = voteMap?.[a?.id]?.trendScore || 0;
+          const bS = voteMap?.[b?.id]?.trendScore || 0;
+          if (bS !== aS) return bS - aS;
+
+          // tie-breaker: open first, then newest
+          return fallbackTrendingSort(a, b);
+        });
+      }
     } else {
       out.sort((a: any, b: any) => {
         const aT = a?.created_at ? new Date(a.created_at).getTime() : 0;
