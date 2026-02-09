@@ -79,12 +79,44 @@ async function tryLoadVotes(tableName: string, sinceISO: string) {
   return { table: tableName, key: null, res: r2 };
 }
 
+/* =========================
+   B) Curioso identity helpers
+========================= */
+
+// Try to extract a creator/user id from a row, without assuming a single column name.
+function getCreatorId(r: any) {
+  return (
+    r?.created_by ||
+    r?.creator_id ||
+    r?.user_id ||
+    r?.curioso_id ||
+    r?.author_id ||
+    null
+  );
+}
+
+// Try to extract a “best effort” creator display name directly from the row (if it exists).
+function getCreatorNameFromRow(r: any) {
+  return (
+    r?.creator_name ||
+    r?.created_by_name ||
+    r?.curioso_name ||
+    r?.author_name ||
+    r?.username ||
+    r?.display_name ||
+    r?.full_name ||
+    ""
+  );
+}
+
 export default function ExploreClient() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
   const [raw, setRaw] = useState<any[]>([]);
   const [voteMap, setVoteMap] = useState<Record<string, any>>({});
+
+  // ✅ keep trendInfo internally, but DO NOT show it (and DO NOT treat it like an error)
   const [trendInfo, setTrendInfo] = useState<string>("");
 
   // UI state
@@ -103,8 +135,9 @@ export default function ExploreClient() {
       setTrendInfo("");
 
       // 1) Load Quandr3s
+      // ✅ Try to include common creator columns (but do not rely on them existing)
       const primarySelect =
-        "id,title,context,created_at,status,closes_at,category,city,state,media_url,hero_image_url";
+        "id,title,context,created_at,status,closes_at,category,city,state,media_url,hero_image_url,created_by,creator_id,user_id,curioso_id,author_id,creator_name,created_by_name,curioso_name,author_name,username,display_name,full_name";
 
       let qData: any[] | null = null;
       let qErr: any = null;
@@ -118,10 +151,11 @@ export default function ExploreClient() {
       qData = r1.data;
       qErr = r1.error;
 
+      // Fallback select if unknown columns error
       if (qErr) {
         const r2 = await supabase
           .from("quandr3s")
-          .select("id,title,context,created_at,status,closes_at,category,city,state")
+          .select("id,title,context,created_at,status,closes_at,category,city,state,media_url,hero_image_url")
           .order("created_at", { ascending: false })
           .limit(SAFE_LIMIT);
 
@@ -139,7 +173,53 @@ export default function ExploreClient() {
         return;
       }
 
-      const quandr3s = qData || [];
+      let quandr3s = qData || [];
+
+      // ✅ B) Attach Curioso name best-effort (row fields first, then profiles lookup)
+      try {
+        // always attach fallbacks so UI can show something
+        quandr3s = quandr3s.map((r: any) => ({
+          ...r,
+          _curioso_id: getCreatorId(r),
+          _curioso_name: (getCreatorNameFromRow(r) || "").trim(),
+          _curioso_avatar: null,
+        }));
+
+        const creatorIds = uniq(quandr3s.map((r: any) => r?._curioso_id)).filter(Boolean);
+
+        if (creatorIds.length) {
+          const prof = await supabase
+            .from("profiles")
+            .select("id, username, display_name, full_name, avatar_url")
+            .in("id", creatorIds.slice(0, 300));
+
+          if (!prof.error && Array.isArray(prof.data)) {
+            const pMap: Record<string, any> = {};
+            for (const p of prof.data) pMap[p.id] = p;
+
+            quandr3s = quandr3s.map((r: any) => {
+              const cid = r?._curioso_id;
+              const p = cid ? pMap[cid] : null;
+
+              const name =
+                (r?._curioso_name || "").trim() ||
+                (p?.display_name || "").trim() ||
+                (p?.full_name || "").trim() ||
+                (p?.username || "").trim() ||
+                "";
+
+              return {
+                ...r,
+                _curioso_name: name,
+                _curioso_avatar: p?.avatar_url || null,
+              };
+            });
+          }
+        }
+      } catch {
+        // safety: never break explore
+      }
+
       setRaw(quandr3s);
 
       // 2) Load recent votes for Trending (auto-detect table/column)
@@ -159,6 +239,7 @@ export default function ExploreClient() {
       const map: Record<string, any> = {};
 
       if (!picked) {
+        // ✅ keep as internal debug text only
         setTrendInfo(
           "Trending: vote table not readable (RLS or name mismatch). Trending will use fallback ordering."
         );
@@ -166,6 +247,7 @@ export default function ExploreClient() {
         const votes = picked?.res?.data || [];
         const idKey = picked?.key;
 
+        // ✅ keep as internal debug text only
         setTrendInfo(`Trending source: ${picked.table}.${idKey}`);
 
         const now = Date.now();
@@ -306,7 +388,8 @@ export default function ExploreClient() {
   return (
     <ExploreInner
       loading={loading}
-      err={err || trendInfo}
+      // ✅ FIX: only pass REAL errors. Do NOT pass trendInfo.
+      err={err}
       rows={rows || []}
       q={q}
       setQ={setQ}
