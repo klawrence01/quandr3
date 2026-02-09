@@ -21,13 +21,13 @@ export default function Quandr3DetailPage() {
     if (!id) return;
 
     (async () => {
-      const { data: qRow, error: qErr } = await supabase
+      const { data: qRow } = await supabase
         .from("quandr3s")
         .select("*")
         .eq("id", id)
         .single();
 
-      const { data: opts, error: optErr } = await supabase
+      const { data: opts } = await supabase
         .from("quandr3_options")
         .select("*")
         .eq("quandr3_id", id)
@@ -43,8 +43,6 @@ export default function Quandr3DetailPage() {
         .select("*")
         .eq("quandr3_id", id)
         .maybeSingle();
-
-      console.log("DETAIL PAGE DATA:", { qRow, opts, vts, res, qErr, optErr });
 
       setQ(qRow || null);
       setOptions(opts || []);
@@ -77,26 +75,26 @@ export default function Quandr3DetailPage() {
             ⚠️ No options loaded for this quandr3. Check Supabase data.
           </div>
         ) : (
-          <div className="space-y-6">
+          <div className="space-y-4">
             {options.map((opt, i) => (
               <div
                 key={opt.id}
-                className="overflow-hidden rounded-2xl border bg-white shadow-sm"
+                className="flex items-center gap-4 rounded-2xl border bg-white p-4 shadow-sm"
               >
-                {/* Shrunk image header */}
-                <div className="h-[140px] w-full overflow-hidden bg-slate-900">
+                {/* Small thumbnail instead of huge banner */}
+                <div className="h-[80px] w-[120px] overflow-hidden rounded-xl bg-slate-900 shrink-0">
                   {opt.image_url && (
                     <img
                       src={opt.image_url}
                       alt=""
-                      className="h-full w-full object-cover opacity-80"
+                      className="h-full w-full object-cover"
                     />
                   )}
                 </div>
 
-                <div className="p-5">
+                <div className="flex-1">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-slate-900">
+                    <h3 className="text-base font-semibold text-slate-900">
                       Option {String.fromCharCode(65 + i)} – {opt.label}
                     </h3>
 
