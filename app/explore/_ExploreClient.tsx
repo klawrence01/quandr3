@@ -25,6 +25,10 @@ function includesLoose(hay?: string, needle?: string) {
   return String(hay).toLowerCase().includes(String(needle).toLowerCase());
 }
 
+function normStatus(s: any) {
+  return String(s || "").trim().toLowerCase();
+}
+
 function recencyFactor(createdAt?: string) {
   if (!createdAt) return 1;
   const ageMs = Date.now() - new Date(createdAt).getTime();
@@ -56,6 +60,20 @@ function computeTrendScore(r: any, voteStats: any) {
   return base * openBoost * (0.6 + 0.4 * rf);
 }
 
+function computeInternetDecided(row: any, totalVotes: number) {
+  // Resolved stays resolved
+  if (normStatus(row?.status) === "resolved") return false;
+
+  const createdAt = row?.created_at ? new Date(row.created_at).getTime() : 0;
+  const dur = Number(row?.voting_duration_hours || 0);
+  const maxVotes = Number(row?.voting_max_votes || 0);
+
+  const timeExpired = createdAt && dur ? Date.now() > createdAt + dur * MS_HOUR : false;
+  const capReached = maxVotes ? totalVotes >= maxVotes : false;
+
+  return timeExpired || capReached;
+}
+
 async function tryLoadVotes(tableName: string, sinceISO: string) {
   // We try common columns: (quandr3_id, created_at) OR (q_id, created_at)
   const r1 = await supabase
@@ -85,14 +103,7 @@ async function tryLoadVotes(tableName: string, sinceISO: string) {
 
 // Try to extract a creator/user id from a row, without assuming a single column name.
 function getCreatorId(r: any) {
-  return (
-    r?.created_by ||
-    r?.creator_id ||
-    r?.user_id ||
-    r?.curioso_id ||
-    r?.author_id ||
-    null
-  );
+  return r?.created_by || r?.creator_id || r?.user_id || r?.curioso_id || r?.author_id || null;
 }
 
 // Try to extract a “best effort” creator display name directly from the row (if it exists).
@@ -135,9 +146,9 @@ export default function ExploreClient() {
       setTrendInfo("");
 
       // 1) Load Quandr3s
-      // ✅ Try to include common creator columns (but do not rely on them existing)
+      // ✅ Include vote timing fields for Internet Decided computation
       const primarySelect =
-        "id,title,context,created_at,status,closes_at,category,city,state,media_url,hero_image_url,created_by,creator_id,user_id,curioso_id,author_id,creator_name,created_by_name,curioso_name,author_name,username,display_name,full_name";
+        "id,title,context,created_at,status,closes_at,category,city,state,media_url,hero_image_url,voting_duration_hours,voting_max_votes,created_by,creator_id,user_id,curioso_id,author_id,creator_name,created_by_name,curioso_name,author_name,username,display_name,full_name";
 
       let qData: any[] | null = null;
       let qErr: any = null;
@@ -155,7 +166,9 @@ export default function ExploreClient() {
       if (qErr) {
         const r2 = await supabase
           .from("quandr3s")
-          .select("id,title,context,created_at,status,closes_at,category,city,state,media_url,hero_image_url")
+          .select(
+            "id,title,context,created_at,status,closes_at,category,city,state,media_url,hero_image_url,voting_duration_hours,voting_max_votes"
+          )
           .order("created_at", { ascending: false })
           .limit(SAFE_LIMIT);
 
@@ -220,8 +233,6 @@ export default function ExploreClient() {
         // safety: never break explore
       }
 
-      setRaw(quandr3s);
-
       // 2) Load recent votes for Trending (auto-detect table/column)
       const since30dISO = new Date(Date.now() - MS_30D).toISOString();
 
@@ -240,9 +251,7 @@ export default function ExploreClient() {
 
       if (!picked) {
         // ✅ keep as internal debug text only
-        setTrendInfo(
-          "Trending: vote table not readable (RLS or name mismatch). Trending will use fallback ordering."
-        );
+        setTrendInfo("Trending: vote table not readable (RLS or name mismatch). Trending will use fallback ordering.");
       } else {
         const votes = picked?.res?.data || [];
         const idKey = picked?.key;
@@ -256,23 +265,45 @@ export default function ExploreClient() {
           const ts = v?.created_at ? new Date(v.created_at).getTime() : null;
           if (!id || !ts) continue;
 
-          if (!map[id]) map[id] = { votes_24h: 0, votes_7d: 0, votes_30d: 0, trendScore: 0 };
+          if (!map[id]) map[id] = { votes_24h: 0, votes_7d: 0, votes_30d: 0, trendScore: 0, _totalVotes: 0 };
 
           const age = now - ts;
           if (age <= MS_DAY) map[id].votes_24h += 1;
           if (age <= MS_7D) map[id].votes_7d += 1;
           if (age <= MS_30D) map[id].votes_30d += 1;
         }
+
+        // Also compute a totalVotes estimate from the same vote data
+        for (const id of Object.keys(map)) {
+          // votes_30d is what we have loaded; use it as total estimate for now
+          map[id]._totalVotes = map[id].votes_30d || 0;
+        }
       }
 
-      // 3) Compute trendScore for each post
+      // 3) Compute trendScore + compute UI status (open/awaiting_user/resolved)
       for (const r of quandr3s) {
         const id = r?.id;
-        const stats = map[id] || { votes_24h: 0, votes_7d: 0, votes_30d: 0, trendScore: 0 };
+
+        const stats =
+          map[id] || { votes_24h: 0, votes_7d: 0, votes_30d: 0, trendScore: 0, _totalVotes: 0 };
+
+        // ✅ compute the UI status we want
+        const decided = computeInternetDecided(r, stats._totalVotes || 0);
+        const s = normStatus(r?.status);
+
+        const uiStatus =
+          s === "resolved" ? "resolved" : decided ? "awaiting_user" : "open";
+
+        // overwrite status only for UI purposes
+        r.status = uiStatus;
+
         stats.trendScore = computeTrendScore(r, stats);
         map[id] = stats;
       }
 
+      if (ignore) return;
+
+      setRaw(quandr3s);
       setVoteMap(map);
       setLoading(false);
     }
@@ -302,9 +333,7 @@ export default function ExploreClient() {
     let out = [...(raw || [])];
 
     if (scope === "local") {
-      out = out.filter(
-        (r: any) => (r?.city && String(r.city).trim()) || (r?.state && String(r.state).trim())
-      );
+      out = out.filter((r: any) => (r?.city && String(r.city).trim()) || (r?.state && String(r.state).trim()));
     }
 
     if (status && status !== "all") {
