@@ -297,7 +297,11 @@ export default function ExploreInner({
         {/* FEED */}
         <div id="feed" className="mt-6">
           {loading && <div className="text-slate-600">Loading…</div>}
-          {err && <div className="text-red-600">{err}</div>}
+
+          {/* ✅ CHANGE: Hide debug in production */}
+          {err && process.env.NODE_ENV !== "production" && (
+            <div className="text-red-600">{err}</div>
+          )}
 
           <div className="flex flex-col gap-5">
             {safeRows.map((r: any) => {
