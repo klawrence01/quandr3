@@ -84,6 +84,30 @@ function canShowDiscussionHint(r: any) {
   return r?.status === "resolved";
 }
 
+function displayCuriosoName(r: any) {
+  const name =
+    (r?._curioso_name || "").trim() ||
+    (r?.creator_name || "").trim() ||
+    (r?.created_by_name || "").trim() ||
+    (r?.curioso_name || "").trim() ||
+    (r?.author_name || "").trim() ||
+    "";
+
+  if (name) return name;
+
+  const id =
+    r?._curioso_id ||
+    r?.created_by ||
+    r?.creator_id ||
+    r?.user_id ||
+    r?.curioso_id ||
+    r?.author_id ||
+    null;
+
+  if (id) return `Curioso ${String(id).slice(0, 6)}`;
+  return "Curioso";
+}
+
 export default function ExploreInner({
   loading,
   err,
@@ -112,6 +136,188 @@ export default function ExploreInner({
   return (
     <div style={{ minHeight: "100vh", background: SOFT_BG }}>
       <div className="mx-auto max-w-6xl px-4 py-8">
+        {/* SOUL HEADER */}
+        <div className="rounded-3xl bg-white border p-6">
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+            <div>
+              <div className="text-xs tracking-widest font-semibold text-slate-500">
+                REAL PEOPLE. REAL DILEMMAS.
+              </div>
+              <h1 className="mt-1 text-4xl font-extrabold" style={{ color: NAVY }}>
+                Explore
+              </h1>
+              <p className="mt-2 text-slate-600 max-w-2xl">
+                This is where decisions live. Browse open Quandr3s, see what the internet decided,
+                and learn from final outcomes — real questions, real reasoning, real closure.
+              </p>
+
+              <div className="mt-4 flex flex-wrap gap-3">
+                <Link
+                  href="/q/create"
+                  className="inline-flex items-center rounded-full px-5 py-3 text-white font-semibold"
+                  style={{ background: "linear-gradient(90deg, #1e63f3 0%, #ff6b6b 100%)" }}
+                >
+                  Create a Quandr3
+                </Link>
+
+                <Link
+                  href="/about"
+                  className="inline-flex items-center rounded-full px-5 py-3 border font-semibold"
+                  style={{ color: NAVY }}
+                >
+                  About
+                </Link>
+
+                <Link
+                  href="/contact"
+                  className="inline-flex items-center rounded-full px-5 py-3 border font-semibold"
+                  style={{ color: NAVY }}
+                >
+                  Contact
+                </Link>
+              </div>
+            </div>
+
+            {/* Global / Local toggle */}
+            <div className="rounded-2xl border p-3 w-full md:w-[320px]">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setScope?.("global")}
+                  className="flex-1 rounded-xl px-4 py-2 font-semibold border"
+                  style={{
+                    background: scope === "global" ? NAVY : "white",
+                    color: scope === "global" ? "white" : NAVY,
+                  }}
+                >
+                  Global
+                </button>
+                <button
+                  onClick={() => setScope?.("local")}
+                  className="flex-1 rounded-xl px-4 py-2 font-semibold border"
+                  style={{
+                    background: scope === "local" ? NAVY : "white",
+                    color: scope === "local" ? "white" : NAVY,
+                  }}
+                >
+                  Local
+                </button>
+              </div>
+              <div className="mt-2 text-xs text-slate-600">
+                Local shows posts with a city/state attached.
+              </div>
+            </div>
+          </div>
+
+          {/* Search row */}
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-12 gap-3">
+            <input
+              className="md:col-span-7 rounded-2xl border px-4 py-3"
+              placeholder="Search title, context, city, or id…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+
+            <select
+              className="md:col-span-3 rounded-2xl border px-4 py-3"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+            >
+              <option value="all">All statuses</option>
+              <option value="open">Open</option>
+              <option value="awaiting_user">Internet Decided</option>
+              <option value="resolved">Resolved</option>
+            </select>
+
+            <select
+              className="md:col-span-2 rounded-2xl border px-4 py-3"
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+            >
+              <option value="trending">Trending</option>
+              <option value="new">Newest</option>
+              <option value="closing">Closing Soon</option>
+            </select>
+          </div>
+
+          {/* Status buttons */}
+          <div className="mt-4 rounded-2xl border bg-white p-2">
+            <div className="flex flex-wrap gap-2">
+              {STATUS_TABS.map((t) => {
+                const selected = status === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    onClick={() => setStatus?.(t.key)}
+                    className="rounded-full px-4 py-2 border font-semibold text-sm"
+                    style={{
+                      background: selected ? NAVY : "white",
+                      color: selected ? "white" : NAVY,
+                    }}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* CATEGORY PILLS */}
+        <div className="mt-6 rounded-3xl bg-white border p-4">
+          <div className="flex flex-wrap gap-2">
+            {(categories || ["all"]).map((c: string) => {
+              const selected = (activeCategory || "all") === c;
+              return (
+                <button
+                  key={c}
+                  onClick={() => setActiveCategory?.(c)}
+                  className="rounded-full px-4 py-2 border font-semibold text-sm"
+                  style={{
+                    background: selected ? NAVY : "white",
+                    color: selected ? "white" : NAVY,
+                  }}
+                >
+                  {c}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 4 STAT BOXES */}
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="rounded-3xl bg-white border p-5">
+            <div className="text-xs tracking-widest font-semibold text-slate-500">TOP CURIOSO</div>
+            <div className="mt-2 text-slate-700">Coming soon (needs stats wiring).</div>
+          </div>
+
+          <div className="rounded-3xl bg-white border p-5">
+            <div className="text-xs tracking-widest font-semibold text-slate-500">TOP WAYFINDER</div>
+            <div className="mt-2 text-slate-700">Coming soon (needs stats wiring).</div>
+          </div>
+
+          <div className="rounded-3xl bg-white border p-5">
+            <div className="text-xs tracking-widest font-semibold text-slate-500">TOP QUANDR3</div>
+            <div className="mt-2 text-slate-700">Coming soon (needs stats wiring).</div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSort?.("trending");
+              const el = document.getElementById("feed");
+              if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+            className="rounded-3xl bg-white border p-5 text-left hover:shadow-sm transition"
+          >
+            <div className="text-xs tracking-widest font-semibold text-slate-500">TRENDING</div>
+            <div className="mt-2 text-slate-700">Click to sort the feed by Trending.</div>
+            <div className="mt-3 text-sm font-semibold" style={{ color: NAVY }}>
+              {sort === "trending" ? "✓ Trending is active" : "Switch to Trending"}
+            </div>
+          </button>
+        </div>
+
         {/* FEED */}
         <div id="feed" className="mt-6">
           {loading && <div className="text-slate-600">Loading…</div>}
@@ -125,6 +331,7 @@ export default function ExploreInner({
             {safeRows.map((r: any) => {
               const pill = statusPill(r.status);
               const imgSrc = pickCardImageSrc(r);
+              const curiosoName = displayCuriosoName(r);
 
               return (
                 <div key={r.id} className="rounded-3xl bg-white border overflow-hidden">
@@ -164,11 +371,11 @@ export default function ExploreInner({
                       </h2>
                     </Link>
 
-                    {/* Posted by */}
+                    {/* Posted by (B) */}
                     <div className="mt-1 text-sm text-slate-500">
                       Posted by{" "}
                       <span className="font-semibold" style={{ color: NAVY }}>
-                        {r.creator_name || (r.user_id ? `Curioso ${String(r.user_id).slice(0, 6)}` : "Curioso")}
+                        {curiosoName}
                       </span>
                     </div>
 
@@ -176,16 +383,48 @@ export default function ExploreInner({
 
                     <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
                       <span>{fmtDateTime(r.created_at)}</span>
+
+                      {sort === "trending" && (
+                        <span className="text-slate-500">
+                          🔥 {Number(r._trendScore || 0).toFixed(1)} · {r._votes24h || 0} votes (24h)
+                        </span>
+                      )}
+
+                      {(r.city || r.state) && (
+                        <span>
+                          {r.city}
+                          {r.state ? `, ${r.state}` : ""}
+                        </span>
+                      )}
+
+                      {r.status === "open" && r.closes_at && <span>{hoursLeft(r.closes_at)}h left</span>}
+
+                      {canShowDiscussionHint(r) ? (
+                        <span className="text-slate-500">
+                          Discussion available after resolve (voters only to post)
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">Discussion after resolve</span>
+                      )}
                     </div>
 
-                    <div className="mt-5">
+                    <div className="mt-5 flex items-center justify-between gap-3">
                       <Link
                         href={`/q/${r.id}`}
-                        className="rounded-full px-5 py-3 font-semibold text-white inline-block"
+                        className="rounded-full px-5 py-3 font-semibold text-white"
                         style={{ background: NAVY }}
                       >
                         View Quandr3
                       </Link>
+
+                      <div className="flex items-center gap-3">
+                        <button className="rounded-full px-5 py-3 border font-semibold" style={{ color: NAVY }}>
+                          Share
+                        </button>
+                        <button className="rounded-full px-5 py-3 border font-semibold text-red-500">
+                          Report
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
