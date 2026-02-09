@@ -111,6 +111,21 @@ function getOptImage(opt: any, qCategory?: string) {
   );
 }
 
+/** ✅ Creator helpers (Phase-1 safe) */
+function getCreatorId(qRow: any) {
+  return qRow?.author_id || qRow?.user_id || qRow?.creator_id || qRow?.created_by || null;
+}
+
+function creatorLabel(qRow: any, profile: any) {
+  if (profile?.display_name) return profile.display_name;
+  if (qRow?.creator_name) return qRow.creator_name;
+
+  const cid = getCreatorId(qRow);
+  if (cid) return `Curioso ${String(cid).slice(0, 6)}`;
+
+  return "Curioso";
+}
+
 /* =========================
    Page
 ========================= */
@@ -221,11 +236,13 @@ export default function Quandr3DetailPage() {
     const { data: qRow } = await supabase.from("quandr3s").select("*").eq("id", qid).single();
     setQ(qRow ?? null);
 
-    if (qRow?.author_id) {
+    // ✅ STRONGER creator profile fetch (supports author_id OR user_id OR creator_id OR created_by)
+    const creatorId = getCreatorId(qRow);
+    if (creatorId) {
       const { data: p } = await supabase
         .from("profiles")
         .select("display_name, avatar_url")
-        .eq("id", qRow.author_id)
+        .eq("id", creatorId)
         .single();
       setProfile(p ?? null);
     } else {
@@ -377,8 +394,10 @@ export default function Quandr3DetailPage() {
   }, [user, status, votingExpired, resolution]);
 
   const isCurioso = useMemo(() => {
-    if (!user?.id || !q?.author_id) return false;
-    return user.id === q.author_id;
+    if (!user?.id) return false;
+    const cid = getCreatorId(q);
+    if (!cid) return false;
+    return user.id === cid;
   }, [user, q]);
 
   const canToggleDiscussion = useMemo(() => {
@@ -408,6 +427,9 @@ export default function Quandr3DetailPage() {
     }
     return { label: "Discussion: Closed", bg: "rgba(148,163,184,0.18)", fg: "rgb(100 116 139)" };
   }, [status, q]);
+
+  // ✅ polish: stable creator label computed once
+  const creatorName = useMemo(() => creatorLabel(q, profile), [q, profile]);
 
   /* =========================
      Actions
@@ -541,7 +563,10 @@ export default function Quandr3DetailPage() {
 
     setTogglingDiscussion(true);
 
-    const { error } = await supabase.from("quandr3s").update({ discussion_open: nextOpen }).eq("id", id);
+    const { error } = await supabase
+      .from("quandr3s")
+      .update({ discussion_open: nextOpen })
+      .eq("id", id);
 
     setTogglingDiscussion(false);
 
@@ -609,7 +634,10 @@ export default function Quandr3DetailPage() {
       <header className="border-b bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
           <Link href="/explore" className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl border" style={{ borderColor: "rgba(15,23,42,0.12)" }}>
+            <div
+              className="flex h-9 w-9 items-center justify-center rounded-xl border"
+              style={{ borderColor: "rgba(15,23,42,0.12)" }}
+            >
               <span className="text-lg" style={{ color: NAVY }}>
                 ?
               </span>
@@ -618,7 +646,9 @@ export default function Quandr3DetailPage() {
               <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                 Quandr3
               </div>
-              <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">ASK. SHARE. DECIDE.</div>
+              <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">
+                ASK. SHARE. DECIDE.
+              </div>
             </div>
           </Link>
 
@@ -648,7 +678,11 @@ export default function Quandr3DetailPage() {
                 >
                   Log in
                 </Link>
-                <Link href="/signup" className="rounded-full px-4 py-2 text-sm font-extrabold text-white" style={{ background: NAVY }}>
+                <Link
+                  href="/signup"
+                  className="rounded-full px-4 py-2 text-sm font-extrabold text-white"
+                  style={{ background: NAVY }}
+                >
                   Sign up
                 </Link>
               </>
@@ -666,10 +700,16 @@ export default function Quandr3DetailPage() {
             <div className="absolute inset-0 bg-gradient-to-r from-[#0b2343cc] via-[#0b234388] to-[#0b234320]" />
 
             <div className="absolute left-5 top-5 flex items-center gap-3">
-              <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
+              <span
+                className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold"
+                style={{ color: NAVY }}
+              >
                 {safeStr(q.category || "Category")}
               </span>
-              <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: statusPill.bg, color: statusPill.fg }}>
+              <span
+                className="rounded-full px-3 py-1 text-xs font-extrabold"
+                style={{ background: statusPill.bg, color: statusPill.fg }}
+              >
                 {statusPill.label}
               </span>
             </div>
@@ -711,9 +751,17 @@ export default function Quandr3DetailPage() {
                 </span>
                 <span className="text-xs text-white/60">•</span>
                 <span className="text-xs font-semibold">Created {fmt(q.created_at)}</span>
+
+                {/* ✅ POLISH: Posted by in the hero */}
+                <span className="text-xs text-white/60">•</span>
+                <span className="text-xs font-semibold">
+                  Posted by <span className="font-extrabold text-white">{creatorName}</span>
+                </span>
               </div>
 
-              <h1 className="mt-2 text-3xl font-extrabold leading-tight text-white">{safeStr(q.title) || "Untitled Quandr3"}</h1>
+              <h1 className="mt-2 text-3xl font-extrabold leading-tight text-white">
+                {safeStr(q.title) || "Untitled Quandr3"}
+              </h1>
 
               {safeStr(q.context) ? (
                 <p className="mt-2 max-w-3xl text-sm text-white/90">{safeStr(q.context)}</p>
@@ -745,10 +793,13 @@ export default function Quandr3DetailPage() {
                 </div>
                 <div className="min-w-0">
                   <div className="text-sm font-extrabold" style={{ color: NAVY }}>
-                    {profile?.display_name ?? "Unknown"}
+                    {creatorName}
                   </div>
                   <div className="mt-1 text-xs text-slate-600">
-                    Category: <span className="font-semibold" style={{ color: NAVY }}>{q.category ?? "—"}</span>
+                    Category:{" "}
+                    <span className="font-semibold" style={{ color: NAVY }}>
+                      {q.category ?? "—"}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -756,11 +807,15 @@ export default function Quandr3DetailPage() {
               <div className="mt-4 grid grid-cols-2 gap-3">
                 <div className="rounded-2xl border bg-slate-50 p-4">
                   <div className="text-[11px] font-semibold tracking-widest text-slate-500">VOTES</div>
-                  <div className="mt-1 text-2xl font-extrabold" style={{ color: NAVY }}>{totalVotes}</div>
+                  <div className="mt-1 text-2xl font-extrabold" style={{ color: NAVY }}>
+                    {totalVotes}
+                  </div>
                 </div>
                 <div className="rounded-2xl border bg-slate-50 p-4">
                   <div className="text-[11px] font-semibold tracking-widest text-slate-500">STATUS</div>
-                  <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>{status}</div>
+                  <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
+                    {status}
+                  </div>
                 </div>
               </div>
 
@@ -775,7 +830,9 @@ export default function Quandr3DetailPage() {
                   </Link>
                 </div>
               ) : (
-                <div className="mt-4 rounded-2xl border bg-slate-50 p-4 text-xs text-slate-600">Results unlock after voting closes.</div>
+                <div className="mt-4 rounded-2xl border bg-slate-50 p-4 text-xs text-slate-600">
+                  Results unlock after voting closes.
+                </div>
               )}
 
               {isCurioso ? (
@@ -806,7 +863,7 @@ export default function Quandr3DetailPage() {
                       {togglingDiscussion ? "Working…" : "Close Discussion"}
                     </button>
 
-                    {(status === "awaiting_user" || status === "resolved") ? (
+                    {status === "awaiting_user" || status === "resolved" ? (
                       <Link
                         href={`/q/${id}/resolve`}
                         className="rounded-xl px-3 py-2 text-xs font-extrabold text-white"
@@ -900,7 +957,9 @@ export default function Quandr3DetailPage() {
                       </div>
 
                       <div className="absolute bottom-4 left-4 right-4">
-                        <div className="text-lg font-extrabold text-white">{safeStr(opt.label) || `Option ${LETTER[opt.order - 1] ?? "?"}`}</div>
+                        <div className="text-lg font-extrabold text-white">
+                          {safeStr(opt.label) || `Option ${LETTER[opt.order - 1] ?? "?"}`}
+                        </div>
 
                         {status !== "open" ? (
                           <div className="mt-1 text-xs text-white/90">
@@ -935,7 +994,9 @@ export default function Quandr3DetailPage() {
 
                       {optReasons.length > 0 && canShowResults ? (
                         <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
-                          <div className="text-xs font-semibold tracking-widest text-slate-600">WHY PEOPLE CHOSE THIS</div>
+                          <div className="text-xs font-semibold tracking-widest text-slate-600">
+                            WHY PEOPLE CHOSE THIS
+                          </div>
                           <ul className="mt-2 list-disc space-y-2 pl-5 text-sm text-slate-800">
                             {optReasons.slice(0, 5).map((txt: string, idx: number) => (
                               <li key={`${opt.id}-r-${idx}`} className="leading-snug">
@@ -1006,7 +1067,7 @@ export default function Quandr3DetailPage() {
           </section>
         ) : null}
 
-        {/* DISCUSSION (visually cohesive + locked while open) */}
+        {/* DISCUSSION */}
         <section className="mt-7 rounded-[28px] border bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -1019,7 +1080,10 @@ export default function Quandr3DetailPage() {
               </div>
             </div>
 
-            <div className="inline-flex items-center rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: discussionBadge.bg, color: discussionBadge.fg }}>
+            <div
+              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-extrabold"
+              style={{ background: discussionBadge.bg, color: discussionBadge.fg }}
+            >
               {discussionBadge.label}
             </div>
           </div>
@@ -1029,11 +1093,17 @@ export default function Quandr3DetailPage() {
               Discussion is locked while voting is open.
             </div>
           ) : !q.discussion_open ? (
-            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Discussion is closed.</div>
+            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
+              Discussion is closed.
+            </div>
           ) : !user ? (
-            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Log in to see if you’re invited to the discussion.</div>
+            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
+              Log in to see if you’re invited to the discussion.
+            </div>
           ) : !didVote ? (
-            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Discussion is for voters only on this Quandr3.</div>
+            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
+              Discussion is for voters only on this Quandr3.
+            </div>
           ) : (
             <>
               <div className="mt-5 rounded-3xl border bg-slate-50 p-5">
@@ -1078,7 +1148,9 @@ export default function Quandr3DetailPage() {
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img src={p.avatar_url} alt="" className="h-full w-full object-cover" />
                               ) : (
-                                <div className="flex h-full w-full items-center justify-center text-xs font-extrabold text-slate-500">?</div>
+                                <div className="flex h-full w-full items-center justify-center text-xs font-extrabold text-slate-500">
+                                  ?
+                                </div>
                               )}
                             </div>
 
