@@ -134,6 +134,7 @@ export default function Quandr3DetailPage() {
   const params = useParams();
   const router = useRouter();
 
+  // Normalize id (Next can give string|string[])
   const id = useMemo(() => {
     const raw: any = params?.id;
     if (!raw) return null;
@@ -162,11 +163,19 @@ export default function Quandr3DetailPage() {
   // Curioso toggles
   const [togglingDiscussion, setTogglingDiscussion] = useState(false);
 
+  /* =========================
+     Load Auth
+  ========================= */
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       setUser(data?.user ?? null);
     });
   }, []);
+
+  /* =========================
+     Load / Refresh Helpers
+  ========================= */
 
   async function refreshVotesAndReasons(qid: string) {
     const { data: v } = await supabase.from("quandr3_votes").select("*").eq("quandr3_id", qid);
@@ -227,6 +236,7 @@ export default function Quandr3DetailPage() {
     const { data: qRow } = await supabase.from("quandr3s").select("*").eq("id", qid).single();
     setQ(qRow ?? null);
 
+    // ✅ STRONGER creator profile fetch (supports author_id OR user_id OR creator_id OR created_by)
     const creatorId = getCreatorId(qRow);
     if (creatorId) {
       const { data: p } = await supabase
@@ -257,9 +267,12 @@ export default function Quandr3DetailPage() {
 
     setResolution(r ?? null);
 
+    // ✅ Discussion fetch ONLY if:
+    // - discussion is open
+    // - voting is NOT open anymore (expired OR resolved)
+    // - and this viewer has voted (invited)
     const duration = Number(qRow?.voting_duration_hours || 0);
     const createdAt = qRow?.created_at;
-
     const timeExpired =
       !!createdAt && !!duration
         ? Date.now() > new Date(createdAt).getTime() + duration * 3600 * 1000
@@ -289,7 +302,11 @@ export default function Quandr3DetailPage() {
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, user?.id]);
+  }, [id, user?.id]); // re-evaluate invite gating after login loads
+
+  /* =========================
+     Derived Logic
+  ========================= */
 
   const myVote = useMemo(() => {
     if (!user) return null;
@@ -338,6 +355,7 @@ export default function Quandr3DetailPage() {
   const canShowResults = useMemo(() => status !== "open", [status]);
 
   const canShowDiscussion = useMemo(() => {
+    // discussion only after close AND only for those who voted AND only if author opened it
     return status !== "open" && !!q?.discussion_open && didVote;
   }, [status, q, didVote]);
 
@@ -370,6 +388,7 @@ export default function Quandr3DetailPage() {
     return grouped;
   }, [votes, reasonsByVoteId]);
 
+  // Only allow editing reasons while voting is open
   const canEditReason = useMemo(() => {
     return !!user && status === "open" && !votingExpired && !resolution;
   }, [user, status, votingExpired, resolution]);
@@ -382,17 +401,24 @@ export default function Quandr3DetailPage() {
   }, [user, q]);
 
   const canToggleDiscussion = useMemo(() => {
+    // Curioso can open/close discussion after voting ends OR after resolution.
     if (!isCurioso) return false;
     return votingExpired || !!resolution;
   }, [isCurioso, votingExpired, resolution]);
 
   const statusPill = useMemo(() => pillStyle(status as any), [status]);
 
+  /** ✅ HERO IMAGE RULE:
+   *  1) If q.media_url exists, use it
+   *  2) Else use category hero mapping (hard set)
+   *  3) Else default
+   */
   const heroImg = useMemo(() => {
     return q?.media_url ? q.media_url : heroForCategory(q?.category);
   }, [q]);
 
   const discussionBadge = useMemo(() => {
+    // Never show "Open" while voting is open — even if the DB flag is true.
     if (status === "open") {
       return { label: "Discussion: Locked", bg: "rgba(148,163,184,0.18)", fg: "rgb(100 116 139)" };
     }
@@ -402,7 +428,12 @@ export default function Quandr3DetailPage() {
     return { label: "Discussion: Closed", bg: "rgba(148,163,184,0.18)", fg: "rgb(100 116 139)" };
   }, [status, q]);
 
+  // ✅ polish: stable creator label computed once
   const creatorName = useMemo(() => creatorLabel(q, profile), [q, profile]);
+
+  /* =========================
+     Actions
+  ========================= */
 
   async function vote(order: number) {
     if (!id) return;
@@ -550,6 +581,10 @@ export default function Quandr3DetailPage() {
     await refreshCore(id);
   }
 
+  /* =========================
+     Render
+  ========================= */
+
   if (loading) {
     return (
       <main className="min-h-screen" style={{ background: SOFT_BG }}>
@@ -595,6 +630,7 @@ export default function Quandr3DetailPage() {
 
   return (
     <main className="min-h-screen" style={{ background: SOFT_BG }}>
+      {/* Top header */}
       <header className="border-b bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
           <Link href="/explore" className="flex items-center gap-3">
@@ -656,6 +692,7 @@ export default function Quandr3DetailPage() {
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-8">
+        {/* HERO BANNER (Explore-style) */}
         <section className="overflow-hidden rounded-[28px] border bg-white shadow-sm">
           <div className="relative h-[240px] w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -733,12 +770,12 @@ export default function Quandr3DetailPage() {
             </div>
           </div>
 
+          {/* META STRIP */}
           <div className="grid gap-4 p-6 lg:grid-cols-[1.4fr_0.6fr]">
             <div className="rounded-2xl border bg-slate-50 p-5">
               <div className="text-xs font-semibold tracking-widest text-slate-600">HOW IT WORKS</div>
               <div className="mt-2 text-sm text-slate-700">
-                Vote while it’s open. After it closes, results unlock so everyone learns. Discussion (if opened) is{" "}
-                <b>after close</b> and <b>voters only</b>.
+                Vote while it’s open. After it closes, results unlock so everyone learns. Discussion (if opened) is <b>after close</b> and <b>voters only</b>.
               </div>
             </div>
 
@@ -750,9 +787,7 @@ export default function Quandr3DetailPage() {
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center text-lg font-extrabold text-slate-500">
-                      ?
-                    </div>
+                    <div className="flex h-full w-full items-center justify-center text-lg font-extrabold text-slate-500">?</div>
                   )}
                 </div>
                 <div className="min-w-0">
@@ -840,8 +875,7 @@ export default function Quandr3DetailPage() {
                   </div>
 
                   <div className="mt-3 text-xs text-slate-600">
-                    Discussion flag is{" "}
-                    <b style={{ color: NAVY }}>{q?.discussion_open ? "ON" : "OFF"}</b> (but it’s still locked until close).
+                    Discussion flag is <b style={{ color: NAVY }}>{q?.discussion_open ? "ON" : "OFF"}</b> (but it’s still locked until close).
                   </div>
                 </div>
               ) : null}
@@ -849,7 +883,7 @@ export default function Quandr3DetailPage() {
           </div>
         </section>
 
-        {/* OPTIONS (✅ smaller images: quarter-width thumbnail) */}
+        {/* OPTIONS (image tiles) */}
         <section className="mt-7 rounded-[28px] border bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -901,22 +935,33 @@ export default function Quandr3DetailPage() {
                       borderColor: isWinner ? "rgba(0,169,165,0.55)" : "rgba(15,23,42,0.12)",
                     }}
                   >
-                    {/* ✅ NEW: thumbnail-left layout */}
-                    <div className="grid md:grid-cols-[170px_1fr]">
+                    {/* ✅ NEW: quarter-width thumbnail layout */}
+                    <div className="grid gap-0 md:grid-cols-[160px_1fr]">
                       {/* Thumbnail */}
-                      <div className="relative h-[120px] md:h-full md:min-h-[210px] w-full overflow-hidden bg-slate-900">
+                      <div className="relative h-[150px] w-full bg-slate-900 md:h-full md:min-h-[150px] md:w-[160px]">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={img} alt="" className="h-full w-full object-cover" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#0b2343aa] via-[#0b234330] to-transparent" />
+                        <img src={img} alt="" className="h-full w-full object-cover opacity-95" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#0b2343aa] via-transparent to-transparent" />
 
                         <div className="absolute left-3 top-3 flex items-center gap-2">
                           <span
-                            className="flex h-9 w-9 items-center justify-center rounded-2xl text-sm font-extrabold text-white"
+                            className="flex h-10 w-10 items-center justify-center rounded-2xl text-sm font-extrabold text-white"
                             style={{ background: isWinner ? TEAL : NAVY }}
                           >
                             {LETTER[opt.order - 1] ?? String.fromCharCode(65 + i)}
                           </span>
                         </div>
+
+                        {isWinner && status !== "open" ? (
+                          <div className="absolute bottom-3 left-3">
+                            <span
+                              className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold"
+                              style={{ color: TEAL }}
+                            >
+                              Winning path
+                            </span>
+                          </div>
+                        ) : null}
                       </div>
 
                       {/* Content */}
@@ -932,18 +977,13 @@ export default function Quandr3DetailPage() {
                                 {count} vote{count === 1 ? "" : "s"} • {pct}%
                               </div>
                             ) : (
-                              <div className="mt-1 text-xs text-slate-600">
-                                Choose and (optionally) add your reason.
-                              </div>
+                              <div className="mt-1 text-xs text-slate-600">Choose and (optionally) add your reason.</div>
                             )}
                           </div>
 
-                          {isWinner && status !== "open" ? (
-                            <span
-                              className="shrink-0 rounded-full bg-teal-50 px-3 py-1 text-xs font-extrabold"
-                              style={{ color: TEAL }}
-                            >
-                              Winning path
+                          {status !== "open" ? (
+                            <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-extrabold text-teal-700">
+                              Resolved
                             </span>
                           ) : null}
                         </div>
