@@ -776,7 +776,8 @@ export default function Quandr3DetailPage() {
             <div className="rounded-2xl border bg-slate-50 p-5">
               <div className="text-xs font-semibold tracking-widest text-slate-600">HOW IT WORKS</div>
               <div className="mt-2 text-sm text-slate-700">
-                Vote while it’s open. After it closes, results unlock so everyone learns. Discussion (if opened) is <b>after close</b> and <b>voters only</b>.
+                Vote while it’s open. After it closes, results unlock so everyone learns. Discussion (if opened) is{" "}
+                <b>after close</b> and <b>voters only</b>.
               </div>
             </div>
 
@@ -788,7 +789,9 @@ export default function Quandr3DetailPage() {
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center text-lg font-extrabold text-slate-500">?</div>
+                    <div className="flex h-full w-full items-center justify-center text-lg font-extrabold text-slate-500">
+                      ?
+                    </div>
                   )}
                 </div>
                 <div className="min-w-0">
@@ -876,7 +879,8 @@ export default function Quandr3DetailPage() {
                   </div>
 
                   <div className="mt-3 text-xs text-slate-600">
-                    Discussion flag is <b style={{ color: NAVY }}>{q?.discussion_open ? "ON" : "OFF"}</b> (but it’s still locked until close).
+                    Discussion flag is <b style={{ color: NAVY }}>{q?.discussion_open ? "ON" : "OFF"}</b> (but it’s still
+                    locked until close).
                   </div>
                 </div>
               ) : null}
@@ -924,122 +928,137 @@ export default function Quandr3DetailPage() {
                 const voteIdForMyVote = myVote?.id;
 
                 const reasonDraft =
-                  voteIdForMyVote != null ? reasonDraftByVoteId[voteIdForMyVote] ?? myReason ?? "" : "";
+                  voteIdForMyVote != null
+                    ? reasonDraftByVoteId[voteIdForMyVote] ?? myReason ?? ""
+                    : "";
 
                 const img = getOptImage(opt, q?.category);
 
                 return (
                   <div
                     key={opt.id}
-                    className="overflow-hidden rounded-[26px] border shadow-sm"
+                    className="overflow-hidden rounded-[26px] border bg-white shadow-sm"
                     style={{
                       borderColor: isWinner ? "rgba(0,169,165,0.55)" : "rgba(15,23,42,0.12)",
-                      background: "white",
                     }}
                   >
-                    <div className="relative h-[170px] w-full">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={img} alt="" className="h-full w-full object-cover" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#0b2343cc] via-[#0b234355] to-transparent" />
+                    {/* ✅ NEW: Smaller thumbnail (≈25%) row layout */}
+                    <div className="grid gap-0 md:grid-cols-[200px_1fr]">
+                      {/* Thumbnail */}
+                      <div className="relative h-[120px] md:h-full md:min-h-[150px]">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={img} alt="" className="h-full w-full object-cover" />
+                        <div className="absolute inset-0 bg-gradient-to-r from-[#0b2343cc] via-[#0b234355] to-transparent" />
 
-                      <div className="absolute left-4 top-4 flex items-center gap-2">
-                        <span
-                          className="flex h-10 w-10 items-center justify-center rounded-2xl text-sm font-extrabold text-white"
-                          style={{ background: isWinner ? TEAL : NAVY }}
-                        >
-                          {LETTER[opt.order - 1] ?? String.fromCharCode(65 + i)}
-                        </span>
-                        {isWinner && status !== "open" ? (
-                          <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold" style={{ color: TEAL }}>
-                            Winning path
+                        <div className="absolute left-4 top-4 flex items-center gap-2">
+                          <span
+                            className="flex h-10 w-10 items-center justify-center rounded-2xl text-sm font-extrabold text-white"
+                            style={{ background: isWinner ? TEAL : NAVY }}
+                          >
+                            {LETTER[opt.order - 1] ?? String.fromCharCode(65 + i)}
                           </span>
+
+                          {isWinner && status !== "open" ? (
+                            <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold" style={{ color: TEAL }}>
+                              Winning path
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {/* Content */}
+                      <div className="p-5">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-lg font-extrabold" style={{ color: NAVY }}>
+                              {safeStr(opt.label) || `Option ${LETTER[opt.order - 1] ?? "?"}`}
+                            </div>
+
+                            {status !== "open" ? (
+                              <div className="mt-1 text-xs text-slate-600">
+                                {count} vote{count === 1 ? "" : "s"} • {pct}%
+                              </div>
+                            ) : (
+                              <div className="mt-1 text-xs text-slate-600">
+                                Choose and (optionally) add your reason.
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Vote button (open) */}
+                          {status === "open" ? (
+                            <button
+                              onClick={() => vote(opt.order)}
+                              className="rounded-xl px-4 py-2 text-xs font-extrabold text-white shadow-sm"
+                              style={{ background: BLUE }}
+                            >
+                              Vote
+                            </button>
+                          ) : null}
+                        </div>
+
+                        {/* Progress bar (closed/resolved) */}
+                        {status !== "open" ? (
+                          <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${pct}%`,
+                                background: isWinner ? TEAL : BLUE,
+                              }}
+                            />
+                          </div>
+                        ) : null}
+
+                        {optReasons.length > 0 && canShowResults ? (
+                          <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
+                            <div className="text-xs font-semibold tracking-widest text-slate-600">
+                              WHY PEOPLE CHOSE THIS
+                            </div>
+                            <ul className="mt-2 list-disc space-y-2 pl-5 text-sm text-slate-800">
+                              {optReasons.slice(0, 5).map((txt: string, idx: number) => (
+                                <li key={`${opt.id}-r-${idx}`} className="leading-snug">
+                                  {txt}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+
+                        {showReasonBox ? (
+                          <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
+                            <div className="text-xs font-semibold tracking-widest text-slate-600">
+                              {myReason ? "EDIT YOUR REASON" : "WHY DID YOU CHOOSE THIS?"}
+                            </div>
+
+                            <textarea
+                              value={reasonDraft}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setReasonDraftByVoteId((prev: any) => ({
+                                  ...prev,
+                                  [voteIdForMyVote]: val,
+                                }));
+                              }}
+                              rows={3}
+                              className="mt-2 w-full rounded-xl border bg-white p-3 text-sm outline-none focus:ring-2"
+                              style={{ borderColor: "rgba(15,23,42,0.12)" }}
+                              placeholder="Write a short reason (1–2 sentences is perfect)."
+                            />
+
+                            <div className="mt-2">
+                              <button
+                                onClick={saveMyReason}
+                                disabled={savingReason}
+                                className="rounded-xl px-4 py-2 text-xs font-extrabold text-white shadow-sm"
+                                style={{ background: NAVY, opacity: savingReason ? 0.7 : 1 }}
+                              >
+                                {savingReason ? "Saving…" : "Save reason"}
+                              </button>
+                            </div>
+                          </div>
                         ) : null}
                       </div>
-
-                      <div className="absolute bottom-4 left-4 right-4">
-                        <div className="text-lg font-extrabold text-white">
-                          {safeStr(opt.label) || `Option ${LETTER[opt.order - 1] ?? "?"}`}
-                        </div>
-
-                        {status !== "open" ? (
-                          <div className="mt-1 text-xs text-white/90">
-                            {count} vote{count === 1 ? "" : "s"} • {pct}%
-                          </div>
-                        ) : (
-                          <div className="mt-1 text-xs text-white/80">Choose and (optionally) add your reason.</div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="p-5">
-                      {status === "open" ? (
-                        <button
-                          onClick={() => vote(opt.order)}
-                          className="w-full rounded-2xl px-4 py-3 text-sm font-extrabold text-white shadow-sm"
-                          style={{ background: BLUE }}
-                        >
-                          Vote
-                        </button>
-                      ) : (
-                        <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${pct}%`,
-                              background: isWinner ? TEAL : BLUE,
-                            }}
-                          />
-                        </div>
-                      )}
-
-                      {optReasons.length > 0 && canShowResults ? (
-                        <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
-                          <div className="text-xs font-semibold tracking-widest text-slate-600">
-                            WHY PEOPLE CHOSE THIS
-                          </div>
-                          <ul className="mt-2 list-disc space-y-2 pl-5 text-sm text-slate-800">
-                            {optReasons.slice(0, 5).map((txt: string, idx: number) => (
-                              <li key={`${opt.id}-r-${idx}`} className="leading-snug">
-                                {txt}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
-
-                      {showReasonBox ? (
-                        <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
-                          <div className="text-xs font-semibold tracking-widest text-slate-600">
-                            {myReason ? "EDIT YOUR REASON" : "WHY DID YOU CHOOSE THIS?"}
-                          </div>
-
-                          <textarea
-                            value={reasonDraft}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setReasonDraftByVoteId((prev: any) => ({
-                                ...prev,
-                                [voteIdForMyVote]: val,
-                              }));
-                            }}
-                            rows={3}
-                            className="mt-2 w-full rounded-xl border bg-white p-3 text-sm outline-none focus:ring-2"
-                            style={{ borderColor: "rgba(15,23,42,0.12)" }}
-                            placeholder="Write a short reason (1–2 sentences is perfect)."
-                          />
-
-                          <div className="mt-2">
-                            <button
-                              onClick={saveMyReason}
-                              disabled={savingReason}
-                              className="rounded-xl px-4 py-2 text-xs font-extrabold text-white shadow-sm"
-                              style={{ background: NAVY, opacity: savingReason ? 0.7 : 1 }}
-                            >
-                              {savingReason ? "Saving…" : "Save reason"}
-                            </button>
-                          </div>
-                        </div>
-                      ) : null}
                     </div>
                   </div>
                 );
@@ -1093,9 +1112,7 @@ export default function Quandr3DetailPage() {
               Discussion is locked while voting is open.
             </div>
           ) : !q.discussion_open ? (
-            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
-              Discussion is closed.
-            </div>
+            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Discussion is closed.</div>
           ) : !user ? (
             <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
               Log in to see if you’re invited to the discussion.
