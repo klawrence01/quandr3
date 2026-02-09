@@ -44,6 +44,12 @@ const FEED_CATEGORIES = [
   "Real Estate",
 ];
 
+// Canonical route for a Quandr3 detail page.
+// If you truly want to keep /debug/vote/[id] on homepage, change this to `/debug/vote/${id}`
+function qHref(id: string) {
+  return `/q/${id}`;
+}
+
 export default function HomePage() {
   const [items, setItems] = useState<Quandr3Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -167,38 +173,43 @@ export default function HomePage() {
                 marginBottom: 10,
               }}
             >
-              <button
-                type="button"
-                style={{
-                  padding: "11px 24px",
-                  borderRadius: 999,
-                  border: "none",
-                  cursor: "pointer",
-                  fontSize: 14,
-                  fontWeight: 800,
-                  color: "#ffffff",
-                  background:
-                    "linear-gradient(135deg, #1e63f3, #00a9a5, #ff6b6b)",
-                  boxShadow: "0 18px 40px rgba(15,23,42,0.45)",
-                }}
-              >
-                Become a Wayfinder
-              </button>
-              <button
-                type="button"
-                style={{
-                  padding: "11px 20px",
-                  borderRadius: 999,
-                  border: "1px solid #d0d7ff",
-                  cursor: "pointer",
-                  fontSize: 14,
-                  fontWeight: 800,
-                  color: NAVY,
-                  background: "#ffffff",
-                }}
-              >
-                Post as a Curioso
-              </button>
+              <Link href="/explore" style={{ textDecoration: "none" }}>
+                <button
+                  type="button"
+                  style={{
+                    padding: "11px 24px",
+                    borderRadius: 999,
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: 14,
+                    fontWeight: 800,
+                    color: "#ffffff",
+                    background:
+                      "linear-gradient(135deg, #1e63f3, #00a9a5, #ff6b6b)",
+                    boxShadow: "0 18px 40px rgba(15,23,42,0.45)",
+                  }}
+                >
+                  Become a Wayfinder
+                </button>
+              </Link>
+
+              <Link href="/q/create" style={{ textDecoration: "none" }}>
+                <button
+                  type="button"
+                  style={{
+                    padding: "11px 20px",
+                    borderRadius: 999,
+                    border: "1px solid #d0d7ff",
+                    cursor: "pointer",
+                    fontSize: 14,
+                    fontWeight: 800,
+                    color: NAVY,
+                    background: "#ffffff",
+                  }}
+                >
+                  Post as a Curioso
+                </button>
+              </Link>
             </div>
 
             <p
@@ -301,7 +312,7 @@ export default function HomePage() {
               )}
 
               {liveItems.map((q, idx) => (
-                <Link key={q.id} href={`/debug/vote/${q.id}`}>
+                <Link key={q.id} href={qHref(q.id)}>
                   <div
                     style={{
                       padding: "12px 4px",
@@ -359,7 +370,7 @@ export default function HomePage() {
               color: "#6b7280",
             }}
           >
-            Browse Quelndr3s by category.
+            Browse Quandr3s by category.
           </div>
           <div
             style={{
@@ -429,7 +440,7 @@ function HomeFeedCard({ q }: { q: Quandr3Row }) {
   const imageSrc = getCategoryImage(q.category);
 
   return (
-    <Link href={`/debug/vote/${q.id}`}>
+    <Link href={qHref(q.id)}>
       <article
         style={{
           borderRadius: 20,

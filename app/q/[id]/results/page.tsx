@@ -29,6 +29,12 @@ function safeNum(n: any) {
   return Number.isFinite(v) ? v : 0;
 }
 
+function safeStr(v: any) {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v.trim();
+  return String(v);
+}
+
 function ConfettiBurst({ fire }: { fire: boolean }) {
   const [pieces, setPieces] = useState<any[]>([]);
 
@@ -36,33 +42,22 @@ function ConfettiBurst({ fire }: { fire: boolean }) {
     if (!fire) return;
 
     const colors = [NAVY, TEAL, CORAL, BLUE, "#ffffff"];
-    const count = 160; // don't spare it 🙂
+    const count = 160;
     const now = Date.now();
 
     const next = Array.from({ length: count }).map((_, i) => {
-      const left = Math.random() * 100; // vw
-      const drift = (Math.random() * 2 - 1) * 35; // vw
+      const left = Math.random() * 100;
+      const drift = (Math.random() * 2 - 1) * 35;
       const rot = Math.random() * 720;
       const delay = Math.random() * 0.25;
       const dur = 2.1 + Math.random() * 0.9;
       const size = 6 + Math.random() * 10;
       const color = colors[Math.floor(Math.random() * colors.length)];
       const shape = Math.random() > 0.55 ? "rect" : "dot";
-      return {
-        id: `${now}-${i}`,
-        left,
-        drift,
-        rot,
-        delay,
-        dur,
-        size,
-        color,
-        shape,
-      };
+      return { id: `${now}-${i}`, left, drift, rot, delay, dur, size, color, shape };
     });
 
     setPieces(next);
-
     const t = setTimeout(() => setPieces([]), 3200);
     return () => clearTimeout(t);
   }, [fire]);
@@ -70,10 +65,7 @@ function ConfettiBurst({ fire }: { fire: boolean }) {
   if (!pieces.length) return null;
 
   return (
-    <div
-      aria-hidden
-      className="pointer-events-none fixed inset-0 z-[60] overflow-hidden"
-    >
+    <div aria-hidden className="pointer-events-none fixed inset-0 z-[60] overflow-hidden">
       {pieces.map((p) => (
         <span
           key={p.id}
@@ -87,7 +79,6 @@ function ConfettiBurst({ fire }: { fire: boolean }) {
             animationDelay: `${p.delay}s`,
             animationDuration: `${p.dur}s`,
             transform: `translate3d(0, -10vh, 0) rotate(${p.rot}deg)`,
-            // custom props via CSS vars
             ["--drift" as any]: `${p.drift}vw`,
           }}
         />
@@ -104,7 +95,6 @@ function ConfettiBurst({ fire }: { fire: boolean }) {
           animation-fill-mode: forwards;
           will-change: transform, opacity;
         }
-
         @keyframes confettiFall {
           0% {
             transform: translate3d(0, -12vh, 0) rotate(0deg);
@@ -132,18 +122,17 @@ export default function Quandr3ResultsPage() {
   const [q, setQ] = useState<any>(null);
   const [options, setOptions] = useState<any[]>([]);
   const [votes, setVotes] = useState<any[]>([]);
-  const [reasons, setReasons] = useState<any[]>([]);
+  const [reasonsByVoteId, setReasonsByVoteId] = useState<Record<string, string>>({});
   const [resolution, setResolution] = useState<any>(null);
 
   const [fireConfetti, setFireConfetti] = useState(false);
   const [me, setMe] = useState<any>(null);
 
+  // ✅ Use Supabase auth (matches the rest of your app)
   useEffect(() => {
-    // local "auth" (matches your current pattern in TopNav)
-    try {
-      const stored = localStorage.getItem("quandr3-user");
-      if (stored) setMe(JSON.parse(stored));
-    } catch {}
+    supabase.auth.getUser().then(({ data }) => {
+      setMe(data?.user ?? null);
+    });
   }, []);
 
   async function loadAll() {
@@ -152,11 +141,7 @@ export default function Quandr3ResultsPage() {
     setLoading(true);
 
     // 1) Load Quandr3
-    const qRes = await supabase
-      .from("quandr3s")
-      .select("*")
-      .eq("id", id)
-      .single();
+    const qRes = await supabase.from("quandr3s").select("*").eq("id", id).single();
 
     if (qRes?.error) {
       console.error(qRes.error);
@@ -168,44 +153,57 @@ export default function Quandr3ResultsPage() {
     const qq = qRes.data;
     setQ(qq);
 
-    // Redirect if still open (State A)
+    // Redirect if still open
     if (qq?.status === "open") {
       router.replace(`/q/${id}`);
       return;
     }
 
-    // 2) Load options
+    // 2) Load options (order-based)
     const optRes = await supabase
       .from("quandr3_options")
       .select("*")
       .eq("quandr3_id", id)
-      .order("created_at", { ascending: true });
+      .order("order", { ascending: true });
 
     if (optRes?.error) console.error(optRes.error);
-    setOptions(optRes?.data || []);
+    const opts = optRes?.data || [];
+    setOptions(opts);
 
     // 3) Load votes
-    // Expecting votes table with either option_id or picked_index.
-    const voteRes = await supabase
-      .from("quandr3_votes")
-      .select("*")
-      .eq("quandr3_id", id);
-
+    const voteRes = await supabase.from("quandr3_votes").select("*").eq("quandr3_id", id);
     if (voteRes?.error) console.error(voteRes.error);
-    setVotes(voteRes?.data || []);
 
-    // 4) Load vote reasons (if available)
-    const reasonRes = await supabase
-      .from("vote_reasons")
-      .select("*")
-      .eq("quandr3_id", id)
-      .order("created_at", { ascending: false });
+    const vRows = voteRes?.data || [];
+    setVotes(vRows);
 
-    if (reasonRes?.error) console.error(reasonRes.error);
-    setReasons(reasonRes?.data || []);
+    // 4) Load vote reasons by vote_id (correct schema)
+    // vote_reasons: { vote_id, reason }
+    if (vRows.length) {
+      const voteIds = vRows.map((v: any) => v.id).filter(Boolean);
+
+      const reasonRes = await supabase
+        .from("vote_reasons")
+        .select("vote_id, reason")
+        .in("vote_id", voteIds);
+
+      if (reasonRes?.error) {
+        console.error(reasonRes.error);
+        setReasonsByVoteId({});
+      } else {
+        const map: Record<string, string> = {};
+        (reasonRes?.data || []).forEach((r: any) => {
+          const txt = safeStr(r?.reason);
+          if (!txt) return;
+          map[r.vote_id] = txt;
+        });
+        setReasonsByVoteId(map);
+      }
+    } else {
+      setReasonsByVoteId({});
+    }
 
     // 5) Load resolution (if resolved)
-    // Expecting table: quandr3_resolutions (as per your build notes)
     const resoRes = await supabase
       .from("quandr3_resolutions")
       .select("*")
@@ -219,10 +217,9 @@ export default function Quandr3ResultsPage() {
 
     setLoading(false);
 
-    // Confetti: only for the "awaiting_user" preview moment
+    // Confetti: only for awaiting_user preview moment
     if (qq?.status === "awaiting_user") {
       setFireConfetti(true);
-      // ensure it never re-fires on state changes
       setTimeout(() => setFireConfetti(false), 3500);
     }
   }
@@ -234,54 +231,27 @@ export default function Quandr3ResultsPage() {
 
   const isCurioso = useMemo(() => {
     if (!q || !me) return false;
-    const myId = me?.id || me?.user_id || me?.uid;
+    const myId = me?.id;
+
     return (
       myId &&
-      (q?.user_id === myId ||
+      (q?.author_id === myId ||
+        q?.user_id === myId ||
         q?.creator_id === myId ||
         q?.created_by === myId)
     );
   }, [q, me]);
 
+  // Normalize options + compute counts using real vote schema
   const optionStats = useMemo(() => {
     const opts = options || [];
     const v = votes || [];
 
-    // Build index map
-    const byOptionId: Record<string, number> = {};
-    const byPickedIndex: Record<number, number> = {};
-    let total = 0;
-
-    for (const vote of v) {
-      // support both schemas
-      const option_id = vote?.option_id || vote?.quandr3_option_id;
-      const pickedIndex =
-        vote?.picked_index ?? vote?.pickedIndex ?? vote?.picked;
-
-      if (option_id) {
-        byOptionId[option_id] = (byOptionId[option_id] || 0) + 1;
-        total += 1;
-      } else if (pickedIndex !== undefined && pickedIndex !== null) {
-        const idx = safeNum(pickedIndex);
-        byPickedIndex[idx] = (byPickedIndex[idx] || 0) + 1;
-        total += 1;
-      } else {
-        // unknown vote row shape; ignore
-      }
-    }
-
+    // map order -> option row idx
     const rows = opts.map((opt: any, idx: number) => {
-      const count =
-        (opt?.id && byOptionId[opt.id]) ||
-        byPickedIndex[idx] ||
-        0;
-      const pct = total ? Math.round((count / total) * 100) : 0;
+      const order = safeNum(opt?.order || idx + 1); // expected 1..4
       const imageUrl =
-        opt?.image_url ||
-        opt?.image ||
-        opt?.option_image_url ||
-        opt?.photo_url ||
-        "";
+        opt?.image_url || opt?.image || opt?.option_image_url || opt?.photo_url || "";
       const label =
         opt?.label ||
         opt?.text ||
@@ -290,74 +260,115 @@ export default function Quandr3ResultsPage() {
         `Option ${String.fromCharCode(65 + idx)}`;
 
       return {
-        idx,
+        idx, // UI position
         id: opt?.id,
+        order, // canonical choice index in votes (1..)
         label,
         imageUrl,
-        count,
-        pct,
+        count: 0,
+        pct: 0,
       };
     });
 
-    // Determine winner:
-    // If resolved, prefer the resolution's picked index/option id.
+    const byOrder: Record<number, number> = {};
+    const byOptionId: Record<string, number> = {};
+    let total = 0;
+
+    for (const vote of v) {
+      const option_id = vote?.option_id;
+      const choiceIndex =
+        vote?.choice_index !== undefined && vote?.choice_index !== null
+          ? safeNum(vote.choice_index) // expected 1..4
+          : vote?.picked_index !== undefined && vote?.picked_index !== null
+          ? safeNum(vote.picked_index) // older fallback
+          : null;
+
+      if (option_id) {
+        byOptionId[option_id] = (byOptionId[option_id] || 0) + 1;
+        total += 1;
+      } else if (choiceIndex !== null) {
+        byOrder[choiceIndex] = (byOrder[choiceIndex] || 0) + 1;
+        total += 1;
+      }
+    }
+
+    rows.forEach((r) => {
+      const c =
+        (r.id && byOptionId[r.id]) ||
+        byOrder[r.order] ||
+        0;
+      r.count = c;
+      r.pct = total ? Math.round((c / total) * 100) : 0;
+    });
+
+    // Determine winner
     let winnerIdx = 0;
 
     if (q?.status === "resolved") {
-      if (resolution?.picked_index !== undefined && resolution?.picked_index !== null) {
-        winnerIdx = safeNum(resolution.picked_index);
-      } else if (resolution?.option_id) {
-        const found = rows.find((r) => r.id === resolution.option_id);
+      if (resolution?.option_id) {
+        const found = rows.find((x) => x.id === resolution.option_id);
         if (found) winnerIdx = found.idx;
-      } else if (resolution?.quandr3_option_id) {
-        const found = rows.find((r) => r.id === resolution.quandr3_option_id);
-        if (found) winnerIdx = found.idx;
+        else winnerIdx = rows.reduce((best, r) => (r.count > rows[best].count ? r.idx : best), 0);
+      } else if (resolution?.picked_index !== undefined && resolution?.picked_index !== null) {
+        // picked_index may be 0-based (older) OR 1-based order (newer). Support both.
+        const pi = safeNum(resolution.picked_index);
+        const foundByIdx = rows.find((x) => x.idx === pi);
+        const foundByOrder = rows.find((x) => x.order === pi);
+        winnerIdx = (foundByIdx?.idx ?? foundByOrder?.idx ?? 0);
       } else {
-        // fall back to max vote
         winnerIdx = rows.reduce((best, r) => (r.count > rows[best].count ? r.idx : best), 0);
       }
     } else {
-      // awaiting_user: max vote
       winnerIdx = rows.reduce((best, r) => (r.count > rows[best].count ? r.idx : best), 0);
     }
 
     return { rows, total, winnerIdx };
   }, [options, votes, q, resolution]);
 
+  // Group reasons under each option using vote -> (choice_index/order) mapping
   const reasonsByOption = useMemo(() => {
     const map: Record<string, string[]> = {};
+    const opts = optionStats.rows || [];
 
-    // Helper to resolve reason -> option
-    const resolveKey = (r: any) => {
-      const option_id = r?.option_id || r?.quandr3_option_id;
-      const pickedIndex = r?.picked_index ?? r?.pickedIndex ?? r?.picked;
-      if (option_id) return `id:${option_id}`;
-      if (pickedIndex !== undefined && pickedIndex !== null) return `idx:${safeNum(pickedIndex)}`;
-      return "unknown";
-    };
+    // Build helper: order -> option id
+    const orderToOptId: Record<number, string> = {};
+    opts.forEach((o) => {
+      if (o?.id) orderToOptId[o.order] = o.id;
+    });
 
-    for (const r of reasons || []) {
-      const key = resolveKey(r);
-      const text =
-        (typeof r?.reason === "string" && r.reason.trim()) ||
-        (typeof r?.text === "string" && r.text.trim()) ||
-        (typeof r?.note === "string" && r.note.trim()) ||
-        "";
+    for (const v of votes || []) {
+      const voteId = v?.id;
+      if (!voteId) continue;
 
-      if (!text) continue;
+      const txt = safeStr(reasonsByVoteId[voteId]);
+      if (!txt) continue;
 
+      // Prefer option_id, else choice_index
+      const optionId = safeStr(v?.option_id);
+      const order =
+        v?.choice_index !== undefined && v?.choice_index !== null
+          ? safeNum(v.choice_index)
+          : v?.picked_index !== undefined && v?.picked_index !== null
+          ? safeNum(v.picked_index)
+          : null;
+
+      let key = "";
+      if (optionId) key = `id:${optionId}`;
+      else if (order !== null && orderToOptId[order]) key = `id:${orderToOptId[order]}`;
+      else if (order !== null) key = `idx:${order}`; // last resort
+
+      if (!key) continue;
       if (!map[key]) map[key] = [];
-      // keep unique-ish
-      if (!map[key].includes(text)) map[key].push(text);
+      if (!map[key].includes(txt)) map[key].push(txt);
     }
 
-    // cap each option list a bit to keep it readable
-    for (const k of Object.keys(map)) {
+    // cap each option list
+    Object.keys(map).forEach((k) => {
       map[k] = map[k].slice(0, 8);
-    }
+    });
 
     return map;
-  }, [reasons]);
+  }, [votes, reasonsByVoteId, optionStats.rows]);
 
   const winner = useMemo(() => {
     const w = optionStats.rows?.find((r) => r.idx === optionStats.winnerIdx);
@@ -475,9 +486,7 @@ export default function Quandr3ResultsPage() {
         <div className="rounded-2xl border bg-white p-6 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                The Question
-              </div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">The Question</div>
               <div className="mt-2 text-lg font-bold leading-snug" style={{ color: NAVY }}>
                 {questionText}
               </div>
@@ -490,16 +499,15 @@ export default function Quandr3ResultsPage() {
               <div
                 className="rounded-2xl px-4 py-3 text-right"
                 style={{
-                  background: "linear-gradient(135deg, rgba(30,99,243,0.08), rgba(0,169,165,0.10), rgba(255,107,107,0.10))",
+                  background:
+                    "linear-gradient(135deg, rgba(30,99,243,0.08), rgba(0,169,165,0.10), rgba(255,107,107,0.10))",
                   border: "1px solid rgba(11,35,67,0.08)",
                 }}
               >
                 <div className="text-xs font-semibold" style={{ color: NAVY }}>
                   Ask. Share. Decide.
                 </div>
-                <div className="mt-1 text-[11px] text-gray-600">
-                  Quandr3 turns opinions into clarity.
-                </div>
+                <div className="mt-1 text-[11px] text-gray-600">Quandr3 turns opinions into clarity.</div>
               </div>
             </div>
           </div>
@@ -511,15 +519,9 @@ export default function Quandr3ResultsPage() {
             <div className="flex flex-col gap-5 md:flex-row md:items-center md:gap-6">
               <div className="relative w-full overflow-hidden rounded-2xl border bg-gray-50 md:w-[340px]">
                 {winner.imageUrl ? (
-                  <img
-                    src={winner.imageUrl}
-                    alt={winner.label}
-                    className="h-56 w-full object-cover md:h-56"
-                  />
+                  <img src={winner.imageUrl} alt={winner.label} className="h-56 w-full object-cover md:h-56" />
                 ) : (
-                  <div className="flex h-56 w-full items-center justify-center text-sm text-gray-500">
-                    No image
-                  </div>
+                  <div className="flex h-56 w-full items-center justify-center text-sm text-gray-500">No image</div>
                 )}
 
                 <div className="absolute left-3 top-3 inline-flex items-center gap-2 rounded-full bg-white/95 px-3 py-1 text-xs font-bold shadow-sm">
@@ -538,10 +540,7 @@ export default function Quandr3ResultsPage() {
                 </div>
 
                 <div className="mt-3 flex items-center gap-3">
-                  <div
-                    className="inline-flex items-center rounded-xl px-3 py-2 text-sm font-bold text-white"
-                    style={{ background: TEAL }}
-                  >
+                  <div className="inline-flex items-center rounded-xl px-3 py-2 text-sm font-bold text-white" style={{ background: TEAL }}>
                     {winner.pct}% ({winner.count})
                   </div>
                   <div className="text-sm text-gray-600">
@@ -563,9 +562,7 @@ export default function Quandr3ResultsPage() {
 
                 {q?.status === "resolved" && (
                   <div className="mt-5 rounded-2xl border bg-gray-50 p-4">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      Curioso’s Note
-                    </div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Curioso’s Note</div>
                     <div className="mt-2 text-sm leading-relaxed" style={{ color: NAVY }}>
                       {resolution?.note || resolution?.resolution_note || q?.resolution_note || "—"}
                     </div>
@@ -583,9 +580,7 @@ export default function Quandr3ResultsPage() {
         <div className="mt-6 rounded-2xl border bg-white p-6 shadow-sm">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Full Breakdown
-              </div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Full Breakdown</div>
               <div className="mt-1 text-lg font-bold" style={{ color: NAVY }}>
                 How the votes split
               </div>
@@ -598,6 +593,7 @@ export default function Quandr3ResultsPage() {
           <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
             {optionStats.rows.map((r) => {
               const isWinner = r.idx === optionStats.winnerIdx;
+
               return (
                 <div
                   key={r.id || r.idx}
@@ -612,9 +608,7 @@ export default function Quandr3ResultsPage() {
                       {r.imageUrl ? (
                         <img src={r.imageUrl} alt={r.label} className="h-full w-full object-cover" />
                       ) : (
-                        <div className="flex h-full w-full items-center justify-center text-[11px] text-gray-500">
-                          No image
-                        </div>
+                        <div className="flex h-full w-full items-center justify-center text-[11px] text-gray-500">No image</div>
                       )}
                     </div>
 
@@ -632,7 +626,9 @@ export default function Quandr3ResultsPage() {
 
                       <div className="mt-2">
                         <div className="flex items-center justify-between text-xs text-gray-600">
-                          <span>{r.count} vote{r.count === 1 ? "" : "s"}</span>
+                          <span>
+                            {r.count} vote{r.count === 1 ? "" : "s"}
+                          </span>
                           <span className="font-semibold">{r.pct}%</span>
                         </div>
 
@@ -659,12 +655,9 @@ export default function Quandr3ResultsPage() {
                     <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-700">
                       {(() => {
                         const keyById = r.id ? `id:${r.id}` : "";
-                        const keyByIdx = `idx:${r.idx}`;
-                        const list = (keyById && reasonsByOption[keyById]) || reasonsByOption[keyByIdx] || [];
+                        const list = (keyById && reasonsByOption[keyById]) || [];
                         const show = list.slice(0, 3);
-                        if (!show.length) {
-                          return <li className="text-gray-500">No reasons submitted yet.</li>;
-                        }
+                        if (!show.length) return <li className="text-gray-500">No reasons submitted yet.</li>;
                         return show.map((t, i) => <li key={i}>{t}</li>);
                       })()}
                     </ul>
@@ -677,21 +670,16 @@ export default function Quandr3ResultsPage() {
 
         {/* Deep Reasons (Grouped) */}
         <div className="mt-6 rounded-2xl border bg-white p-6 shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-            Reasoning
-          </div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Reasoning</div>
           <div className="mt-1 text-lg font-bold" style={{ color: NAVY }}>
             Why people voted the way they did
           </div>
-          <p className="mt-1 text-sm text-gray-600">
-            This is the wisdom layer — the “why” behind the numbers.
-          </p>
+          <p className="mt-1 text-sm text-gray-600">This is the wisdom layer — the “why” behind the numbers.</p>
 
           <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
             {optionStats.rows.map((r) => {
               const keyById = r.id ? `id:${r.id}` : "";
-              const keyByIdx = `idx:${r.idx}`;
-              const list = (keyById && reasonsByOption[keyById]) || reasonsByOption[keyByIdx] || [];
+              const list = (keyById && reasonsByOption[keyById]) || [];
               const isWinner = r.idx === optionStats.winnerIdx;
 
               return (
@@ -732,18 +720,13 @@ export default function Quandr3ResultsPage() {
         {/* Curioso CTA (awaiting_user only) */}
         {q?.status === "awaiting_user" && (
           <div className="sticky bottom-3 mt-6">
-            <div
-              className="rounded-2xl border bg-white p-4 shadow-lg"
-              style={{ borderColor: "rgba(0,169,165,0.35)" }}
-            >
+            <div className="rounded-2xl border bg-white p-4 shadow-lg" style={{ borderColor: "rgba(0,169,165,0.35)" }}>
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
                   <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                     Ready to decide?
                   </div>
-                  <div className="text-xs text-gray-600">
-                    Lock your outcome and close the loop.
-                  </div>
+                  <div className="text-xs text-gray-600">Lock your outcome and close the loop.</div>
                 </div>
 
                 <div className="flex gap-2">
@@ -778,7 +761,7 @@ export default function Quandr3ResultsPage() {
           </div>
         )}
 
-        {/* Footer nudge */}
+        {/* Footer */}
         <div className="mt-10 text-center text-xs text-gray-600">
           Quandr3 keeps it simple: <span className="font-semibold">Ask.</span> <span className="font-semibold">Share.</span>{" "}
           <span className="font-semibold">Decide.</span>

@@ -204,7 +204,6 @@ export default function ExploreInner({
               <option value="resolved">Resolved</option>
             </select>
 
-            {/* ✅ UPDATED: Added Trending */}
             <select
               className="md:col-span-2 rounded-2xl border px-4 py-3"
               value={sort}
@@ -263,25 +262,21 @@ export default function ExploreInner({
 
         {/* 4 STAT BOXES */}
         <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-          {/* TOP CURIOSO */}
           <div className="rounded-3xl bg-white border p-5">
             <div className="text-xs tracking-widest font-semibold text-slate-500">TOP CURIOSO</div>
             <div className="mt-2 text-slate-700">Coming soon (needs stats wiring).</div>
           </div>
 
-          {/* TOP WAYFINDER */}
           <div className="rounded-3xl bg-white border p-5">
             <div className="text-xs tracking-widest font-semibold text-slate-500">TOP WAYFINDER</div>
             <div className="mt-2 text-slate-700">Coming soon (needs stats wiring).</div>
           </div>
 
-          {/* TOP QUANDR3 */}
           <div className="rounded-3xl bg-white border p-5">
             <div className="text-xs tracking-widest font-semibold text-slate-500">TOP QUANDR3</div>
             <div className="mt-2 text-slate-700">Coming soon (needs stats wiring).</div>
           </div>
 
-          {/* ✅ TRENDING TILE (CLICKABLE) */}
           <button
             type="button"
             onClick={() => {
@@ -352,7 +347,6 @@ export default function ExploreInner({
                     <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
                       <span>{fmtDateTime(r.created_at)}</span>
 
-                      {/* ✅ TRENDING DEBUG LINE */}
                       {sort === "trending" && (
                         <span className="text-slate-500">
                           🔥 {Number(r._trendScore || 0).toFixed(1)} · {r._votes24h || 0} votes (24h)

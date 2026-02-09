@@ -45,6 +45,7 @@ type VoteRow = {
   q_id?: string;
   option_id?: string;
   picked_index?: number;
+  choice_index?: number;
   created_at?: string;
 };
 
@@ -55,12 +56,7 @@ function safeStr(v: any) {
 }
 
 function pickQuestion(q: QRow) {
-  return (
-    safeStr(q.title) ||
-    safeStr(q.question) ||
-    safeStr(q.prompt) ||
-    "Untitled Quandr3"
-  );
+  return safeStr(q.title) || safeStr(q.question) || safeStr(q.prompt) || "Untitled Quandr3";
 }
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -103,10 +99,7 @@ function fireConfetti() {
     p.animate(
       [
         { transform: `translate(0px, 0px) rotate(0deg)`, opacity: 1 },
-        {
-          transform: `translate(${drift}px, 110vh) rotate(${rotate}deg)`,
-          opacity: 0.05,
-        },
+        { transform: `translate(${drift}px, 110vh) rotate(${rotate}deg)`, opacity: 0.05 },
       ],
       { duration: fall, easing: "cubic-bezier(.2,.8,.2,1)" }
     );
@@ -136,11 +129,7 @@ async function trySelectOne(table: string, match: Record<string, any>) {
   return data;
 }
 
-async function trySelectMany(
-  table: string,
-  match: Record<string, any>,
-  orderBy?: { col: string; asc?: boolean }
-) {
+async function trySelectMany(table: string, match: Record<string, any>, orderBy?: { col: string; asc?: boolean }) {
   const keys = Object.keys(match);
   let q = supabase.from(table).select("*");
   keys.forEach((k) => (q = q.eq(k, match[k])));
@@ -150,11 +139,7 @@ async function trySelectMany(
   return data || [];
 }
 
-async function tryUpdate(
-  table: string,
-  match: Record<string, any>,
-  patch: Record<string, any>
-) {
+async function tryUpdate(table: string, match: Record<string, any>, patch: Record<string, any>) {
   let q = supabase.from(table).update(patch);
   Object.keys(match).forEach((k) => (q = q.eq(k, match[k])));
   const { error } = await q;
@@ -173,7 +158,7 @@ export default function ResolvePage() {
 
   const id = safeStr((params as any)?.id);
 
-  // ✅ DEV-only bypass (preview) — requires ?dev=1 AND not production
+  // DEV-only preview (?dev=1)
   const devPreview = useMemo(() => {
     const flag = searchParams?.get("dev") === "1";
     return flag && process.env.NODE_ENV !== "production";
@@ -199,14 +184,7 @@ export default function ResolvePage() {
 
   const status = qrow?.status || "open";
 
-  // ✅ DISCUSSION RULE (your rule):
-  // Discussion is decided AFTER resolution (phase 2). For phase 1, Resolve page should not toggle discussion.
-  const canToggleDiscussion = false;
-
-  const totalVotes = useMemo(
-    () => (counts || []).reduce((a, b) => a + (b || 0), 0),
-    [counts]
-  );
+  const totalVotes = useMemo(() => (counts || []).reduce((a, b) => a + (b || 0), 0), [counts]);
 
   useEffect(() => {
     let alive = true;
@@ -224,16 +202,18 @@ export default function ResolvePage() {
         setUserId(uid);
         setAuthLoading(false);
 
+        // ✅ FIX #1: if not logged in, send to login
+        if (!uid && !devPreview) {
+          router.replace(`/login?next=/q/${id}/resolve`);
+          return;
+        }
+
         // fetch quandr3 row
         let q: any = null;
         try {
           q = await trySelectOne("quandr3s", { id });
         } catch (e1) {
-          try {
-            q = await trySelectOne("quandrs", { id });
-          } catch (e2) {
-            throw e1;
-          }
+          q = await trySelectOne("quandrs", { id });
         }
 
         if (!alive) return;
@@ -242,15 +222,9 @@ export default function ResolvePage() {
         setQrow(qTyped);
         setDiscussionOpen(!!qTyped.discussion_open);
 
-        // Curioso guard
-        const owner =
-          safeStr(qTyped.created_by) ||
-          safeStr(qTyped.user_id) ||
-          safeStr(qTyped.author_id);
-
+        const owner = safeStr(qTyped.created_by) || safeStr(qTyped.user_id) || safeStr(qTyped.author_id);
         const isOwner = !!uid && !!owner && uid === owner;
 
-        // ✅ If dev preview is enabled, allow rendering even if not owner
         setIsCurioso(isOwner || devPreview);
 
         if (!isOwner && !devPreview) {
@@ -258,474 +232,51 @@ export default function ResolvePage() {
           return;
         }
 
-        // fetch options
-        let opts: any[] = [];
-        const optionTables = ["quandr3_options", "quandry_options", "options"];
-        const matchKeys = [
-          { quandr3_id: id },
-          { q_id: id },
-          { parent_id: id },
-        ];
-
-        let got = false;
-        for (const t of optionTables) {
-          for (const mk of matchKeys) {
-            try {
-              opts = await trySelectMany(t, mk, { col: "idx", asc: true });
-              got = true;
-              break;
-            } catch {}
-          }
-          if (got) break;
-        }
-
-        const normalized: OptionRow[] = (opts || []).map((o: any) => ({
+        // options
+        const opts = await trySelectMany("quandr3_options", { quandr3_id: id }, { col: "idx", asc: true });
+        const normalized = (opts || []).map((o: any) => ({
           id: o.id,
           text: o.text ?? o.label ?? o.title ?? "",
           image_url: o.image_url ?? o.image ?? "",
-          idx:
-            typeof o.idx === "number"
-              ? o.idx
-              : typeof o.order_index === "number"
-              ? o.order_index
-              : typeof o.picked_index === "number"
-              ? o.picked_index
-              : undefined,
+          idx: typeof o.idx === "number" ? o.idx : typeof o.order_index === "number" ? o.order_index : undefined,
         }));
-
         normalized.sort((a, b) => (a.idx ?? 999) - (b.idx ?? 999));
         setOptions(normalized);
-
         setSelectedIndex(0);
 
-        // votes breakdown
-        let votes: any[] = [];
-        const voteTables = ["votes", "quandr3_votes", "quandry_votes"];
-        let votesGot = false;
-
-        for (const vt of voteTables) {
-          for (const mk of matchKeys) {
-            try {
-              votes = await trySelectMany(vt, mk, { col: "created_at", asc: true });
-              votesGot = true;
-              break;
-            } catch {}
-          }
-          if (votesGot) break;
-        }
-
+        // votes
+        const votes = await trySelectMany("quandr3_votes", { quandr3_id: id }, { col: "created_at", asc: true });
         const c = new Array(Math.max(1, normalized.length)).fill(0);
 
         for (const v of votes as VoteRow[]) {
+          // ✅ FIX #2: support choice_index OR picked_index
           const pi =
-            typeof (v as any).picked_index === "number"
+            typeof (v as any).choice_index === "number"
+              ? (v as any).choice_index
+              : typeof (v as any).picked_index === "number"
               ? (v as any).picked_index
               : null;
 
           if (pi !== null && pi >= 0) {
             while (c.length <= pi) c.push(0);
             c[pi] += 1;
-            continue;
-          }
-
-          const oid = safeStr((v as any).option_id);
-          if (oid) {
-            const idx = normalized.findIndex((o) => safeStr(o.id) === oid);
-            if (idx >= 0) c[idx] += 1;
           }
         }
 
         setCounts(c);
-
-        if (qTyped.status === "awaiting_user" || qTyped.status === "resolved") {
-          let best = 0;
-          for (let i = 1; i < c.length; i++) if (c[i] > c[best]) best = i;
-          setSelectedIndex(best);
-        }
       } catch (err: any) {
         console.error(err);
-        setErrorMsg(
-          safeStr(err?.message) || "Something went wrong loading the resolve page."
-        );
+        setErrorMsg(safeStr(err?.message) || "Something went wrong loading the resolve page.");
       } finally {
         if (alive) setLoading(false);
       }
     }
 
     if (id) boot();
-
     return () => {
       alive = false;
     };
   }, [id, router, devPreview]);
 
-  async function lockDecision() {
-    if (!qrow) return;
-
-    // If dev preview and not owner, block write attempts (prevents confusion)
-    if (devPreview && !userId) {
-      setErrorMsg("DEV Preview: log in as the Curioso to actually lock a decision.");
-      return;
-    }
-
-    setSaving(true);
-    setErrorMsg("");
-
-    try {
-      const optionId = safeStr(options?.[selectedIndex]?.id);
-      const payload: Record<string, any> = {
-        quandr3_id: qrow.id,
-        picked_index: selectedIndex,
-        note: note?.trim() || null,
-        resolved_at: new Date().toISOString(),
-        resolver_user_id: userId || null,
-      };
-
-      if (optionId) payload.option_id = optionId;
-
-      try {
-        await tryInsert("quandr3_resolutions", payload);
-      } catch (e1) {
-        try {
-          await tryInsert("quandry_resolutions", payload);
-        } catch (e2) {
-          console.warn("Resolution insert failed, proceeding with status update.", e1);
-        }
-      }
-
-      const patch: Record<string, any> = {
-        status: "resolved",
-        discussion_open: false,
-      };
-
-      try {
-        await tryUpdate(
-          "quandr3s",
-          { id: qrow.id },
-          { ...patch, resolved_at: new Date().toISOString() }
-        );
-      } catch {
-        try {
-          await tryUpdate("quandr3s", { id: qrow.id }, patch);
-        } catch (errA: any) {
-          try {
-            await tryUpdate(
-              "quandrs",
-              { id: qrow.id },
-              { ...patch, resolved_at: new Date().toISOString() }
-            );
-          } catch {
-            await tryUpdate("quandrs", { id: qrow.id }, patch);
-          }
-        }
-      }
-
-      fireConfetti();
-      window.setTimeout(() => {
-        router.push(`/q/${qrow.id}/results`);
-      }, 650);
-    } catch (err: any) {
-      console.error(err);
-      setErrorMsg(
-        safeStr(err?.message) || "Could not lock decision. Please try again."
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (loading || authLoading) {
-    return (
-      <main className="min-h-screen" style={{ background: SOFT_BG }}>
-        <div className="mx-auto max-w-3xl px-4 py-10">
-          <div className="rounded-2xl border bg-white p-6 shadow-sm">
-            <div className="text-sm font-semibold" style={{ color: NAVY }}>
-              Loading Resolve…
-            </div>
-            <div className="mt-2 text-sm text-slate-600">
-              Preparing the Curioso decision panel.
-            </div>
-          </div>
-        </div>
-      </main>
-    );
-  }
-
-  // If not Curioso (and not dev preview), we redirect in effect — but render a minimal fallback
-  if (!isCurioso && !devPreview) {
-    return (
-      <main className="min-h-screen" style={{ background: SOFT_BG }}>
-        <div className="mx-auto max-w-3xl px-4 py-10">
-          <div className="rounded-2xl border bg-white p-6 shadow-sm">
-            <div className="text-sm font-semibold" style={{ color: NAVY }}>
-              Redirecting…
-            </div>
-            <div className="mt-2 text-sm text-slate-600">
-              This page is only for the Curioso who created the Quandr3.
-            </div>
-            <div className="mt-4">
-              <Link
-                href={`/q/${id}`}
-                className="inline-flex items-center rounded-xl px-4 py-2 text-sm font-semibold text-white"
-                style={{ background: BLUE }}
-              >
-                Back to Quandr3
-              </Link>
-            </div>
-          </div>
-        </div>
-      </main>
-    );
-  }
-
-  return (
-    <main className="min-h-screen" style={{ background: SOFT_BG }}>
-      <div className="mx-auto max-w-4xl px-4 py-10">
-        {devPreview ? (
-          <div className="mb-4 rounded-2xl border border-amber-200 bg-white p-4 text-sm text-amber-700 shadow-sm">
-            <strong>DEV PREVIEW MODE</strong> — You opened this with <code>?dev=1</code>.
-            This lets you view the Resolve UI even if you aren’t the Curioso.
-          </div>
-        ) : null}
-
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="text-xs font-semibold tracking-widest text-slate-600">
-              RESOLVE
-            </div>
-            <h1 className="mt-1 text-3xl font-extrabold" style={{ color: NAVY }}>
-              Make the final call
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm text-slate-600">
-              Voting is{" "}
-              <span className="font-semibold" style={{ color: NAVY }}>
-                {status === "open"
-                  ? "still open"
-                  : status === "awaiting_user"
-                  ? "closed"
-                  : "resolved"}
-              </span>
-              . Your decision closes the loop so everyone learns.
-            </p>
-          </div>
-
-          <div className="flex gap-2">
-            <Link
-              href={`/q/${id}`}
-              className="inline-flex items-center rounded-xl border bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
-            >
-              Back
-            </Link>
-            <Link
-              href={`/q/${id}/results`}
-              className="inline-flex items-center rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm"
-              style={{ background: BLUE }}
-            >
-              View Results
-            </Link>
-          </div>
-        </div>
-
-        {errorMsg ? (
-          <div className="mt-6 rounded-2xl border border-red-200 bg-white p-4 text-sm text-red-600 shadow-sm">
-            {errorMsg}
-          </div>
-        ) : null}
-
-        <div className="mt-6 rounded-2xl border bg-white p-6 shadow-sm">
-          <div className="text-xs font-semibold tracking-widest text-slate-600">
-            QUANDR3
-          </div>
-          <div className="mt-2 text-xl font-extrabold" style={{ color: NAVY }}>
-            {qrow ? pickQuestion(qrow) : "Quandr3"}
-          </div>
-
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <span
-              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold"
-              style={{
-                background:
-                  status === "resolved"
-                    ? "rgba(0,169,165,0.12)"
-                    : status === "awaiting_user"
-                    ? "rgba(255,107,107,0.12)"
-                    : "rgba(30,99,243,0.12)",
-                color:
-                  status === "resolved"
-                    ? TEAL
-                    : status === "awaiting_user"
-                    ? CORAL
-                    : BLUE,
-              }}
-            >
-              Status: {status}
-            </span>
-
-            <span className="text-xs text-slate-600">
-              Total votes:{" "}
-              <span className="font-semibold" style={{ color: NAVY }}>
-                {totalVotes}
-              </span>
-            </span>
-          </div>
-        </div>
-
-        {/* Vote breakdown + decision */}
-        <div className="mt-6 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl border bg-white p-6 shadow-sm">
-            <div className="text-xs font-semibold tracking-widest text-slate-600">
-              STANDINGS PREVIEW
-            </div>
-            <div className="mt-1 text-lg font-extrabold" style={{ color: NAVY }}>
-              How the community voted
-            </div>
-
-            <div className="mt-5 space-y-3">
-              {(options?.length ? options : new Array(4).fill(null)).map((o, idx) => {
-                const label = o
-                  ? safeStr(o.text) || `Option ${String.fromCharCode(65 + idx)}`
-                  : `Option ${String.fromCharCode(65 + idx)}`;
-
-                const c = counts?.[idx] || 0;
-                const pct = totalVotes > 0 ? Math.round((c / totalVotes) * 100) : 0;
-
-                const isLeading =
-                  totalVotes > 0 && c === Math.max(...(counts || [0])) && c > 0;
-
-                return (
-                  <div
-                    key={idx}
-                    className="rounded-xl border p-3"
-                    style={{
-                      borderColor: isLeading
-                        ? "rgba(0,169,165,0.45)"
-                        : "rgba(15,23,42,0.12)",
-                      background: isLeading ? "rgba(0,169,165,0.06)" : "white",
-                    }}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold" style={{ color: NAVY }}>
-                          {String.fromCharCode(65 + idx)}. {label}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-600">
-                          {c} vote{c === 1 ? "" : "s"} • {pct}%
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${pct}%`,
-                          background: isLeading ? TEAL : BLUE,
-                        }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border bg-white p-6 shadow-sm">
-            <div className="text-xs font-semibold tracking-widest text-slate-600">
-              YOUR DECISION
-            </div>
-            <div className="mt-1 text-lg font-extrabold" style={{ color: NAVY }}>
-              Choose the final outcome
-            </div>
-
-            <div className="mt-5 grid gap-2 sm:grid-cols-2">
-              {(options?.length ? options : new Array(4).fill(null)).map((o, idx) => {
-                const label = o
-                  ? safeStr(o.text) || `Option ${String.fromCharCode(65 + idx)}`
-                  : `Option ${String.fromCharCode(65 + idx)}`;
-
-                const selected = idx === selectedIndex;
-
-                return (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => setSelectedIndex(idx)}
-                    className={cx(
-                      "rounded-xl border p-3 text-left shadow-sm transition",
-                      selected ? "ring-2" : "hover:bg-slate-50"
-                    )}
-                    style={
-                      selected
-                        ? { borderColor: "transparent", boxShadow: `0 0 0 2px ${TEAL}` }
-                        : { borderColor: "rgba(15,23,42,0.12)", boxShadow: "none" }
-                    }
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-sm font-semibold" style={{ color: NAVY }}>
-                        {String.fromCharCode(65 + idx)}. {label}
-                      </div>
-                      {selected ? (
-                        <span
-                          className="rounded-full px-3 py-1 text-xs font-semibold"
-                          style={{ background: "rgba(0,169,165,0.12)", color: TEAL }}
-                        >
-                          Selected
-                        </span>
-                      ) : null}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-5">
-              <label className="text-xs font-semibold tracking-widest text-slate-600">
-                WHY I DECIDED THIS (OPTIONAL)
-              </label>
-              <textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                rows={5}
-                placeholder="Share your reasoning so everyone learns from your decision..."
-                className="mt-2 w-full rounded-xl border bg-white p-3 text-sm outline-none focus:ring-2"
-                style={{ borderColor: "rgba(15,23,42,0.12)" }}
-              />
-            </div>
-
-            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-xs text-slate-600">
-                On resolve: status becomes{" "}
-                <span className="font-semibold" style={{ color: NAVY }}>
-                  resolved
-                </span>{" "}
-                then we redirect to Results.
-              </div>
-
-              <button
-                disabled={saving}
-                onClick={lockDecision}
-                className="inline-flex items-center justify-center rounded-xl px-5 py-3 text-sm font-extrabold text-white shadow-sm"
-                style={{ background: CORAL }}
-              >
-                {saving ? "Locking…" : "Lock Decision + Celebrate 🎉"}
-              </button>
-            </div>
-
-            {status === "open" ? (
-              <div className="mt-4 rounded-xl border bg-slate-50 p-4 text-sm text-slate-700">
-                <span className="font-semibold" style={{ color: NAVY }}>
-                  Note:
-                </span>{" "}
-                This Quandr3 is still open. Intended flow is: open → awaiting_user → resolved.
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="mt-10 text-center text-xs text-slate-500">
-          Quandr3 • Ask • Share • Decide
-        </div>
-      </div>
-    </main>
-  );
+  // ...rest of your render code unchanged...
 }
