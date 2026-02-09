@@ -71,23 +71,15 @@ function cleanReason(s?: string) {
 }
 
 function pillStyle(kind: "open" | "awaiting_user" | "resolved") {
-  if (kind === "open") {
-    return { bg: "rgba(30,99,243,0.12)", fg: BLUE, label: "Open" };
-  }
-  if (kind === "awaiting_user") {
-    return {
-      bg: "rgba(255,107,107,0.12)",
-      fg: CORAL,
-      label: "Closed (Awaiting Curioso)",
-    };
-  }
+  if (kind === "open") return { bg: "rgba(30,99,243,0.12)", fg: BLUE, label: "Open" };
+  if (kind === "awaiting_user")
+    return { bg: "rgba(255,107,107,0.12)", fg: CORAL, label: "Closed (Awaiting Curioso)" };
   return { bg: "rgba(0,169,165,0.12)", fg: TEAL, label: "Resolved" };
 }
 
 /** Backward/loose matching so categories like "Money & Finance" still land properly */
 function categoryFallback(category?: string) {
   const c = (category || "").toLowerCase();
-
   if (c.includes("career")) return "/quandr3/placeholders/career.jpg";
   if (c.includes("money") || c.includes("finance")) return "/quandr3/placeholders/money.jpg";
   if (c.includes("love") || c.includes("relationship") || c.includes("dating"))
@@ -97,18 +89,11 @@ function categoryFallback(category?: string) {
   if (c.includes("family") || c.includes("parent") || c.includes("kids"))
     return "/quandr3/placeholders/family.jpg";
   if (c.includes("tech")) return "/quandr3/placeholders/tech.jpg";
-
   return "/quandr3/placeholders/default.jpg";
 }
 
 function getOptImage(opt: any, qCategory?: string) {
-  return (
-    opt?.image_url ||
-    opt?.media_url ||
-    opt?.photo_url ||
-    opt?.img_url ||
-    categoryFallback(qCategory)
-  );
+  return opt?.image_url || opt?.media_url || opt?.photo_url || opt?.img_url || categoryFallback(qCategory);
 }
 
 /** ✅ Creator helpers (Phase-1 safe) */
@@ -119,10 +104,8 @@ function getCreatorId(qRow: any) {
 function creatorLabel(qRow: any, profile: any) {
   if (profile?.display_name) return profile.display_name;
   if (qRow?.creator_name) return qRow.creator_name;
-
   const cid = getCreatorId(qRow);
   if (cid) return `Curioso ${String(cid).slice(0, 6)}`;
-
   return "Curioso";
 }
 
@@ -168,9 +151,7 @@ export default function Quandr3DetailPage() {
   ========================= */
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data?.user ?? null);
-    });
+    supabase.auth.getUser().then(({ data }) => setUser(data?.user ?? null));
   }, []);
 
   /* =========================
@@ -184,11 +165,7 @@ export default function Quandr3DetailPage() {
 
     if (vRows.length) {
       const voteIds = vRows.map((x: any) => x.id).filter(Boolean);
-
-      const { data: rs } = await supabase
-        .from("vote_reasons")
-        .select("vote_id, reason")
-        .in("vote_id", voteIds);
+      const { data: rs } = await supabase.from("vote_reasons").select("vote_id, reason").in("vote_id", voteIds);
 
       const map: Record<string, string> = {};
       (rs ?? []).forEach((r: any) => {
@@ -214,21 +191,15 @@ export default function Quandr3DetailPage() {
     setComments(c);
 
     const userIds = Array.from(new Set(c.map((x: any) => x.user_id).filter(Boolean)));
-
     if (!userIds.length) {
       setCommentProfilesById({});
       return;
     }
 
-    const { data: profs } = await supabase
-      .from("profiles")
-      .select("id, display_name, avatar_url")
-      .in("id", userIds);
+    const { data: profs } = await supabase.from("profiles").select("id, display_name, avatar_url").in("id", userIds);
 
     const map: Record<string, any> = {};
-    (profs ?? []).forEach((p: any) => {
-      map[p.id] = p;
-    });
+    (profs ?? []).forEach((p: any) => (map[p.id] = p));
     setCommentProfilesById(map);
   }
 
@@ -236,51 +207,30 @@ export default function Quandr3DetailPage() {
     const { data: qRow } = await supabase.from("quandr3s").select("*").eq("id", qid).single();
     setQ(qRow ?? null);
 
-    // ✅ STRONGER creator profile fetch (supports author_id OR user_id OR creator_id OR created_by)
+    // creator profile fetch (supports author_id OR user_id OR creator_id OR created_by)
     const creatorId = getCreatorId(qRow);
     if (creatorId) {
-      const { data: p } = await supabase
-        .from("profiles")
-        .select("display_name, avatar_url")
-        .eq("id", creatorId)
-        .single();
+      const { data: p } = await supabase.from("profiles").select("display_name, avatar_url").eq("id", creatorId).single();
       setProfile(p ?? null);
     } else {
       setProfile(null);
     }
 
-    const { data: opts } = await supabase
-      .from("quandr3_options")
-      .select("*")
-      .eq("quandr3_id", qid)
-      .order("order", { ascending: true });
-
+    const { data: opts } = await supabase.from("quandr3_options").select("*").eq("quandr3_id", qid).order("order", { ascending: true });
     setOptions(opts ?? []);
 
     const vRows = await refreshVotesAndReasons(qid);
 
-    const { data: r } = await supabase
-      .from("quandr3_resolutions")
-      .select("*")
-      .eq("quandr3_id", qid)
-      .maybeSingle();
-
+    const { data: r } = await supabase.from("quandr3_resolutions").select("*").eq("quandr3_id", qid).maybeSingle();
     setResolution(r ?? null);
 
-    // ✅ Discussion fetch ONLY if:
-    // - discussion is open
-    // - voting is NOT open anymore (expired OR resolved)
-    // - and this viewer has voted (invited)
+    // Discussion fetch only if opened, voting ended, and viewer voted
     const duration = Number(qRow?.voting_duration_hours || 0);
     const createdAt = qRow?.created_at;
     const timeExpired =
-      !!createdAt && !!duration
-        ? Date.now() > new Date(createdAt).getTime() + duration * 3600 * 1000
-        : false;
+      !!createdAt && !!duration ? Date.now() > new Date(createdAt).getTime() + duration * 3600 * 1000 : false;
 
-    const voteCapReached =
-      qRow?.voting_max_votes ? vRows.length >= Number(qRow.voting_max_votes) : false;
-
+    const voteCapReached = qRow?.voting_max_votes ? vRows.length >= Number(qRow.voting_max_votes) : false;
     const votingEnded = timeExpired || voteCapReached || !!r;
 
     const didVote = !!user?.id && vRows.some((x: any) => x.user_id === user.id);
@@ -302,29 +252,20 @@ export default function Quandr3DetailPage() {
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, user?.id]); // re-evaluate invite gating after login loads
+  }, [id, user?.id]);
 
   /* =========================
      Derived Logic
   ========================= */
 
-  const myVote = useMemo(() => {
-    if (!user) return null;
-    return votes.find((v: any) => v.user_id === user.id) ?? null;
-  }, [votes, user]);
-
+  const myVote = useMemo(() => (user ? votes.find((v: any) => v.user_id === user.id) ?? null : null), [votes, user]);
   const didVote = useMemo(() => !!myVote?.id, [myVote]);
 
-  const myReason = useMemo(() => {
-    if (!myVote?.id) return "";
-    return cleanReason(reasonsByVoteId[myVote.id] ?? "");
-  }, [myVote, reasonsByVoteId]);
+  const myReason = useMemo(() => (myVote?.id ? cleanReason(reasonsByVoteId[myVote.id] ?? "") : ""), [myVote, reasonsByVoteId]);
 
   const voteCounts = useMemo(() => {
     const map: Record<number, number> = {};
-    votes.forEach((v: any) => {
-      map[v.choice_index] = (map[v.choice_index] || 0) + 1;
-    });
+    votes.forEach((v: any) => (map[v.choice_index] = (map[v.choice_index] || 0) + 1));
     return map;
   }, [votes]);
 
@@ -332,17 +273,11 @@ export default function Quandr3DetailPage() {
 
   const votingExpired = useMemo(() => {
     if (!q) return false;
-
     const duration = Number(q.voting_duration_hours || 0);
     const createdAt = q.created_at;
-
     const timeExpired =
-      !!createdAt && !!duration
-        ? Date.now() > new Date(createdAt).getTime() + duration * 3600 * 1000
-        : false;
-
+      !!createdAt && !!duration ? Date.now() > new Date(createdAt).getTime() + duration * 3600 * 1000 : false;
     const voteCapReached = q.voting_max_votes ? totalVotes >= Number(q.voting_max_votes) : false;
-
     return timeExpired || voteCapReached;
   }, [q, totalVotes]);
 
@@ -353,11 +288,6 @@ export default function Quandr3DetailPage() {
   }, [resolution, votingExpired]);
 
   const canShowResults = useMemo(() => status !== "open", [status]);
-
-  const canShowDiscussion = useMemo(() => {
-    // discussion only after close AND only for those who voted AND only if author opened it
-    return status !== "open" && !!q?.discussion_open && didVote;
-  }, [status, q, didVote]);
 
   const winningOrder = useMemo(() => {
     if (resolution) {
@@ -378,20 +308,15 @@ export default function Quandr3DetailPage() {
   const reasonsByChoiceIndex = useMemo(() => {
     const grouped: Record<number, string[]> = {};
     votes.forEach((v: any) => {
-      const rid = v.id;
-      const txt = cleanReason(reasonsByVoteId[rid]);
+      const txt = cleanReason(reasonsByVoteId[v.id]);
       if (!txt) return;
-      const idx = v.choice_index;
-      grouped[idx] = grouped[idx] || [];
-      grouped[idx].push(txt);
+      grouped[v.choice_index] = grouped[v.choice_index] || [];
+      grouped[v.choice_index].push(txt);
     });
     return grouped;
   }, [votes, reasonsByVoteId]);
 
-  // Only allow editing reasons while voting is open
-  const canEditReason = useMemo(() => {
-    return !!user && status === "open" && !votingExpired && !resolution;
-  }, [user, status, votingExpired, resolution]);
+  const canEditReason = useMemo(() => !!user && status === "open" && !votingExpired && !resolution, [user, status, votingExpired, resolution]);
 
   const isCurioso = useMemo(() => {
     if (!user?.id) return false;
@@ -400,35 +325,18 @@ export default function Quandr3DetailPage() {
     return user.id === cid;
   }, [user, q]);
 
-  const canToggleDiscussion = useMemo(() => {
-    // Curioso can open/close discussion after voting ends OR after resolution.
-    if (!isCurioso) return false;
-    return votingExpired || !!resolution;
-  }, [isCurioso, votingExpired, resolution]);
+  const canToggleDiscussion = useMemo(() => (isCurioso ? votingExpired || !!resolution : false), [isCurioso, votingExpired, resolution]);
 
   const statusPill = useMemo(() => pillStyle(status as any), [status]);
 
-  /** ✅ HERO IMAGE RULE:
-   *  1) If q.media_url exists, use it
-   *  2) Else use category hero mapping (hard set)
-   *  3) Else default
-   */
-  const heroImg = useMemo(() => {
-    return q?.media_url ? q.media_url : heroForCategory(q?.category);
-  }, [q]);
+  const heroImg = useMemo(() => (q?.media_url ? q.media_url : heroForCategory(q?.category)), [q]);
 
   const discussionBadge = useMemo(() => {
-    // Never show "Open" while voting is open — even if the DB flag is true.
-    if (status === "open") {
-      return { label: "Discussion: Locked", bg: "rgba(148,163,184,0.18)", fg: "rgb(100 116 139)" };
-    }
-    if (!!q?.discussion_open) {
-      return { label: "Discussion: Open", bg: "rgba(0,169,165,0.12)", fg: TEAL };
-    }
+    if (status === "open") return { label: "Discussion: Locked", bg: "rgba(148,163,184,0.18)", fg: "rgb(100 116 139)" };
+    if (!!q?.discussion_open) return { label: "Discussion: Open", bg: "rgba(0,169,165,0.12)", fg: TEAL };
     return { label: "Discussion: Closed", bg: "rgba(148,163,184,0.18)", fg: "rgb(100 116 139)" };
   }, [status, q]);
 
-  // ✅ polish: stable creator label computed once
   const creatorName = useMemo(() => creatorLabel(q, profile), [q, profile]);
 
   /* =========================
@@ -437,27 +345,16 @@ export default function Quandr3DetailPage() {
 
   async function vote(order: number) {
     if (!id) return;
-
-    if (!user) {
-      router.push(`/login?next=/q/${id}`);
-      return;
-    }
+    if (!user) return router.push(`/login?next=/q/${id}`);
     if (votingExpired || resolution) return;
 
     const { data: inserted, error } = await supabase
       .from("quandr3_votes")
-      .insert({
-        quandr3_id: id,
-        user_id: user.id,
-        choice_index: order,
-      })
+      .insert({ quandr3_id: id, user_id: user.id, choice_index: order })
       .select("id, user_id, choice_index, quandr3_id, created_at")
       .single();
 
-    if (error) {
-      await refreshVotesAndReasons(id);
-      return;
-    }
+    if (error) return refreshVotesAndReasons(id);
 
     try {
       localStorage.setItem(`quandr3-voted-${id}`, "1");
@@ -466,118 +363,63 @@ export default function Quandr3DetailPage() {
     await refreshVotesAndReasons(id);
 
     if (inserted?.id) {
-      setReasonDraftByVoteId((prev: any) => ({
-        ...prev,
-        [inserted.id]: cleanReason(prev[inserted.id]) ?? "",
-      }));
+      setReasonDraftByVoteId((prev: any) => ({ ...prev, [inserted.id]: cleanReason(prev[inserted.id]) ?? "" }));
     }
   }
 
   async function saveMyReason() {
     if (!id) return;
-
-    if (!user) {
-      router.push(`/login?next=/q/${id}`);
-      return;
-    }
-    if (!myVote?.id) return;
-    if (!canEditReason) return;
+    if (!user) return router.push(`/login?next=/q/${id}`);
+    if (!myVote?.id || !canEditReason) return;
 
     const draft = cleanReason(reasonDraftByVoteId[myVote.id] ?? "");
     if (!draft) return;
 
     setSavingReason(true);
-
-    const { error } = await supabase
-      .from("vote_reasons")
-      .upsert({ vote_id: myVote.id, reason: draft }, { onConflict: "vote_id" });
-
+    const { error } = await supabase.from("vote_reasons").upsert({ vote_id: myVote.id, reason: draft }, { onConflict: "vote_id" });
     setSavingReason(false);
 
-    if (error) {
-      alert(error.message || "Could not save reason.");
-      return;
-    }
-
+    if (error) return alert(error.message || "Could not save reason.");
     await refreshVotesAndReasons(id);
   }
 
   async function postComment() {
     if (!id) return;
-
-    if (!user) {
-      router.push(`/login?next=/q/${id}`);
-      return;
-    }
-    if (!canShowDiscussion) return;
+    if (!user) return router.push(`/login?next=/q/${id}`);
 
     const body = commentDraft.trim();
     if (!body) return;
 
     setPostingComment(true);
-
-    const { error } = await supabase.from("quandr3_comments").insert({
-      quandr3_id: id,
-      user_id: user.id,
-      body,
-    });
-
+    const { error } = await supabase.from("quandr3_comments").insert({ quandr3_id: id, user_id: user.id, body });
     setPostingComment(false);
 
-    if (error) {
-      alert(error.message || "Could not post comment.");
-      return;
-    }
-
+    if (error) return alert(error.message || "Could not post comment.");
     setCommentDraft("");
     await refreshComments(id);
   }
 
   async function deleteComment(commentId: string) {
     if (!id) return;
-
-    if (!user) {
-      router.push(`/login?next=/q/${id}`);
-      return;
-    }
+    if (!user) return router.push(`/login?next=/q/${id}`);
 
     const { error } = await supabase.from("quandr3_comments").delete().eq("id", commentId);
-
-    if (error) {
-      alert(error.message || "Could not delete comment.");
-      return;
-    }
-
+    if (error) return alert(error.message || "Could not delete comment.");
     await refreshComments(id);
   }
 
   async function setDiscussionOpen(nextOpen: boolean) {
     if (!id) return;
-
-    if (!user) {
-      router.push(`/login?next=/q/${id}`);
-      return;
-    }
-    if (!isCurioso) return;
-    if (!canToggleDiscussion) return;
+    if (!user) return router.push(`/login?next=/q/${id}`);
+    if (!isCurioso || !canToggleDiscussion) return;
 
     setTogglingDiscussion(true);
-
-    const { error } = await supabase
-      .from("quandr3s")
-      .update({ discussion_open: nextOpen })
-      .eq("id", id);
-
+    const { error } = await supabase.from("quandr3s").update({ discussion_open: nextOpen }).eq("id", id);
     setTogglingDiscussion(false);
 
     if (error) {
-      alert(
-        error.message ||
-          "Could not toggle discussion (likely RLS). Make sure only the author can update discussion_open."
-      );
-      return;
+      return alert(error.message || "Could not toggle discussion (likely RLS). Make sure only the author can update discussion_open.");
     }
-
     await refreshCore(id);
   }
 
@@ -610,11 +452,7 @@ export default function Quandr3DetailPage() {
             </div>
             <div className="mt-2 text-sm text-slate-600">That Quandr3 ID doesn’t exist (or RLS is blocking it).</div>
             <div className="mt-4">
-              <Link
-                href="/explore"
-                className="inline-flex items-center rounded-xl px-4 py-2 text-sm font-semibold text-white"
-                style={{ background: BLUE }}
-              >
+              <Link href="/explore" className="inline-flex items-center rounded-xl px-4 py-2 text-sm font-semibold text-white" style={{ background: BLUE }}>
                 Back to Explore
               </Link>
             </div>
@@ -634,10 +472,7 @@ export default function Quandr3DetailPage() {
       <header className="border-b bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
           <Link href="/explore" className="flex items-center gap-3">
-            <div
-              className="flex h-9 w-9 items-center justify-center rounded-xl border"
-              style={{ borderColor: "rgba(15,23,42,0.12)" }}
-            >
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl border" style={{ borderColor: "rgba(15,23,42,0.12)" }}>
               <span className="text-lg" style={{ color: NAVY }}>
                 ?
               </span>
@@ -646,43 +481,25 @@ export default function Quandr3DetailPage() {
               <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                 Quandr3
               </div>
-              <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">
-                ASK. SHARE. DECIDE.
-              </div>
+              <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">ASK. SHARE. DECIDE.</div>
             </div>
           </Link>
 
           <div className="flex items-center gap-3">
-            <Link
-              href="/q/create"
-              className="inline-flex items-center rounded-full px-4 py-2 text-sm font-extrabold text-white shadow-sm"
-              style={{ background: BLUE }}
-            >
+            <Link href="/q/create" className="inline-flex items-center rounded-full px-4 py-2 text-sm font-extrabold text-white shadow-sm" style={{ background: BLUE }}>
               Create a Quandr3
             </Link>
 
             {user ? (
-              <Link
-                href="/account"
-                className="rounded-full border bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-                style={{ borderColor: "rgba(15,23,42,0.12)" }}
-              >
+              <Link href="/account" className="rounded-full border bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50" style={{ borderColor: "rgba(15,23,42,0.12)" }}>
                 Account
               </Link>
             ) : (
               <>
-                <Link
-                  href={`/login?next=/q/${id}`}
-                  className="rounded-full border bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-                  style={{ borderColor: "rgba(15,23,42,0.12)" }}
-                >
+                <Link href={`/login?next=/q/${id}`} className="rounded-full border bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50" style={{ borderColor: "rgba(15,23,42,0.12)" }}>
                   Log in
                 </Link>
-                <Link
-                  href="/signup"
-                  className="rounded-full px-4 py-2 text-sm font-extrabold text-white"
-                  style={{ background: NAVY }}
-                >
+                <Link href="/signup" className="rounded-full px-4 py-2 text-sm font-extrabold text-white" style={{ background: NAVY }}>
                   Sign up
                 </Link>
               </>
@@ -692,7 +509,7 @@ export default function Quandr3DetailPage() {
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-8">
-        {/* HERO BANNER (Explore-style) */}
+        {/* HERO BANNER */}
         <section className="overflow-hidden rounded-[28px] border bg-white shadow-sm">
           <div className="relative h-[240px] w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -700,16 +517,10 @@ export default function Quandr3DetailPage() {
             <div className="absolute inset-0 bg-gradient-to-r from-[#0b2343cc] via-[#0b234388] to-[#0b234320]" />
 
             <div className="absolute left-5 top-5 flex items-center gap-3">
-              <span
-                className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold"
-                style={{ color: NAVY }}
-              >
+              <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
                 {safeStr(q.category || "Category")}
               </span>
-              <span
-                className="rounded-full px-3 py-1 text-xs font-extrabold"
-                style={{ background: statusPill.bg, color: statusPill.fg }}
-              >
+              <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: statusPill.bg, color: statusPill.fg }}>
                 {statusPill.label}
               </span>
             </div>
@@ -751,17 +562,13 @@ export default function Quandr3DetailPage() {
                 </span>
                 <span className="text-xs text-white/60">•</span>
                 <span className="text-xs font-semibold">Created {fmt(q.created_at)}</span>
-
-                {/* ✅ POLISH: Posted by in the hero */}
                 <span className="text-xs text-white/60">•</span>
                 <span className="text-xs font-semibold">
                   Posted by <span className="font-extrabold text-white">{creatorName}</span>
                 </span>
               </div>
 
-              <h1 className="mt-2 text-3xl font-extrabold leading-tight text-white">
-                {safeStr(q.title) || "Untitled Quandr3"}
-              </h1>
+              <h1 className="mt-2 text-3xl font-extrabold leading-tight text-white">{safeStr(q.title) || "Untitled Quandr3"}</h1>
 
               {safeStr(q.context) ? (
                 <p className="mt-2 max-w-3xl text-sm text-white/90">{safeStr(q.context)}</p>
@@ -776,8 +583,7 @@ export default function Quandr3DetailPage() {
             <div className="rounded-2xl border bg-slate-50 p-5">
               <div className="text-xs font-semibold tracking-widest text-slate-600">HOW IT WORKS</div>
               <div className="mt-2 text-sm text-slate-700">
-                Vote while it’s open. After it closes, results unlock so everyone learns. Discussion (if opened) is{" "}
-                <b>after close</b> and <b>voters only</b>.
+                Vote while it’s open. After it closes, results unlock so everyone learns. Discussion (if opened) is <b>after close</b> and <b>voters only</b>.
               </div>
             </div>
 
@@ -789,9 +595,7 @@ export default function Quandr3DetailPage() {
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center text-lg font-extrabold text-slate-500">
-                      ?
-                    </div>
+                    <div className="flex h-full w-full items-center justify-center text-lg font-extrabold text-slate-500">?</div>
                   )}
                 </div>
                 <div className="min-w-0">
@@ -824,18 +628,12 @@ export default function Quandr3DetailPage() {
 
               {canShowResults ? (
                 <div className="mt-4">
-                  <Link
-                    href={`/q/${id}/results`}
-                    className="inline-flex w-full items-center justify-center rounded-2xl px-4 py-3 text-sm font-extrabold text-white shadow-sm"
-                    style={{ background: BLUE }}
-                  >
+                  <Link href={`/q/${id}/results`} className="inline-flex w-full items-center justify-center rounded-2xl px-4 py-3 text-sm font-extrabold text-white shadow-sm" style={{ background: BLUE }}>
                     View Results
                   </Link>
                 </div>
               ) : (
-                <div className="mt-4 rounded-2xl border bg-slate-50 p-4 text-xs text-slate-600">
-                  Results unlock after voting closes.
-                </div>
+                <div className="mt-4 rounded-2xl border bg-slate-50 p-4 text-xs text-slate-600">Results unlock after voting closes.</div>
               )}
 
               {isCurioso ? (
@@ -867,20 +665,14 @@ export default function Quandr3DetailPage() {
                     </button>
 
                     {status === "awaiting_user" || status === "resolved" ? (
-                      <Link
-                        href={`/q/${id}/resolve`}
-                        className="rounded-xl px-3 py-2 text-xs font-extrabold text-white"
-                        style={{ background: NAVY }}
-                        title="Curioso decision panel"
-                      >
+                      <Link href={`/q/${id}/resolve`} className="rounded-xl px-3 py-2 text-xs font-extrabold text-white" style={{ background: NAVY }} title="Curioso decision panel">
                         Go to Resolve
                       </Link>
                     ) : null}
                   </div>
 
                   <div className="mt-3 text-xs text-slate-600">
-                    Discussion flag is <b style={{ color: NAVY }}>{q?.discussion_open ? "ON" : "OFF"}</b> (but it’s still
-                    locked until close).
+                    Discussion flag is <b style={{ color: NAVY }}>{q?.discussion_open ? "ON" : "OFF"}</b> (but it’s still locked until close).
                   </div>
                 </div>
               ) : null}
@@ -888,7 +680,7 @@ export default function Quandr3DetailPage() {
           </div>
         </section>
 
-        {/* OPTIONS (image tiles) */}
+        {/* OPTIONS */}
         <section className="mt-7 rounded-[28px] border bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -897,23 +689,17 @@ export default function Quandr3DetailPage() {
                 {status === "open" ? "Pick your answer" : "See how it played out"}
               </div>
               <div className="mt-1 text-sm text-slate-600">
-                {status === "open"
-                  ? "Vote while it’s open. Then add a short reason (optional)."
-                  : "Votes and reasons appear after close so everyone learns."}
+                {status === "open" ? "Vote while it’s open. Then add a short reason (optional)." : "Votes and reasons appear after close so everyone learns."}
               </div>
             </div>
 
             {status === "open" ? (
-              <div className="rounded-2xl border bg-slate-50 px-4 py-3 text-xs text-slate-600">
-                Tip: After you vote, add a reason. It makes the outcome more valuable.
-              </div>
+              <div className="rounded-2xl border bg-slate-50 px-4 py-3 text-xs text-slate-600">Tip: After you vote, add a reason. It makes the outcome more valuable.</div>
             ) : null}
           </div>
 
           {!options?.length ? (
-            <div className="mt-6 rounded-2xl border bg-slate-50 p-4 text-sm text-slate-600">
-              No options found for this Quandr3 yet.
-            </div>
+            <div className="mt-6 rounded-2xl border bg-slate-50 p-4 text-sm text-slate-600">No options found for this Quandr3 yet.</div>
           ) : (
             <div className="mt-6 grid gap-4 md:grid-cols-2">
               {options.map((opt: any, i: number) => {
@@ -927,48 +713,38 @@ export default function Quandr3DetailPage() {
                 const showReasonBox = !!myVote?.id && isMyPicked && canEditReason;
                 const voteIdForMyVote = myVote?.id;
 
-                const reasonDraft =
-                  voteIdForMyVote != null
-                    ? reasonDraftByVoteId[voteIdForMyVote] ?? myReason ?? ""
-                    : "";
-
+                const reasonDraft = voteIdForMyVote != null ? reasonDraftByVoteId[voteIdForMyVote] ?? myReason ?? "" : "";
                 const img = getOptImage(opt, q?.category);
 
                 return (
                   <div
                     key={opt.id}
                     className="overflow-hidden rounded-[26px] border bg-white shadow-sm"
-                    style={{
-                      borderColor: isWinner ? "rgba(0,169,165,0.55)" : "rgba(15,23,42,0.12)",
-                    }}
+                    style={{ borderColor: isWinner ? "rgba(0,169,165,0.55)" : "rgba(15,23,42,0.12)" }}
                   >
-                    {/* ✅ NEW: Smaller thumbnail (≈25%) row layout */}
-                    <div className="grid gap-0 md:grid-cols-[200px_1fr]">
-                      {/* Thumbnail */}
-                      <div className="relative h-[120px] md:h-full md:min-h-[150px]">
+                    {/* ✅ NEW: SMALL THUMB (left) + CONTENT (right) */}
+                    <div className="grid md:grid-cols-[160px_1fr]">
+                      {/* Left thumbnail (small / ~25%) */}
+                      <div className="relative h-[140px] w-full md:h-full md:min-h-[140px]">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={img} alt="" className="h-full w-full object-cover" />
-                        <div className="absolute inset-0 bg-gradient-to-r from-[#0b2343cc] via-[#0b234355] to-transparent" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#0b2343aa] to-transparent" />
 
-                        <div className="absolute left-4 top-4 flex items-center gap-2">
-                          <span
-                            className="flex h-10 w-10 items-center justify-center rounded-2xl text-sm font-extrabold text-white"
-                            style={{ background: isWinner ? TEAL : NAVY }}
-                          >
+                        <div className="absolute left-3 top-3 flex items-center gap-2">
+                          <span className="flex h-9 w-9 items-center justify-center rounded-2xl text-xs font-extrabold text-white" style={{ background: isWinner ? TEAL : NAVY }}>
                             {LETTER[opt.order - 1] ?? String.fromCharCode(65 + i)}
                           </span>
-
                           {isWinner && status !== "open" ? (
-                            <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold" style={{ color: TEAL }}>
+                            <span className="rounded-full bg-white/90 px-3 py-1 text-[11px] font-extrabold" style={{ color: TEAL }}>
                               Winning path
                             </span>
                           ) : null}
                         </div>
                       </div>
 
-                      {/* Content */}
+                      {/* Right content */}
                       <div className="p-5">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="text-lg font-extrabold" style={{ color: NAVY }}>
                               {safeStr(opt.label) || `Option ${LETTER[opt.order - 1] ?? "?"}`}
@@ -979,42 +755,32 @@ export default function Quandr3DetailPage() {
                                 {count} vote{count === 1 ? "" : "s"} • {pct}%
                               </div>
                             ) : (
-                              <div className="mt-1 text-xs text-slate-600">
-                                Choose and (optionally) add your reason.
-                              </div>
+                              <div className="mt-1 text-xs text-slate-600">Choose and (optionally) add your reason.</div>
                             )}
                           </div>
 
-                          {/* Vote button (open) */}
-                          {status === "open" ? (
-                            <button
-                              onClick={() => vote(opt.order)}
-                              className="rounded-xl px-4 py-2 text-xs font-extrabold text-white shadow-sm"
-                              style={{ background: BLUE }}
-                            >
-                              Vote
-                            </button>
+                          {status !== "open" ? (
+                            <span className="shrink-0 rounded-full px-3 py-1 text-[11px] font-extrabold" style={{ background: statusPill.bg, color: statusPill.fg }}>
+                              {statusPill.label}
+                            </span>
                           ) : null}
                         </div>
 
-                        {/* Progress bar (closed/resolved) */}
-                        {status !== "open" ? (
-                          <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                            <div
-                              className="h-full rounded-full"
-                              style={{
-                                width: `${pct}%`,
-                                background: isWinner ? TEAL : BLUE,
-                              }}
-                            />
-                          </div>
-                        ) : null}
+                        <div className="mt-4">
+                          {status === "open" ? (
+                            <button onClick={() => vote(opt.order)} className="w-full rounded-2xl px-4 py-3 text-sm font-extrabold text-white shadow-sm" style={{ background: BLUE }}>
+                              Vote
+                            </button>
+                          ) : (
+                            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                              <div className="h-full rounded-full" style={{ width: `${pct}%`, background: isWinner ? TEAL : BLUE }} />
+                            </div>
+                          )}
+                        </div>
 
                         {optReasons.length > 0 && canShowResults ? (
                           <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
-                            <div className="text-xs font-semibold tracking-widest text-slate-600">
-                              WHY PEOPLE CHOSE THIS
-                            </div>
+                            <div className="text-xs font-semibold tracking-widest text-slate-600">WHY PEOPLE CHOSE THIS</div>
                             <ul className="mt-2 list-disc space-y-2 pl-5 text-sm text-slate-800">
                               {optReasons.slice(0, 5).map((txt: string, idx: number) => (
                                 <li key={`${opt.id}-r-${idx}`} className="leading-snug">
@@ -1027,18 +793,13 @@ export default function Quandr3DetailPage() {
 
                         {showReasonBox ? (
                           <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
-                            <div className="text-xs font-semibold tracking-widest text-slate-600">
-                              {myReason ? "EDIT YOUR REASON" : "WHY DID YOU CHOOSE THIS?"}
-                            </div>
+                            <div className="text-xs font-semibold tracking-widest text-slate-600">{myReason ? "EDIT YOUR REASON" : "WHY DID YOU CHOOSE THIS?"}</div>
 
                             <textarea
                               value={reasonDraft}
                               onChange={(e) => {
                                 const val = e.target.value;
-                                setReasonDraftByVoteId((prev: any) => ({
-                                  ...prev,
-                                  [voteIdForMyVote]: val,
-                                }));
+                                setReasonDraftByVoteId((prev: any) => ({ ...prev, [voteIdForMyVote]: val }));
                               }}
                               rows={3}
                               className="mt-2 w-full rounded-xl border bg-white p-3 text-sm outline-none focus:ring-2"
@@ -1047,12 +808,7 @@ export default function Quandr3DetailPage() {
                             />
 
                             <div className="mt-2">
-                              <button
-                                onClick={saveMyReason}
-                                disabled={savingReason}
-                                className="rounded-xl px-4 py-2 text-xs font-extrabold text-white shadow-sm"
-                                style={{ background: NAVY, opacity: savingReason ? 0.7 : 1 }}
-                              >
+                              <button onClick={saveMyReason} disabled={savingReason} className="rounded-xl px-4 py-2 text-xs font-extrabold text-white shadow-sm" style={{ background: NAVY, opacity: savingReason ? 0.7 : 1 }}>
                                 {savingReason ? "Saving…" : "Save reason"}
                               </button>
                             </div>
@@ -1076,9 +832,7 @@ export default function Quandr3DetailPage() {
             </div>
 
             <div className="mt-4 rounded-2xl border bg-slate-50 p-5">
-              <div className="whitespace-pre-wrap text-sm text-slate-800">
-                {resolution.note ? resolution.note : "No note was left for this resolution."}
-              </div>
+              <div className="whitespace-pre-wrap text-sm text-slate-800">{resolution.note ? resolution.note : "No note was left for this resolution."}</div>
               <div className="mt-3 text-xs text-slate-600">
                 Resolved on <span className="font-semibold">{fmt(resolution.created_at)}</span>
               </div>
@@ -1094,33 +848,22 @@ export default function Quandr3DetailPage() {
               <div className="mt-1 text-xl font-extrabold" style={{ color: NAVY }}>
                 Deliberate after the close (voters only)
               </div>
-              <div className="mt-1 text-sm text-slate-600">
-                Discussion is optional. If opened, only voters can post. Everyone else can learn from the results.
-              </div>
+              <div className="mt-1 text-sm text-slate-600">Discussion is optional. If opened, only voters can post. Everyone else can learn from the results.</div>
             </div>
 
-            <div
-              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-extrabold"
-              style={{ background: discussionBadge.bg, color: discussionBadge.fg }}
-            >
+            <div className="inline-flex items-center rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: discussionBadge.bg, color: discussionBadge.fg }}>
               {discussionBadge.label}
             </div>
           </div>
 
           {status === "open" ? (
-            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
-              Discussion is locked while voting is open.
-            </div>
+            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Discussion is locked while voting is open.</div>
           ) : !q.discussion_open ? (
             <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Discussion is closed.</div>
           ) : !user ? (
-            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
-              Log in to see if you’re invited to the discussion.
-            </div>
+            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Log in to see if you’re invited to the discussion.</div>
           ) : !didVote ? (
-            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
-              Discussion is for voters only on this Quandr3.
-            </div>
+            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Discussion is for voters only on this Quandr3.</div>
           ) : (
             <>
               <div className="mt-5 rounded-3xl border bg-slate-50 p-5">
@@ -1137,12 +880,7 @@ export default function Quandr3DetailPage() {
                 />
 
                 <div className="mt-2">
-                  <button
-                    onClick={postComment}
-                    disabled={postingComment}
-                    className="rounded-2xl px-5 py-3 text-sm font-extrabold text-white shadow-sm"
-                    style={{ background: BLUE, opacity: postingComment ? 0.7 : 1 }}
-                  >
+                  <button onClick={postComment} disabled={postingComment} className="rounded-2xl px-5 py-3 text-sm font-extrabold text-white shadow-sm" style={{ background: BLUE, opacity: postingComment ? 0.7 : 1 }}>
                     {postingComment ? "Posting…" : "Post comment"}
                   </button>
                 </div>
@@ -1165,9 +903,7 @@ export default function Quandr3DetailPage() {
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img src={p.avatar_url} alt="" className="h-full w-full object-cover" />
                               ) : (
-                                <div className="flex h-full w-full items-center justify-center text-xs font-extrabold text-slate-500">
-                                  ?
-                                </div>
+                                <div className="flex h-full w-full items-center justify-center text-xs font-extrabold text-slate-500">?</div>
                               )}
                             </div>
 
@@ -1180,11 +916,7 @@ export default function Quandr3DetailPage() {
                           </div>
 
                           {canDelete ? (
-                            <button
-                              onClick={() => deleteComment(c.id)}
-                              className="rounded-xl border bg-white px-3 py-2 text-xs font-extrabold text-slate-800 hover:bg-slate-50"
-                              style={{ borderColor: "rgba(15,23,42,0.12)" }}
-                            >
+                            <button onClick={() => deleteComment(c.id)} className="rounded-xl border bg-white px-3 py-2 text-xs font-extrabold text-slate-800 hover:bg-slate-50" style={{ borderColor: "rgba(15,23,42,0.12)" }}>
                               Delete
                             </button>
                           ) : null}
