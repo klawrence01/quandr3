@@ -19,7 +19,7 @@ const TEAL = "#00a9a5";
 const CORAL = "#ff6b6b";
 const SOFT_BG = "#f5f7fc";
 
-const LETTER = ["A", "B", "C", "D"];
+const LETTER = ["A", "B", "C", "D", "E", "F"];
 
 /** ✅ Category hero mapping (set-and-forget)
  *  Place images in: /public/quandr3/placeholders/
@@ -89,7 +89,8 @@ function categoryFallback(category?: string) {
   const c = (category || "").toLowerCase();
 
   if (c.includes("career")) return "/quandr3/placeholders/career.jpg";
-  if (c.includes("money") || c.includes("finance")) return "/quandr3/placeholders/money.jpg";
+  if (c.includes("money") || c.includes("finance"))
+    return "/quandr3/placeholders/money.jpg";
   if (c.includes("love") || c.includes("relationship") || c.includes("dating"))
     return "/quandr3/placeholders/relationships.jpg";
   if (c.includes("health") || c.includes("fitness") || c.includes("wellness"))
@@ -113,7 +114,13 @@ function getOptImage(opt: any, qCategory?: string) {
 
 /** ✅ Creator helpers (Phase-1 safe) */
 function getCreatorId(qRow: any) {
-  return qRow?.author_id || qRow?.user_id || qRow?.creator_id || qRow?.created_by || null;
+  return (
+    qRow?.author_id ||
+    qRow?.user_id ||
+    qRow?.creator_id ||
+    qRow?.created_by ||
+    null
+  );
 }
 
 function creatorLabel(qRow: any, profile: any) {
@@ -124,6 +131,24 @@ function creatorLabel(qRow: any, profile: any) {
   if (cid) return `Curioso ${String(cid).slice(0, 6)}`;
 
   return "Curioso";
+}
+
+// ✅ Option order can be stored as: order, idx, position, choice_index, sort_order, etc.
+function getOptOrder(opt: any, fallback: number) {
+  const candidates = [
+    opt?.order,
+    opt?.idx,
+    opt?.position,
+    opt?.choice_index,
+    opt?.choiceOrder,
+    opt?.sort_order,
+  ];
+  for (const c of candidates) {
+    const n = Number(c);
+    // allow 0-based too; we normalize later
+    if (!Number.isNaN(n)) return n;
+  }
+  return fallback;
 }
 
 /* =========================
@@ -172,6 +197,27 @@ export default function Quandr3DetailPage() {
       setUser(data?.user ?? null);
     });
   }, []);
+
+  /* =========================
+     Robust Options Fetch
+  ========================= */
+
+  async function fetchOptionsRobust(qid: string) {
+    // Try common ordering columns in priority order, fallback to created_at
+    const tries = ["order", "idx", "position", "choice_index", "sort_order", "created_at"];
+    for (const col of tries) {
+      const res = await supabase
+        .from("quandr3_options")
+        .select("*")
+        .eq("quandr3_id", qid)
+        .order(col, { ascending: true });
+      if (!res.error) return res.data ?? [];
+    }
+
+    // last resort: no order applied
+    const res2 = await supabase.from("quandr3_options").select("*").eq("quandr3_id", qid);
+    return res2.data ?? [];
+  }
 
   /* =========================
      Load / Refresh Helpers
@@ -236,7 +282,7 @@ export default function Quandr3DetailPage() {
     const { data: qRow } = await supabase.from("quandr3s").select("*").eq("id", qid).single();
     setQ(qRow ?? null);
 
-    // ✅ STRONGER creator profile fetch (supports author_id OR user_id OR creator_id OR created_by)
+    // Creator profile
     const creatorId = getCreatorId(qRow);
     if (creatorId) {
       const { data: p } = await supabase
@@ -249,12 +295,8 @@ export default function Quandr3DetailPage() {
       setProfile(null);
     }
 
-    const { data: opts } = await supabase
-      .from("quandr3_options")
-      .select("*")
-      .eq("quandr3_id", qid)
-      .order("order", { ascending: true });
-
+    // ✅ Options (robust)
+    const opts = await fetchOptionsRobust(qid);
     setOptions(opts ?? []);
 
     const vRows = await refreshVotesAndReasons(qid);
@@ -266,22 +308,19 @@ export default function Quandr3DetailPage() {
       .maybeSingle();
     setResolution(r ?? null);
 
-    // ✅ Discussion fetch ONLY if:
-    // - discussion is open
-    // - voting is NOT open anymore (expired OR resolved)
-    // - and this viewer has voted (invited)
+    // Discussion gating
     const duration = Number(qRow?.voting_duration_hours || 0);
     const createdAt = qRow?.created_at;
-
     const timeExpired =
       !!createdAt && !!duration
         ? Date.now() > new Date(createdAt).getTime() + duration * 3600 * 1000
         : false;
 
-    const voteCapReached = qRow?.voting_max_votes ? vRows.length >= Number(qRow.voting_max_votes) : false;
+    const voteCapReached = qRow?.voting_max_votes
+      ? vRows.length >= Number(qRow.voting_max_votes)
+      : false;
 
     const votingEnded = timeExpired || voteCapReached || !!r;
-
     const didVoteNow = !!user?.id && vRows.some((x: any) => x.user_id === user.id);
 
     if (qRow?.discussion_open && votingEnded && didVoteNow) {
@@ -301,11 +340,26 @@ export default function Quandr3DetailPage() {
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, user?.id]); // re-evaluate invite gating after login loads
+  }, [id, user?.id]);
 
   /* =========================
      Derived Logic
   ========================= */
+
+  const totalVotes = votes.length;
+
+  // Detect 0-based votes in DB (choice_index starts at 0)
+  const zeroBasedVotes = useMemo(() => {
+    if (!votes?.length) return false;
+    const mins = Math.min(...votes.map((v: any) => Number(v.choice_index ?? 9999)));
+    return mins === 0;
+  }, [votes]);
+
+  function normChoiceIndex(vChoice: any) {
+    const n = Number(vChoice);
+    if (Number.isNaN(n)) return null;
+    return zeroBasedVotes ? n + 1 : n; // normalize to 1-based for UI & matching
+  }
 
   const myVote = useMemo(() => {
     if (!user) return null;
@@ -319,15 +373,41 @@ export default function Quandr3DetailPage() {
     return cleanReason(reasonsByVoteId[myVote.id] ?? "");
   }, [myVote, reasonsByVoteId]);
 
+  // Build stable ordered options (1-based ord for display)
+  const orderedOptions = useMemo(() => {
+    const arr = [...(options ?? [])];
+
+    // compute ord for each row (if 0-based in table, convert to 1-based for UI)
+    const withOrd = arr.map((opt: any, i: number) => {
+      let ordRaw = getOptOrder(opt, i + 1);
+      // if options are 0-based, map 0->1, 1->2...
+      const ord = ordRaw === 0 ? 1 : ordRaw;
+      const ordFixed = zeroBasedVotes ? ord : ord; // keep consistent; votes normalization handles votes
+      return { ...opt, _ord: ordFixed };
+    });
+
+    // If we see any _ord === 0 (or duplicates), just fallback to index+1
+    const ords = withOrd.map((o: any) => o._ord);
+    const hasBad = ords.some((x: any) => x === 0 || x === null || x === undefined);
+    const uniqueCount = new Set(ords).size;
+
+    if (hasBad || uniqueCount !== ords.length) {
+      return withOrd.map((o: any, i: number) => ({ ...o, _ord: i + 1 }));
+    }
+
+    withOrd.sort((a: any, b: any) => (a._ord ?? 9999) - (b._ord ?? 9999));
+    return withOrd;
+  }, [options, zeroBasedVotes]);
+
   const voteCounts = useMemo(() => {
     const map: Record<number, number> = {};
     votes.forEach((v: any) => {
-      map[v.choice_index] = (map[v.choice_index] || 0) + 1;
+      const idx = normChoiceIndex(v.choice_index);
+      if (!idx) return;
+      map[idx] = (map[idx] || 0) + 1;
     });
     return map;
-  }, [votes]);
-
-  const totalVotes = votes.length;
+  }, [votes, zeroBasedVotes]);
 
   const votingExpired = useMemo(() => {
     if (!q) return false;
@@ -345,35 +425,30 @@ export default function Quandr3DetailPage() {
     return timeExpired || voteCapReached;
   }, [q, totalVotes]);
 
-  // ✅ FIX: TRUST DB STATUS FIRST (normalize case), THEN fallback
+  // ✅ TRUST DB STATUS FIRST, normalize casing
   const status = useMemo(() => {
-    const s = String(q?.status || "").toLowerCase().trim();
+    const s = String(q?.status || "").toLowerCase();
     if (s === "open" || s === "awaiting_user" || s === "resolved") return s;
     if (resolution) return "resolved";
     if (votingExpired) return "awaiting_user";
     return "open";
   }, [q?.status, resolution, votingExpired]);
 
-  const isClosed = useMemo(() => status !== "open", [status]);
-
-  // ✅ FIX: vote UI only when open AND viewer hasn't voted yet
-  const canShowVoteUI = useMemo(() => {
-    return status === "open" && !didVote && !votingExpired && !resolution;
-  }, [status, didVote, votingExpired, resolution]);
-
-  const canShowResults = useMemo(() => isClosed, [isClosed]);
+  const canShowResults = useMemo(() => status !== "open", [status]);
 
   const canShowDiscussion = useMemo(() => {
-    // discussion only after close AND only for those who voted AND only if author opened it
-    return isClosed && !!q?.discussion_open && didVote;
-  }, [isClosed, q, didVote]);
+    return status !== "open" && !!q?.discussion_open && didVote;
+  }, [status, q, didVote]);
 
   const winningOrder = useMemo(() => {
-    if (resolution) {
-      const opt = options.find((o: any) => o.id === resolution.option_id);
-      return opt?.order;
+    // If resolution has option_id, use it
+    if (resolution?.option_id) {
+      const opt = orderedOptions.find((o: any) => o.id === resolution.option_id);
+      if (opt) return opt._ord;
     }
-    let max = 0;
+
+    // Otherwise, highest votes
+    let max = -1;
     let win: any = null;
     Object.entries(voteCounts).forEach(([k, v]: any) => {
       if (v > max) {
@@ -382,25 +457,25 @@ export default function Quandr3DetailPage() {
       }
     });
     return win;
-  }, [voteCounts, resolution, options]);
+  }, [resolution, orderedOptions, voteCounts]);
 
   const reasonsByChoiceIndex = useMemo(() => {
     const grouped: Record<number, string[]> = {};
     votes.forEach((v: any) => {
-      const rid = v.id;
-      const txt = cleanReason(reasonsByVoteId[rid]);
+      const txt = cleanReason(reasonsByVoteId[v.id]);
       if (!txt) return;
-      const idx = v.choice_index;
+      const idx = normChoiceIndex(v.choice_index);
+      if (!idx) return;
       grouped[idx] = grouped[idx] || [];
       grouped[idx].push(txt);
     });
     return grouped;
-  }, [votes, reasonsByVoteId]);
+  }, [votes, reasonsByVoteId, zeroBasedVotes]);
 
-  // Only allow editing reasons while voting is open
+  // Only allow editing reasons while voting is open AND user already voted
   const canEditReason = useMemo(() => {
-    return !!user && status === "open" && !votingExpired && !resolution;
-  }, [user, status, votingExpired, resolution]);
+    return !!user && status === "open" && !votingExpired && !resolution && !!myVote?.id;
+  }, [user, status, votingExpired, resolution, myVote]);
 
   const isCurioso = useMemo(() => {
     if (!user?.id) return false;
@@ -410,24 +485,17 @@ export default function Quandr3DetailPage() {
   }, [user, q]);
 
   const canToggleDiscussion = useMemo(() => {
-    // Curioso can open/close discussion after voting ends OR after resolution.
     if (!isCurioso) return false;
-    return votingExpired || !!resolution || status !== "open";
-  }, [isCurioso, votingExpired, resolution, status]);
+    return votingExpired || !!resolution;
+  }, [isCurioso, votingExpired, resolution]);
 
   const statusPill = useMemo(() => pillStyle(status as any), [status]);
 
-  /** ✅ HERO IMAGE RULE:
-   *  1) If q.media_url exists, use it
-   *  2) Else use category hero mapping (hard set)
-   *  3) Else default
-   */
   const heroImg = useMemo(() => {
     return q?.media_url ? q.media_url : heroForCategory(q?.category);
   }, [q]);
 
   const discussionBadge = useMemo(() => {
-    // Never show "Open" while voting is open — even if the DB flag is true.
     if (status === "open") {
       return {
         label: "Discussion: Locked",
@@ -445,14 +513,13 @@ export default function Quandr3DetailPage() {
     };
   }, [status, q]);
 
-  // ✅ polish: stable creator label computed once
   const creatorName = useMemo(() => creatorLabel(q, profile), [q, profile]);
 
   /* =========================
      Actions
   ========================= */
 
-  async function vote(order: number) {
+  async function vote(choiceOrd: number) {
     if (!id) return;
 
     if (!user) {
@@ -460,14 +527,17 @@ export default function Quandr3DetailPage() {
       return;
     }
     if (votingExpired || resolution) return;
-    if (didVote) return; // ✅ prevent second vote from UI
+    if (didVote) return; // ✅ one vote per user
+
+    // If DB stores 0-based votes, write 0-based; else write 1-based
+    const storedChoice = zeroBasedVotes ? choiceOrd - 1 : choiceOrd;
 
     const { data: inserted, error } = await supabase
       .from("quandr3_votes")
       .insert({
         quandr3_id: id,
         user_id: user.id,
-        choice_index: order,
+        choice_index: storedChoice,
       })
       .select("id, user_id, choice_index, quandr3_id, created_at")
       .single();
@@ -698,14 +768,13 @@ export default function Quandr3DetailPage() {
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-8">
-        {/* HERO BANNER (Explore-style) */}
+        {/* HERO BANNER */}
         <section className="overflow-hidden rounded-[28px] border bg-white shadow-sm">
           <div className="relative h-[240px] w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={heroImg} alt="" className="h-full w-full object-cover" />
             <div className="absolute inset-0 bg-gradient-to-r from-[#0b2343cc] via-[#0b234388] to-[#0b234320]" />
 
-            {/* Pills */}
             <div className="absolute left-5 top-5 flex items-center gap-3">
               <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold shadow-sm backdrop-blur" style={{ color: NAVY }}>
                 {safeStr(q.category || "Category")}
@@ -775,8 +844,7 @@ export default function Quandr3DetailPage() {
             <div className="rounded-2xl border bg-slate-50 p-5">
               <div className="text-xs font-semibold tracking-widest text-slate-600">HOW IT WORKS</div>
               <div className="mt-2 text-sm text-slate-700">
-                Vote while it’s open. After it closes, results unlock so everyone learns. Discussion (if opened) is <b>after close</b> and{" "}
-                <b>voters only</b>.
+                Vote while it’s open. After it closes, results unlock so everyone learns. Discussion (if opened) is <b>after close</b> and <b>voters only</b>.
               </div>
             </div>
 
@@ -814,7 +882,7 @@ export default function Quandr3DetailPage() {
                 <div className="rounded-2xl border bg-slate-50 p-4">
                   <div className="text-[11px] font-semibold tracking-widest text-slate-500">STATUS</div>
                   <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
-                    {status === "open" ? "open" : status === "awaiting_user" ? "Internet decided" : "resolved"}
+                    {status}
                   </div>
                 </div>
               </div>
@@ -830,9 +898,7 @@ export default function Quandr3DetailPage() {
                   </Link>
                 </div>
               ) : (
-                <div className="mt-4 rounded-2xl border bg-slate-50 p-4 text-xs text-slate-600">
-                  {didVote ? "You voted. Results unlock after voting closes." : "Vote while it’s open. Results unlock after voting closes."}
-                </div>
+                <div className="mt-4 rounded-2xl border bg-slate-50 p-4 text-xs text-slate-600">Results unlock after voting closes.</div>
               )}
 
               {isCurioso ? (
@@ -864,12 +930,7 @@ export default function Quandr3DetailPage() {
                     </button>
 
                     {status === "awaiting_user" || status === "resolved" ? (
-                      <Link
-                        href={`/q/${id}/resolve`}
-                        className="rounded-xl px-3 py-2 text-xs font-extrabold text-white"
-                        style={{ background: NAVY }}
-                        title="Curioso decision panel"
-                      >
+                      <Link href={`/q/${id}/resolve`} className="rounded-xl px-3 py-2 text-xs font-extrabold text-white" style={{ background: NAVY }}>
                         Go to Resolve
                       </Link>
                     ) : null}
@@ -890,14 +951,14 @@ export default function Quandr3DetailPage() {
             <div>
               <div className="text-xs font-semibold tracking-widest text-slate-600">OPTIONS</div>
               <div className="mt-1 text-xl font-extrabold" style={{ color: NAVY }}>
-                {status === "open" ? "Pick your answer" : "Internet decided (vote breakdown)"}
+                {status === "open" ? "Pick your answer" : "Internet decided"}
               </div>
               <div className="mt-1 text-sm text-slate-600">
                 {status === "open"
                   ? didVote
-                    ? "You already voted. Results unlock after voting closes."
+                    ? "You already voted. (One vote per person.)"
                     : "Vote while it’s open. Then add a short reason (optional)."
-                  : "Percentages are visible after close so everyone can learn."}
+                  : "Voting is closed. Percentages show what the crowd chose."}
               </div>
             </div>
 
@@ -908,17 +969,23 @@ export default function Quandr3DetailPage() {
             ) : null}
           </div>
 
-          {!options?.length ? (
-            <div className="mt-6 rounded-2xl border bg-slate-50 p-4 text-sm text-slate-600">No options found for this Quandr3 yet.</div>
+          {!orderedOptions?.length ? (
+            <div className="mt-6 rounded-2xl border bg-slate-50 p-4 text-sm text-slate-600">
+              No options found for this Quandr3 yet.
+              <div className="mt-2 text-xs text-slate-500">
+                This was the bug: your table doesn’t match the assumed sort column. This page now tries multiple columns automatically.
+              </div>
+            </div>
           ) : (
             <div className="mt-6 grid gap-4 md:grid-cols-2">
-              {options.map((opt: any, i: number) => {
-                const count = voteCounts[opt.order] || 0;
+              {orderedOptions.map((opt: any, i: number) => {
+                const ord = Number(opt._ord || i + 1); // ✅ always 1-based for UI
+                const count = voteCounts[ord] || 0;
                 const pct = totalVotes ? Math.round((count / totalVotes) * 100) : 0;
 
-                const isWinner = opt.order === winningOrder;
-                const optReasons = reasonsByChoiceIndex[opt.order] ?? [];
-                const isMyPicked = myVote?.choice_index === opt.order;
+                const isWinner = ord === winningOrder;
+                const optReasons = reasonsByChoiceIndex[ord] ?? [];
+                const isMyPicked = normChoiceIndex(myVote?.choice_index) === ord;
 
                 const showReasonBox = !!myVote?.id && isMyPicked && canEditReason;
                 const voteIdForMyVote = myVote?.id;
@@ -927,17 +994,16 @@ export default function Quandr3DetailPage() {
                   voteIdForMyVote != null ? reasonDraftByVoteId[voteIdForMyVote] ?? myReason ?? "" : "";
 
                 const img = getOptImage(opt, q?.category);
+                const label = safeStr(opt.label || opt.title || opt.text || opt.option_text) || `Option ${LETTER[ord - 1] ?? "?"}`;
 
                 return (
                   <div
-                    key={opt.id}
+                    key={opt.id ?? `${i}-${label}`}
                     className={[
                       "overflow-hidden rounded-[26px] border bg-white shadow-sm",
                       "transition will-change-transform md:hover:-translate-y-[2px] md:hover:shadow-lg",
                     ].join(" ")}
-                    style={{
-                      borderColor: isWinner ? "rgba(0,169,165,0.55)" : "rgba(15,23,42,0.12)",
-                    }}
+                    style={{ borderColor: isWinner ? "rgba(0,169,165,0.55)" : "rgba(15,23,42,0.12)" }}
                   >
                     <div className="grid gap-0 grid-cols-[140px_1fr]">
                       <div className="relative h-[120px] w-[140px] bg-slate-900">
@@ -948,18 +1014,15 @@ export default function Quandr3DetailPage() {
                         <div className="absolute left-3 top-3 flex items-center gap-2">
                           <span
                             className="flex h-10 w-10 items-center justify-center rounded-2xl text-sm font-extrabold text-white shadow-sm"
-                            style={{ background: isWinner && isClosed ? TEAL : NAVY }}
+                            style={{ background: isWinner && status !== "open" ? TEAL : NAVY }}
                           >
-                            {LETTER[opt.order - 1] ?? String.fromCharCode(65 + i)}
+                            {LETTER[ord - 1] ?? String.fromCharCode(65 + i)}
                           </span>
                         </div>
 
-                        {isWinner && isClosed ? (
+                        {isWinner && status !== "open" ? (
                           <div className="absolute bottom-3 left-3">
-                            <span
-                              className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold shadow-sm backdrop-blur"
-                              style={{ color: TEAL }}
-                            >
+                            <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold shadow-sm backdrop-blur" style={{ color: TEAL }}>
                               Leading
                             </span>
                           </div>
@@ -970,61 +1033,48 @@ export default function Quandr3DetailPage() {
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="text-lg font-extrabold" style={{ color: NAVY }}>
-                              {safeStr(opt.label) || `Option ${LETTER[opt.order - 1] ?? "?"}`}
+                              {label}
                             </div>
 
-                            {isClosed ? (
+                            {status !== "open" ? (
                               <div className="mt-1 text-xs text-slate-600">
                                 {count} vote{count === 1 ? "" : "s"} • {pct}%
                               </div>
-                            ) : didVote ? (
-                              <div className="mt-1 text-xs text-slate-600">
-                                {isMyPicked ? "You picked this option." : "Voting is still open — you already voted."}
+                            ) : isMyPicked ? (
+                              <div className="mt-1 text-xs font-extrabold" style={{ color: TEAL }}>
+                                Your pick
                               </div>
                             ) : (
                               <div className="mt-1 text-xs text-slate-600">Choose and (optionally) add your reason.</div>
                             )}
                           </div>
 
-                          {isClosed ? (
-                            <span
-                              className="rounded-full px-3 py-1 text-xs font-extrabold"
-                              style={{
-                                background: status === "awaiting_user" ? "rgba(255,107,107,0.14)" : "rgba(0,169,165,0.14)",
-                                color: status === "awaiting_user" ? CORAL : TEAL,
-                              }}
-                            >
-                              {status === "awaiting_user" ? "Internet Decided" : "Resolved"}
-                            </span>
-                          ) : didVote && isMyPicked ? (
+                          {status !== "open" ? (
                             <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
-                              Your vote
+                              Internet decided
                             </span>
                           ) : null}
                         </div>
 
                         <div className="mt-4">
-                          {canShowVoteUI ? (
-                            <>
-                              <button
-                                onClick={() => vote(opt.order)}
-                                className="w-full rounded-2xl px-4 py-3 text-sm font-extrabold text-white shadow-sm transition hover:opacity-[0.96] active:scale-[0.99]"
-                                style={{ background: BLUE }}
-                              >
-                                Vote
-                              </button>
-
-                              <div className="mt-2 text-center text-[11px] font-semibold text-slate-500">Your “why” helps others learn.</div>
-                            </>
-                          ) : isClosed ? (
+                          {status === "open" ? (
+                            <button
+                              onClick={() => vote(ord)}
+                              disabled={didVote || votingExpired || !!resolution}
+                              className="w-full rounded-2xl px-4 py-3 text-sm font-extrabold text-white shadow-sm transition hover:opacity-[0.96] active:scale-[0.99]"
+                              style={{ background: BLUE, opacity: didVote ? 0.6 : 1 }}
+                            >
+                              {didVote ? "Vote submitted" : "Vote"}
+                            </button>
+                          ) : (
                             <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
                               <div className="h-full rounded-full" style={{ width: `${pct}%`, background: isWinner ? TEAL : BLUE }} />
                             </div>
-                          ) : (
-                            <div className="rounded-2xl border bg-slate-50 p-3 text-xs text-slate-600">
-                              {didVote ? "You already voted. Results unlock after close." : "Voting is locked."}
-                            </div>
                           )}
+
+                          {status === "open" ? (
+                            <div className="mt-2 text-center text-[11px] font-semibold text-slate-500">Your “why” helps others learn.</div>
+                          ) : null}
                         </div>
 
                         {optReasons.length > 0 && canShowResults ? (
@@ -1042,9 +1092,7 @@ export default function Quandr3DetailPage() {
 
                         {showReasonBox ? (
                           <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
-                            <div className="text-xs font-semibold tracking-widest text-slate-600">
-                              {myReason ? "EDIT YOUR REASON" : "WHY DID YOU CHOOSE THIS?"}
-                            </div>
+                            <div className="text-xs font-semibold tracking-widest text-slate-600">{myReason ? "EDIT YOUR REASON" : "WHY DID YOU CHOOSE THIS?"}</div>
 
                             <textarea
                               value={reasonDraft}
@@ -1084,25 +1132,6 @@ export default function Quandr3DetailPage() {
           )}
         </section>
 
-        {/* RESOLUTION */}
-        {resolution ? (
-          <section className="mt-7 rounded-[28px] border bg-white p-6 shadow-sm">
-            <div className="text-xs font-semibold tracking-widest text-slate-600">RESOLUTION</div>
-            <div className="mt-1 text-xl font-extrabold" style={{ color: NAVY }}>
-              The Curioso decided
-            </div>
-
-            <div className="mt-4 rounded-2xl border bg-slate-50 p-5">
-              <div className="whitespace-pre-wrap text-sm text-slate-800">
-                {resolution.note ? resolution.note : "No note was left for this resolution."}
-              </div>
-              <div className="mt-3 text-xs text-slate-600">
-                Resolved on <span className="font-semibold">{fmt(resolution.created_at)}</span>
-              </div>
-            </div>
-          </section>
-        ) : null}
-
         {/* DISCUSSION */}
         <section className="mt-7 rounded-[28px] border bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1111,9 +1140,7 @@ export default function Quandr3DetailPage() {
               <div className="mt-1 text-xl font-extrabold" style={{ color: NAVY }}>
                 Deliberate after the close (voters only)
               </div>
-              <div className="mt-1 text-sm text-slate-600">
-                Discussion is optional. If opened, only voters can post. Everyone else can learn from the results.
-              </div>
+              <div className="mt-1 text-sm text-slate-600">Discussion is optional. If opened, only voters can post.</div>
             </div>
 
             <div className="inline-flex items-center rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: discussionBadge.bg, color: discussionBadge.fg }}>
