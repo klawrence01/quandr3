@@ -78,28 +78,27 @@ function statusLabel(kind: "open" | "awaiting_user" | "resolved") {
 }
 
 /* =========================
-   Robust FK tries (THIS FIXES “wrong FK name” bugs)
+   FK helpers (THIS is the fix)
 ========================= */
 
-const FK_TRIES = ["quandr3_id", "quandary_id", "q_id", "question_id"];
+// Your DB column is `quandr3_id` (no extra "a").
+// But other files used `quandr3_id`. We support both.
+const FK_TRIES = ["quandr3_id", "quandr3_id", "quandary_id", "q_id", "question_id"];
 
-async function fetchByFK(table: string, selectCols: string, qid: string, orderCol?: string) {
-  let lastErr: any = null;
-
+async function selectManyByFK(table: string, qid: string, columns = "*") {
   for (const fk of FK_TRIES) {
-    let q = supabase.from(table).select(selectCols).eq(fk, qid);
-    if (orderCol) q = q.order(orderCol, { ascending: true });
-
-    const res = await q;
-
-    if (!res.error) {
-      return { rows: res.data ?? [], fkUsed: fk, error: null };
-    }
-
-    lastErr = res.error;
+    const res = await supabase.from(table).select(columns).eq(fk, qid);
+    if (!res.error) return { data: res.data ?? [], fkUsed: fk };
   }
+  return { data: [], fkUsed: null };
+}
 
-  return { rows: [], fkUsed: null, error: lastErr };
+async function selectMaybeSingleByFK(table: string, qid: string, columns = "*") {
+  for (const fk of FK_TRIES) {
+    const res = await supabase.from(table).select(columns).eq(fk, qid).maybeSingle();
+    if (!res.error) return { data: res.data ?? null, fkUsed: fk };
+  }
+  return { data: null, fkUsed: null };
 }
 
 /* =========================
@@ -122,18 +121,11 @@ export default function ResultsPage() {
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Debug
-  const [optFKUsed, setOptFKUsed] = useState<string | null>(null);
-  const [voteFKUsed, setVoteFKUsed] = useState<string | null>(null);
-  const [optErrMsg, setOptErrMsg] = useState<string | null>(null);
-  const [voteErrMsg, setVoteErrMsg] = useState<string | null>(null);
-
   const [reasonsByVoteId, setReasonsByVoteId] = useState<Record<string, string>>({});
   const [showAllReasons, setShowAllReasons] = useState(false);
 
   const totalVotes = votes.length;
 
-  // Detect whether DB votes are 0-based (0,1,2...) or 1-based (1,2,3...)
   const zeroBasedVotes = useMemo(() => {
     if (!votes?.length) return false;
     const mins = Math.min(...votes.map((v: any) => Number(v.choice_index ?? 9999)));
@@ -143,15 +135,10 @@ export default function ResultsPage() {
   function normChoiceIndex(vChoice: any) {
     const n = Number(vChoice);
     if (Number.isNaN(n)) return null;
-    return zeroBasedVotes ? n + 1 : n; // normalize to 1-based for display/matching
+    return zeroBasedVotes ? n + 1 : n;
   }
 
   async function refreshAll(qid: string) {
-    setOptErrMsg(null);
-    setVoteErrMsg(null);
-    setOptFKUsed(null);
-    setVoteFKUsed(null);
-
     // 1) Core question
     const { data: qRow } = await supabase.from("quandr3s").select("*").eq("id", qid).single();
     setQ(qRow ?? null);
@@ -169,29 +156,38 @@ export default function ResultsPage() {
       setProfile(null);
     }
 
-    // 3) OPTIONS (robust FK)
-    const optRes = await fetchByFK(
+    // 3) ✅ Options (robust FK)
+    const optRes = await selectManyByFK(
       "quandr3_options",
-      "id,quandr3_id,quandary_id,q_id,question_id,label,value,order,created_at,image_url",
       qid,
-      "created_at"
+      "id,label,value,order,created_at,image_url,media_url,photo_url,img_url"
     );
 
-    setOptions(optRes.rows ?? []);
-    setOptFKUsed(optRes.fkUsed);
-    if (optRes.error) setOptErrMsg(optRes.error?.message ? String(optRes.error.message) : String(optRes.error));
+    const optRows = optRes.data ?? [];
+    // deterministic ordering (prefer `order`, then `created_at`)
+    optRows.sort((a: any, b: any) => {
+      const ao = Number(a?.order);
+      const bo = Number(b?.order);
+      const aoOk = !Number.isNaN(ao);
+      const boOk = !Number.isNaN(bo);
+      if (aoOk && boOk) return ao - bo;
+      if (aoOk && !boOk) return -1;
+      if (!aoOk && boOk) return 1;
+      const at = new Date(a?.created_at || 0).getTime();
+      const bt = new Date(b?.created_at || 0).getTime();
+      return at - bt;
+    });
 
-    // 4) VOTES (robust FK)
-    const voteRes = await fetchByFK("quandr3_votes", "*", qid, "created_at");
-    setVotes(voteRes.rows ?? []);
-    setVoteFKUsed(voteRes.fkUsed);
-    if (voteRes.error) setVoteErrMsg(voteRes.error?.message ? String(voteRes.error.message) : String(voteRes.error));
+    setOptions(optRows);
+
+    // 4) ✅ Votes (robust FK)
+    const voteRes = await selectManyByFK("quandr3_votes", qid, "*");
+    const vRows = voteRes.data ?? [];
+    setVotes(vRows);
 
     // 5) Reasons (vote_id -> reason)
-    const vRows = voteRes.rows ?? [];
     if (vRows.length) {
       const voteIds = vRows.map((x: any) => x.id).filter(Boolean);
-
       const { data: rs } = await supabase.from("vote_reasons").select("vote_id, reason").in("vote_id", voteIds);
 
       const map: Record<string, string> = {};
@@ -204,9 +200,9 @@ export default function ResultsPage() {
       setReasonsByVoteId({});
     }
 
-    // 6) Resolution (optional, robust FK)
-    const resoRes = await fetchByFK("quandr3_resolutions", "*", qid);
-    setResolution((resoRes.rows && resoRes.rows[0]) ? resoRes.rows[0] : null);
+    // 6) ✅ Resolution (robust FK)
+    const resoRes = await selectMaybeSingleByFK("quandr3_resolutions", qid, "*");
+    setResolution(resoRes.data ?? null);
   }
 
   useEffect(() => {
@@ -230,11 +226,9 @@ export default function ResultsPage() {
         : false;
 
     const voteCapReached = q.voting_max_votes ? totalVotes >= Number(q.voting_max_votes) : false;
-
     return timeExpired || voteCapReached;
   }, [q, totalVotes]);
 
-  // Trust DB status first, then fallback
   const status = useMemo(() => {
     const s = String(q?.status || "").toLowerCase();
     if (s === "open" || s === "awaiting_user" || s === "resolved") return s;
@@ -245,7 +239,6 @@ export default function ResultsPage() {
 
   const statusPill = useMemo(() => statusLabel(status as any), [status]);
 
-  // Stable 1-based display order
   const orderedOptions = useMemo(() => {
     const arr = [...(options ?? [])];
     return arr.map((o: any, i: number) => ({ ...o, _ord: i + 1 }));
@@ -302,10 +295,6 @@ export default function ResultsPage() {
 
   const creatorName = useMemo(() => creatorLabel(q, profile), [q, profile]);
 
-  /* =========================
-     Render
-  ========================= */
-
   if (loading) {
     return (
       <main className="min-h-screen" style={{ background: SOFT_BG }}>
@@ -347,7 +336,6 @@ export default function ResultsPage() {
     );
   }
 
-  // Block results only while OPEN
   if (status === "open") {
     return (
       <main className="min-h-screen" style={{ background: SOFT_BG }}>
@@ -366,7 +354,9 @@ export default function ResultsPage() {
                 <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                   Back to Quandr3
                 </div>
-                <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">RESULTS LOCKED</div>
+                <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">
+                  RESULTS LOCKED
+                </div>
               </div>
             </Link>
 
@@ -391,7 +381,9 @@ export default function ResultsPage() {
             <h1 className="mt-3 text-2xl font-extrabold" style={{ color: NAVY }}>
               Results unlock after voting closes
             </h1>
-            <div className="mt-2 text-sm text-slate-600">Head back to the Quandr3 to vote while it’s open.</div>
+            <div className="mt-2 text-sm text-slate-600">
+              Head back to the Quandr3 to vote while it’s open.
+            </div>
             <div className="mt-5 flex flex-wrap gap-2">
               <Link
                 href={`/q/${id}`}
@@ -414,7 +406,6 @@ export default function ResultsPage() {
     );
   }
 
-  // awaiting_user or resolved => show results
   return (
     <main className="min-h-screen" style={{ background: SOFT_BG }}>
       <header className="border-b bg-white">
@@ -432,7 +423,9 @@ export default function ResultsPage() {
               <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                 Results
               </div>
-              <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">SEE HOW IT PLAYED OUT</div>
+              <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">
+                SEE HOW IT PLAYED OUT
+              </div>
             </div>
           </Link>
 
@@ -456,7 +449,6 @@ export default function ResultsPage() {
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-8">
-        {/* HERO */}
         <section className="overflow-hidden rounded-[28px] border bg-white shadow-sm">
           <div className="relative h-[220px] w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -464,7 +456,10 @@ export default function ResultsPage() {
             <div className="absolute inset-0 bg-gradient-to-r from-[#0b2343cc] via-[#0b234388] to-[#0b234320]" />
 
             <div className="absolute left-5 top-5 flex items-center gap-3">
-              <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
+              <span
+                className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold"
+                style={{ color: NAVY }}
+              >
                 {safeStr(q.category || "Category")}
               </span>
               <span
@@ -500,13 +495,11 @@ export default function ResultsPage() {
             </div>
           </div>
 
-          {/* TOPLINE */}
           <div className="grid gap-4 p-6 lg:grid-cols-[1.2fr_0.8fr]">
             <div className="rounded-2xl border bg-slate-50 p-5">
               <div className="text-xs font-semibold tracking-widest text-slate-600">WHAT THIS MEANS</div>
               <div className="mt-2 text-sm text-slate-700">
-                The crowd voted. The “why” behind votes is what makes Quandr3 valuable — it turns polling into shared
-                wisdom.
+                The crowd voted. The “why” behind votes is what makes Quandr3 valuable — it turns polling into shared wisdom.
               </div>
             </div>
 
@@ -518,10 +511,7 @@ export default function ResultsPage() {
                 </span>
 
                 {crowdWinnerOpt ? (
-                  <span
-                    className="rounded-full px-3 py-1 text-xs font-extrabold"
-                    style={{ background: "rgba(0,169,165,0.12)", color: TEAL }}
-                  >
+                  <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "rgba(0,169,165,0.12)", color: TEAL }}>
                     Crowd winner: {LETTER[(crowdWinnerOpt._ord || 1) - 1] ?? "?"} —{" "}
                     {safeStr(crowdWinnerOpt.label || crowdWinnerOpt.value || "—")}
                   </span>
@@ -532,34 +522,22 @@ export default function ResultsPage() {
                 )}
 
                 {status === "resolved" && curiosoChoiceOpt ? (
-                  <span
-                    className="rounded-full px-3 py-1 text-xs font-extrabold"
-                    style={{ background: "rgba(30,99,243,0.12)", color: BLUE }}
-                  >
+                  <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "rgba(30,99,243,0.12)", color: BLUE }}>
                     Curioso chose: {LETTER[(curiosoChoiceOpt._ord || 1) - 1] ?? "?"} —{" "}
                     {safeStr(curiosoChoiceOpt.label || curiosoChoiceOpt.value || "—")}
                   </span>
                 ) : null}
 
                 {resolution?.note ? (
-                  <span
-                    className="rounded-full px-3 py-1 text-xs font-extrabold"
-                    style={{ background: "rgba(30,99,243,0.12)", color: BLUE }}
-                  >
+                  <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "rgba(30,99,243,0.12)", color: BLUE }}>
                     Curioso note included
                   </span>
                 ) : null}
-              </div>
-
-              {/* DEBUG STRIP */}
-              <div className="mt-3 text-xs text-slate-500">
-                Debug: options FK={optFKUsed || "none"} • votes FK={voteFKUsed || "none"}
               </div>
             </div>
           </div>
         </section>
 
-        {/* RESULTS */}
         <section className="mt-7 rounded-[28px] border bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -567,7 +545,9 @@ export default function ResultsPage() {
               <div className="mt-1 text-xl font-extrabold" style={{ color: NAVY }}>
                 Vote breakdown
               </div>
-              <div className="mt-1 text-sm text-slate-600">Percentages are based on total votes. Reasons show under each option.</div>
+              <div className="mt-1 text-sm text-slate-600">
+                Percentages are based on total votes. Reasons show under each option.
+              </div>
             </div>
 
             <button
@@ -581,21 +561,10 @@ export default function ResultsPage() {
 
           {!orderedOptions?.length ? (
             <div className="mt-6 rounded-2xl border bg-slate-50 p-4 text-sm text-slate-600">
-              <div className="font-semibold">No options found for this Quandr3.</div>
-
+              No options found for this Quandr3.
               <div className="mt-2 text-xs text-slate-500">
-                Options FK tried: <span className="font-semibold">{FK_TRIES.join(", ")}</span>
+                If options exist in Supabase but not here, it’s almost always RLS on <code>quandr3_options</code>.
               </div>
-
-              {optErrMsg ? (
-                <div className="mt-3 rounded-xl border bg-white p-3 text-xs text-slate-700">
-                  <div className="font-semibold">Supabase error (options):</div>
-                  <div className="mt-1 font-mono">{optErrMsg}</div>
-                  <div className="mt-2 text-slate-500">
-                    If this mentions permission/rls, add a SELECT policy for <code>quandr3_options</code>.
-                  </div>
-                </div>
-              ) : null}
             </div>
           ) : (
             <div className="mt-6 grid gap-4 md:grid-cols-2">
@@ -618,11 +587,7 @@ export default function ResultsPage() {
                     className="rounded-[26px] border bg-white p-5 shadow-sm"
                     style={{
                       borderColor:
-                        isCuriosoChoice
-                          ? "rgba(30,99,243,0.55)"
-                          : isCrowdWinner
-                          ? "rgba(0,169,165,0.55)"
-                          : "rgba(15,23,42,0.12)",
+                        isCuriosoChoice ? "rgba(30,99,243,0.55)" : isCrowdWinner ? "rgba(0,169,165,0.55)" : "rgba(15,23,42,0.12)",
                     }}
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -693,7 +658,6 @@ export default function ResultsPage() {
           )}
         </section>
 
-        {/* CURIOSO NOTE */}
         {resolution ? (
           <section className="mt-7 rounded-[28px] border bg-white p-6 shadow-sm">
             <div className="text-xs font-semibold tracking-widest text-slate-600">CURIOSO NOTE</div>
