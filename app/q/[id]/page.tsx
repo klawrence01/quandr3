@@ -70,6 +70,12 @@ function cleanReason(s?: string) {
   return t;
 }
 
+function titleCase(s?: string) {
+  const t = String(s || "").toLowerCase();
+  if (!t) return "";
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
 function pillStyle(kind: "open" | "awaiting_user" | "resolved") {
   if (kind === "open") {
     return { bg: "rgba(30,99,243,0.16)", fg: "#0b2343", label: "Open" };
@@ -78,7 +84,7 @@ function pillStyle(kind: "open" | "awaiting_user" | "resolved") {
     return {
       bg: "rgba(255,107,107,0.16)",
       fg: "#0b2343",
-      label: "Closed (Awaiting Curioso)",
+      label: "Closed",
     };
   }
   return { bg: "rgba(0,169,165,0.16)", fg: "#0b2343", label: "Resolved" };
@@ -133,24 +139,6 @@ function creatorLabel(qRow: any, profile: any) {
   return "Curioso";
 }
 
-// ✅ Option order can be stored as: order, idx, position, choice_index, sort_order, etc.
-function getOptOrder(opt: any, fallback: number) {
-  const candidates = [
-    opt?.order,
-    opt?.idx,
-    opt?.position,
-    opt?.choice_index,
-    opt?.choiceOrder,
-    opt?.sort_order,
-  ];
-  for (const c of candidates) {
-    const n = Number(c);
-    // allow 0-based too; we normalize later
-    if (!Number.isNaN(n)) return n;
-  }
-  return fallback;
-}
-
 /* =========================
    Page
 ========================= */
@@ -169,7 +157,7 @@ export default function Quandr3DetailPage() {
   const [user, setUser] = useState<any>(null);
   const [q, setQ] = useState<any>(null);
   const [options, setOptions] = useState<any[]>([]);
-  const [optionsErr, setOptionsErr] = useState<string>(""); // ✅ NEW
+  const [optionsErr, setOptionsErr] = useState<string>("");
   const [votes, setVotes] = useState<any[]>([]);
   const [resolution, setResolution] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
@@ -200,46 +188,28 @@ export default function Quandr3DetailPage() {
   }, []);
 
   /* =========================
-     Robust Options Fetch
+     Options Fetch (FIXED)
+     - DO NOT select columns that may not exist
+     - DO NOT order by columns that may not exist
+     - Use select("*") so schema differences won't break
   ========================= */
 
-  async function fetchOptionsRobust(quandr3Id: string) {
+  async function fetchOptionsSafe(quandr3Id: string) {
     setOptionsErr("");
 
-    // Try common ordering columns in priority order, fallback to created_at
-    const tries = ["order", "idx", "position", "choice_index", "sort_order", "created_at"];
+    // Primary: try ordering by created_at (common)
+    const res1 = await supabase
+      .from("quandr3_options")
+      .select("*")
+      .eq("quandr3_id", quandr3Id)
+      .order("created_at", { ascending: true });
 
-    // ✅ IMPORTANT FIX:
-    // Your table does NOT necessarily contain all the columns in the old baseSelect list.
-    // Selecting non-existent columns causes PostgREST to error and returns no options.
-    // So we use select("*") to match your actual schema.
-    const baseSelect = "*";
+    if (!res1.error) return res1.data ?? [];
 
-    for (const col of tries) {
-      const res = await supabase
-        .from("quandr3_options")
-        .select(baseSelect)
-        .eq("quandr3_id", quandr3Id)
-        .order(col, { ascending: true });
-
-      if (!res.error) return res.data ?? [];
-
-      // ✅ If RLS blocks, tell the UI the truth and stop looping.
-      const msg = res.error?.message || "";
-      if (
-        msg.toLowerCase().includes("permission") ||
-        msg.toLowerCase().includes("row level security") ||
-        msg.toLowerCase().includes("not allowed")
-      ) {
-        setOptionsErr(msg);
-        return [];
-      }
-    }
-
-    // last resort: no order applied
+    // If created_at doesn't exist or ordering fails, fallback no-order
     const res2 = await supabase
       .from("quandr3_options")
-      .select(baseSelect)
+      .select("*")
       .eq("quandr3_id", quandr3Id);
 
     if (res2.error) {
@@ -326,8 +296,8 @@ export default function Quandr3DetailPage() {
       setProfile(null);
     }
 
-    // ✅ Options (robust)
-    const opts = await fetchOptionsRobust(qid);
+    // ✅ Options (SAFE)
+    const opts = await fetchOptionsSafe(qid);
     setOptions(opts ?? []);
 
     const vRows = await refreshVotesAndReasons(qid);
@@ -404,42 +374,7 @@ export default function Quandr3DetailPage() {
     return cleanReason(reasonsByVoteId[myVote.id] ?? "");
   }, [myVote, reasonsByVoteId]);
 
-  // Build stable ordered options (1-based ord for display)
-  const orderedOptions = useMemo(() => {
-    const arr = [...(options ?? [])];
-
-    // compute ord for each row (if 0-based in table, convert to 1-based for UI)
-    const withOrd = arr.map((opt: any, i: number) => {
-      let ordRaw = getOptOrder(opt, i + 1);
-      // if options are 0-based, map 0->1, 1->2...
-      const ord = ordRaw === 0 ? 1 : ordRaw;
-      const ordFixed = zeroBasedVotes ? ord : ord;
-      return { ...opt, _ord: ordFixed };
-    });
-
-    // If we see any _ord === 0 (or duplicates), just fallback to index+1
-    const ords = withOrd.map((o: any) => o._ord);
-    const hasBad = ords.some((x: any) => x === 0 || x === null || x === undefined);
-    const uniqueCount = new Set(ords).size;
-
-    if (hasBad || uniqueCount !== ords.length) {
-      return withOrd.map((o: any, i: number) => ({ ...o, _ord: i + 1 }));
-    }
-
-    withOrd.sort((a: any, b: any) => (a._ord ?? 9999) - (b._ord ?? 9999));
-    return withOrd;
-  }, [options, zeroBasedVotes]);
-
-  const voteCounts = useMemo(() => {
-    const map: Record<number, number> = {};
-    votes.forEach((v: any) => {
-      const idx = normChoiceIndex(v.choice_index);
-      if (!idx) return;
-      map[idx] = (map[idx] || 0) + 1;
-    });
-    return map;
-  }, [votes, zeroBasedVotes]);
-
+  // Determine if voting is expired by time/cap
   const votingExpired = useMemo(() => {
     if (!q) return false;
 
@@ -471,12 +406,83 @@ export default function Quandr3DetailPage() {
     return status !== "open" && !!q?.discussion_open && didVote;
   }, [status, q, didVote]);
 
+  // ✅ Sort options in a stable way WITHOUT assuming schema columns
+  // Priority:
+  // 1) if option has an explicit index/order field (common names)
+  // 2) else by created_at
+  // 3) else keep original order
+  const orderedOptions = useMemo(() => {
+    const arr = [...(options ?? [])];
+
+    function optOrd(o: any, fallback: number) {
+      const cands = [
+        o?.order,
+        o?.idx,
+        o?.position,
+        o?.choice_index,
+        o?.sort_order,
+        o?.display_order,
+      ];
+      for (const c of cands) {
+        const n = Number(c);
+        if (!Number.isNaN(n)) return n;
+      }
+      return fallback;
+    }
+
+    const withMeta = arr.map((o: any, i: number) => {
+      const raw = optOrd(o, i + 1);
+      const ord = raw === 0 ? 1 : raw; // avoid 0 in UI
+      return { ...o, _ord: ord, _i: i };
+    });
+
+    // If created_at exists, use it as a secondary sort key
+    withMeta.sort((a: any, b: any) => {
+      const ao = a._ord ?? 9999;
+      const bo = b._ord ?? 9999;
+      if (ao !== bo) return ao - bo;
+
+      const at = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const bt = b.created_at ? new Date(b.created_at).getTime() : 0;
+      if (at !== bt) return at - bt;
+
+      return (a._i ?? 0) - (b._i ?? 0);
+    });
+
+    // Remap to clean 1..N order for display
+    return withMeta.map((o: any, i: number) => ({ ...o, _ord: i + 1 }));
+  }, [options]);
+
+  const voteCounts = useMemo(() => {
+    const map: Record<number, number> = {};
+    votes.forEach((v: any) => {
+      const idx = normChoiceIndex(v.choice_index);
+      if (!idx) return;
+      map[idx] = (map[idx] || 0) + 1;
+    });
+    return map;
+  }, [votes, zeroBasedVotes]);
+
   const winningOrder = useMemo(() => {
+    // If resolution stored by option_id
     if (resolution?.option_id) {
       const opt = orderedOptions.find((o: any) => o.id === resolution.option_id);
       if (opt) return opt._ord;
     }
 
+    // If resolution stored by picked_index / pickedIndex
+    const picked =
+      resolution?.picked_index ??
+      resolution?.pickedIndex ??
+      resolution?.choice_index ??
+      null;
+
+    if (picked !== null && picked !== undefined) {
+      const n = normChoiceIndex(picked);
+      if (n) return n;
+    }
+
+    // Else compute top-voted
     let max = -1;
     let win: any = null;
     Object.entries(voteCounts).forEach(([k, v]: any) => {
@@ -542,6 +548,17 @@ export default function Quandr3DetailPage() {
   }, [status, q]);
 
   const creatorName = useMemo(() => creatorLabel(q, profile), [q, profile]);
+
+  // Curioso final choice label (only when resolved)
+  const curiosoChoiceLabel = useMemo(() => {
+    if (status !== "resolved") return "";
+    if (!winningOrder) return "";
+    const opt = orderedOptions.find((o: any) => o._ord === winningOrder);
+    const lbl =
+      safeStr(opt?.label || opt?.title || opt?.text || opt?.option_text) ||
+      `Option ${LETTER[winningOrder - 1] ?? "?"}`;
+    return `${LETTER[winningOrder - 1] ?? "?"} — ${lbl}`;
+  }, [status, winningOrder, orderedOptions]);
 
   /* =========================
      Actions
@@ -742,58 +759,6 @@ export default function Quandr3DetailPage() {
 
   return (
     <main className="min-h-screen" style={{ background: SOFT_BG }}>
-      {/* Top header */}
-      <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-          <Link href="/explore" className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl border" style={{ borderColor: "rgba(15,23,42,0.12)" }}>
-              <span className="text-lg" style={{ color: NAVY }}>
-                ?
-              </span>
-            </div>
-            <div className="leading-tight">
-              <div className="text-sm font-extrabold" style={{ color: NAVY }}>
-                Quandr3
-              </div>
-              <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">ASK. SHARE. DECIDE.</div>
-            </div>
-          </Link>
-
-          <div className="flex items-center gap-3">
-            <Link
-              href="/q/create"
-              className="inline-flex items-center rounded-full px-4 py-2 text-sm font-extrabold text-white shadow-sm"
-              style={{ background: BLUE }}
-            >
-              Create a Quandr3
-            </Link>
-
-            {user ? (
-              <Link
-                href="/account"
-                className="rounded-full border bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-                style={{ borderColor: "rgba(15,23,42,0.12)" }}
-              >
-                Account
-              </Link>
-            ) : (
-              <>
-                <Link
-                  href={`/login?next=/q/${id}`}
-                  className="rounded-full border bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-                  style={{ borderColor: "rgba(15,23,42,0.12)" }}
-                >
-                  Log in
-                </Link>
-                <Link href="/signup" className="rounded-full px-4 py-2 text-sm font-extrabold text-white" style={{ background: NAVY }}>
-                  Sign up
-                </Link>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
-
       <div className="mx-auto max-w-6xl px-4 py-8">
         {/* HERO BANNER */}
         <section className="overflow-hidden rounded-[28px] border bg-white shadow-sm">
@@ -803,11 +768,22 @@ export default function Quandr3DetailPage() {
             <div className="absolute inset-0 bg-gradient-to-r from-[#0b2343cc] via-[#0b234388] to-[#0b234320]" />
 
             <div className="absolute left-5 top-5 flex items-center gap-3">
+              <Link
+                href="/explore"
+                className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold shadow-sm backdrop-blur"
+                style={{ color: NAVY }}
+              >
+                ← Explore
+              </Link>
+
               <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold shadow-sm backdrop-blur" style={{ color: NAVY }}>
                 {safeStr(q.category || "Category")}
               </span>
 
-              <span className="rounded-full px-3 py-1 text-xs font-extrabold shadow-sm backdrop-blur" style={{ background: statusPill.bg, color: statusPill.fg }}>
+              <span
+                className="rounded-full px-3 py-1 text-xs font-extrabold shadow-sm backdrop-blur"
+                style={{ background: statusPill.bg, color: statusPill.fg }}
+              >
                 {statusPill.label}
               </span>
             </div>
@@ -856,7 +832,9 @@ export default function Quandr3DetailPage() {
                 </span>
               </div>
 
-              <h1 className="mt-2 text-3xl font-extrabold leading-tight text-white">{safeStr(q.title) || "Untitled Quandr3"}</h1>
+              <h1 className="mt-2 text-3xl font-extrabold leading-tight text-white">
+                {safeStr(q.title) || "Untitled Quandr3"}
+              </h1>
 
               {safeStr(q.context) ? (
                 <p className="mt-2 max-w-3xl text-sm text-white/90">{safeStr(q.context)}</p>
@@ -871,8 +849,21 @@ export default function Quandr3DetailPage() {
             <div className="rounded-2xl border bg-slate-50 p-5">
               <div className="text-xs font-semibold tracking-widest text-slate-600">HOW IT WORKS</div>
               <div className="mt-2 text-sm text-slate-700">
-                Vote while it’s open. After it closes, results unlock so everyone learns. Discussion (if opened) is <b>after close</b> and <b>voters only</b>.
+                Vote while it’s open. After it closes, results unlock so everyone learns. Discussion (if opened) is{" "}
+                <b>after close</b> and <b>voters only</b>.
               </div>
+
+              {status === "resolved" && curiosoChoiceLabel ? (
+                <div className="mt-4 rounded-2xl border bg-white p-4">
+                  <div className="text-xs font-semibold tracking-widest text-slate-600">CURIOSO FINAL CHOICE</div>
+                  <div className="mt-2 text-sm font-extrabold" style={{ color: TEAL }}>
+                    {curiosoChoiceLabel}
+                  </div>
+                  {safeStr(resolution?.note) ? (
+                    <div className="mt-2 text-sm text-slate-700">{safeStr(resolution.note)}</div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             <div className="rounded-2xl border bg-white p-5">
@@ -909,7 +900,7 @@ export default function Quandr3DetailPage() {
                 <div className="rounded-2xl border bg-slate-50 p-4">
                   <div className="text-[11px] font-semibold tracking-widest text-slate-500">STATUS</div>
                   <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
-                    {status}
+                    {statusPill.label}
                   </div>
                 </div>
               </div>
@@ -957,7 +948,11 @@ export default function Quandr3DetailPage() {
                     </button>
 
                     {status === "awaiting_user" || status === "resolved" ? (
-                      <Link href={`/q/${id}/resolve`} className="rounded-xl px-3 py-2 text-xs font-extrabold text-white" style={{ background: NAVY }}>
+                      <Link
+                        href={`/q/${id}/resolve`}
+                        className="rounded-xl px-3 py-2 text-xs font-extrabold text-white"
+                        style={{ background: NAVY }}
+                      >
                         Go to Resolve
                       </Link>
                     ) : null}
@@ -978,14 +973,14 @@ export default function Quandr3DetailPage() {
             <div>
               <div className="text-xs font-semibold tracking-widest text-slate-600">OPTIONS</div>
               <div className="mt-1 text-xl font-extrabold" style={{ color: NAVY }}>
-                {status === "open" ? "Pick your answer" : "Internet decided"}
+                {status === "open" ? "Pick your answer" : status === "resolved" ? "Final outcome" : "Voting closed"}
               </div>
               <div className="mt-1 text-sm text-slate-600">
                 {status === "open"
                   ? didVote
                     ? "You already voted. (One vote per person.)"
                     : "Vote while it’s open. Then add a short reason (optional)."
-                  : "Voting is closed. Percentages show what the crowd chose."}
+                  : "Percentages show what the crowd chose."}
               </div>
             </div>
 
@@ -1001,12 +996,12 @@ export default function Quandr3DetailPage() {
               No options found for this Quandr3 yet.
               {optionsErr ? (
                 <div className="mt-2 rounded-xl border bg-white p-3 text-xs text-slate-700">
-                  <b style={{ color: NAVY }}>Likely RLS:</b> your app is not allowed to read <code>quandr3_options</code>.
+                  <b style={{ color: NAVY }}>Options query error:</b>
                   <div className="mt-2 text-slate-500">{optionsErr}</div>
                 </div>
               ) : (
                 <div className="mt-2 text-xs text-slate-500">
-                  If you see options in the Supabase dashboard but not here, it’s almost always RLS.
+                  If you see options in Supabase but not here, it’s usually RLS or the wrong `quandr3_id`.
                 </div>
               )}
             </div>
@@ -1028,7 +1023,9 @@ export default function Quandr3DetailPage() {
                   voteIdForMyVote != null ? reasonDraftByVoteId[voteIdForMyVote] ?? myReason ?? "" : "";
 
                 const img = getOptImage(opt, q?.category);
-                const label = safeStr(opt.label || opt.title || opt.text || opt.option_text) || `Option ${LETTER[ord - 1] ?? "?"}`;
+                const label =
+                  safeStr(opt.label || opt.title || opt.text || opt.option_text) ||
+                  `Option ${LETTER[ord - 1] ?? "?"}`;
 
                 return (
                   <div
@@ -1037,7 +1034,7 @@ export default function Quandr3DetailPage() {
                       "overflow-hidden rounded-[26px] border bg-white shadow-sm",
                       "transition will-change-transform md:hover:-translate-y-[2px] md:hover:shadow-lg",
                     ].join(" ")}
-                    style={{ borderColor: isWinner ? "rgba(0,169,165,0.55)" : "rgba(15,23,42,0.12)" }}
+                    style={{ borderColor: isWinner && status !== "open" ? "rgba(0,169,165,0.55)" : "rgba(15,23,42,0.12)" }}
                   >
                     <div className="grid gap-0 grid-cols-[140px_1fr]">
                       <div className="relative h-[120px] w-[140px] bg-slate-900">
@@ -1057,7 +1054,7 @@ export default function Quandr3DetailPage() {
                         {isWinner && status !== "open" ? (
                           <div className="absolute bottom-3 left-3">
                             <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold shadow-sm backdrop-blur" style={{ color: TEAL }}>
-                              Leading
+                              Winner
                             </span>
                           </div>
                         ) : null}
@@ -1085,7 +1082,7 @@ export default function Quandr3DetailPage() {
 
                           {status !== "open" ? (
                             <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
-                              Internet decided
+                              {status === "resolved" ? "Resolved" : "Closed"}
                             </span>
                           ) : null}
                         </div>
@@ -1102,12 +1099,17 @@ export default function Quandr3DetailPage() {
                             </button>
                           ) : (
                             <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                              <div className="h-full rounded-full" style={{ width: `${pct}%`, background: isWinner ? TEAL : BLUE }} />
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${pct}%`, background: isWinner ? TEAL : BLUE }}
+                              />
                             </div>
                           )}
 
                           {status === "open" ? (
-                            <div className="mt-2 text-center text-[11px] font-semibold text-slate-500">Your “why” helps others learn.</div>
+                            <div className="mt-2 text-center text-[11px] font-semibold text-slate-500">
+                              Your “why” helps others learn.
+                            </div>
                           ) : null}
                         </div>
 
@@ -1126,7 +1128,9 @@ export default function Quandr3DetailPage() {
 
                         {showReasonBox ? (
                           <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
-                            <div className="text-xs font-semibold tracking-widest text-slate-600">{myReason ? "EDIT YOUR REASON" : "WHY DID YOU CHOOSE THIS?"}</div>
+                            <div className="text-xs font-semibold tracking-widest text-slate-600">
+                              {myReason ? "EDIT YOUR REASON" : "WHY DID YOU CHOOSE THIS?"}
+                            </div>
 
                             <textarea
                               value={reasonDraft}
@@ -1177,19 +1181,28 @@ export default function Quandr3DetailPage() {
               <div className="mt-1 text-sm text-slate-600">Discussion is optional. If opened, only voters can post.</div>
             </div>
 
-            <div className="inline-flex items-center rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: discussionBadge.bg, color: discussionBadge.fg }}>
+            <div
+              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-extrabold"
+              style={{ background: discussionBadge.bg, color: discussionBadge.fg }}
+            >
               {discussionBadge.label}
             </div>
           </div>
 
           {status === "open" ? (
-            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Discussion is locked while voting is open.</div>
+            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
+              Discussion is locked while voting is open.
+            </div>
           ) : !q.discussion_open ? (
             <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Discussion is closed.</div>
           ) : !user ? (
-            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Log in to see if you’re invited to the discussion.</div>
+            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
+              Log in to see if you’re invited to the discussion.
+            </div>
           ) : !didVote ? (
-            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">Discussion is for voters only on this Quandr3.</div>
+            <div className="mt-5 rounded-2xl border bg-slate-50 p-5 text-sm text-slate-600">
+              Discussion is for voters only on this Quandr3.
+            </div>
           ) : (
             <>
               <div className="mt-5 rounded-3xl border bg-slate-50 p-5">
@@ -1234,7 +1247,9 @@ export default function Quandr3DetailPage() {
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img src={p.avatar_url} alt="" className="h-full w-full object-cover" />
                               ) : (
-                                <div className="flex h-full w-full items-center justify-center text-xs font-extrabold text-slate-500">?</div>
+                                <div className="flex h-full w-full items-center justify-center text-xs font-extrabold text-slate-500">
+                                  ?
+                                </div>
                               )}
                             </div>
 

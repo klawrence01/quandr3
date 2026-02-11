@@ -77,75 +77,6 @@ function statusLabel(kind: "open" | "awaiting_user" | "resolved") {
   return { bg: "rgba(0,169,165,0.12)", fg: TEAL, label: "Resolved" };
 }
 
-// Option order can be stored as: order, idx, position, choice_index, etc.
-function getOptOrder(opt: any, fallback: number) {
-  const candidates = [
-    opt?.order,
-    opt?.idx,
-    opt?.position,
-    opt?.choice_index,
-    opt?.choiceOrder,
-    opt?.sort_order,
-  ];
-  for (const c of candidates) {
-    const n = Number(c);
-    // IMPORTANT: allow 0-based (0,1,2...) AND 1-based (1,2,3...)
-    if (!Number.isNaN(n) && n >= 0) return n;
-  }
-  return fallback;
-}
-
-/* =========================
-   Robust FK fetch helpers
-========================= */
-
-// Some of your tables may use different FK column names.
-// We'll try these in order until one works.
-const FK_TRIES = ["quandr3_id", "quandary_id", "q_id", "question_id"];
-
-async function selectByFK(table: string, qid: string) {
-  for (const fk of FK_TRIES) {
-    const res = await supabase.from(table).select("*").eq(fk, qid);
-    if (!res.error) return { data: res.data ?? [], fkUsed: fk, error: null };
-  }
-  // return the last error-ish shape
-  return { data: [], fkUsed: null, error: `Unable to read ${table} by any FK (${FK_TRIES.join(", ")})` };
-}
-
-// Try ordering options by multiple possible sort columns.
-// If the sort column doesn't exist, Supabase returns an error — we just try the next one.
-async function fetchOptionsRobust(qid: string) {
-  // First, discover which FK works for options.
-  let fkUsed = null;
-
-  // Try each FK with ordering attempts
-  const sortTries = ["order", "idx", "position", "choice_index", "sort_order", "created_at"];
-
-  for (const fk of FK_TRIES) {
-    for (const col of sortTries) {
-      const res = await supabase
-        .from("quandr3_options")
-        .select("*")
-        .eq(fk, qid)
-        .order(col, { ascending: true });
-
-      if (!res.error) {
-        fkUsed = fk;
-        return { opts: res.data ?? [], fkUsed };
-      }
-    }
-
-    // If ordering fails but FK might still be right, try plain select
-    const res2 = await supabase.from("quandr3_options").select("*").eq(fk, qid);
-    if (!res2.error) {
-      fkUsed = fk;
-      return { opts: res2.data ?? [], fkUsed };
-    }
-  }
-
-  return { opts: [], fkUsed };
-}
-
 /* =========================
    Page
 ========================= */
@@ -171,6 +102,7 @@ export default function ResultsPage() {
 
   const totalVotes = votes.length;
 
+  // Detect whether DB votes are 0-based (0,1,2...) or 1-based (1,2,3...)
   const zeroBasedVotes = useMemo(() => {
     if (!votes?.length) return false;
     const mins = Math.min(...votes.map((v: any) => Number(v.choice_index ?? 9999)));
@@ -180,15 +112,15 @@ export default function ResultsPage() {
   function normChoiceIndex(vChoice: any) {
     const n = Number(vChoice);
     if (Number.isNaN(n)) return null;
-    return zeroBasedVotes ? n + 1 : n; // normalize to 1-based for display + matching
+    return zeroBasedVotes ? n + 1 : n; // normalize to 1-based for display/matching
   }
 
   async function refreshAll(qid: string) {
-    // Core question
+    // 1) Core question
     const { data: qRow } = await supabase.from("quandr3s").select("*").eq("id", qid).single();
     setQ(qRow ?? null);
 
-    // Creator profile (nice-to-have)
+    // 2) Creator profile (nice-to-have)
     const creatorId = getCreatorId(qRow);
     if (creatorId) {
       const { data: p } = await supabase
@@ -201,18 +133,30 @@ export default function ResultsPage() {
       setProfile(null);
     }
 
-    // Options (robust FK + robust ordering)
-    const { opts } = await fetchOptionsRobust(qid);
-    setOptions(opts ?? []);
+    // 3) ✅ Options (simple + reliable)
+    // Order by created_at so the UI order is deterministic.
+    const { data: optRows, error: optErr } = await supabase
+      .from("quandr3_options")
+      .select("id,quandr3_id,label,value,created_at,image_url,media_url,photo_url,img_url")
+      .eq("quandr3_id", qid)
+      .order("created_at", { ascending: true });
 
-    // Votes (robust FK)
-    const vRes = await selectByFK("quandr3_votes", qid);
-    const vRows = vRes.data ?? [];
-    setVotes(vRows);
+    if (optErr) {
+      // If this errors, it’s RLS or table/column mismatch.
+      // We keep empty options, UI will show it clearly.
+      setOptions([]);
+    } else {
+      setOptions(optRows ?? []);
+    }
 
-    // Reasons (vote_id -> reason)
-    if (vRows.length) {
-      const voteIds = vRows.map((x: any) => x.id).filter(Boolean);
+    // 4) Votes
+    const { data: vRows } = await supabase.from("quandr3_votes").select("*").eq("quandr3_id", qid);
+    setVotes(vRows ?? []);
+
+    // 5) Reasons (vote_id -> reason)
+    if ((vRows ?? []).length) {
+      const voteIds = (vRows ?? []).map((x: any) => x.id).filter(Boolean);
+
       const { data: rs } = await supabase
         .from("vote_reasons")
         .select("vote_id, reason")
@@ -228,21 +172,13 @@ export default function ResultsPage() {
       setReasonsByVoteId({});
     }
 
-    // Resolution (may be blocked by RLS; still fine)
-    // Also: try common FK names for resolution too
-    let reso = null;
-    for (const fk of FK_TRIES) {
-      const { data: r } = await supabase
-        .from("quandr3_resolutions")
-        .select("*")
-        .eq(fk, qid)
-        .maybeSingle();
-      if (r) {
-        reso = r;
-        break;
-      }
-    }
-    setResolution(reso ?? null);
+    // 6) Resolution (optional)
+    const { data: r } = await supabase
+      .from("quandr3_resolutions")
+      .select("*")
+      .eq("quandr3_id", qid)
+      .maybeSingle();
+    setResolution(r ?? null);
   }
 
   useEffect(() => {
@@ -270,7 +206,7 @@ export default function ResultsPage() {
     return timeExpired || voteCapReached;
   }, [q, totalVotes]);
 
-  // ✅ TRUST DB STATUS FIRST, then fallback
+  // Trust DB status first, then fallback
   const status = useMemo(() => {
     const s = String(q?.status || "").toLowerCase();
     if (s === "open" || s === "awaiting_user" || s === "resolved") return s;
@@ -280,6 +216,12 @@ export default function ResultsPage() {
   }, [q?.status, resolution, votingExpired]);
 
   const statusPill = useMemo(() => statusLabel(status as any), [status]);
+
+  // Build orderedOptions with a stable 1-based display order
+  const orderedOptions = useMemo(() => {
+    const arr = [...(options ?? [])];
+    return arr.map((o: any, i: number) => ({ ...o, _ord: i + 1 }));
+  }, [options]);
 
   const voteCounts = useMemo(() => {
     const map: Record<number, number> = {};
@@ -291,18 +233,7 @@ export default function ResultsPage() {
     return map;
   }, [votes, zeroBasedVotes]);
 
-  const winningOrder = useMemo(() => {
-    // If resolution has option_id, use it
-    if (resolution?.option_id) {
-      const opt = options.find((o: any) => o.id === resolution.option_id);
-      if (opt) {
-        const ord = getOptOrder(opt, 1);
-        // ord might be 0-based; normalize to 1-based display
-        return zeroBasedVotes ? ord + 1 : ord;
-      }
-    }
-
-    // Otherwise, highest votes
+  const crowdWinnerOrd = useMemo(() => {
     let max = -1;
     let win: any = null;
     Object.entries(voteCounts).forEach(([k, v]: any) => {
@@ -312,23 +243,17 @@ export default function ResultsPage() {
       }
     });
     return win;
-  }, [resolution, options, voteCounts, zeroBasedVotes]);
+  }, [voteCounts]);
 
-  // ✅ show letter + option label
-  const leadingLabel = useMemo(() => {
-    if (!winningOrder) return null;
+  const curiosoChoiceOpt = useMemo(() => {
+    if (!resolution?.option_id) return null;
+    return orderedOptions.find((o: any) => o.id === resolution.option_id) ?? null;
+  }, [resolution, orderedOptions]);
 
-    // Find option by matching computed order (normalize as needed)
-    const opt = options.find((o: any, i: number) => {
-      const ordRaw = getOptOrder(o, i + 1);
-      const ordDisplay = zeroBasedVotes ? ordRaw + 1 : ordRaw;
-      return ordDisplay === winningOrder;
-    });
-
-    const letter = LETTER[winningOrder - 1] || `#${winningOrder}`;
-    const label = opt ? safeStr(opt.label || opt.title || opt.text || opt.option_text) : "";
-    return label ? `${letter} — ${label}` : `${letter}`;
-  }, [winningOrder, options, zeroBasedVotes]);
+  const crowdWinnerOpt = useMemo(() => {
+    if (!crowdWinnerOrd) return null;
+    return orderedOptions.find((o: any) => o._ord === crowdWinnerOrd) ?? null;
+  }, [crowdWinnerOrd, orderedOptions]);
 
   const reasonsByChoiceIndex = useMemo(() => {
     const grouped: Record<number, string[]> = {};
@@ -349,9 +274,9 @@ export default function ResultsPage() {
 
   const creatorName = useMemo(() => creatorLabel(q, profile), [q, profile]);
 
-  // =========================
-  // Render states
-  // =========================
+  /* =========================
+     Render
+  ========================= */
 
   if (loading) {
     return (
@@ -361,7 +286,7 @@ export default function ResultsPage() {
             <div className="text-sm font-semibold" style={{ color: NAVY }}>
               Loading Results…
             </div>
-            <div className="mt-2 text-sm text-slate-600">Pulling votes and reasons.</div>
+            <div className="mt-2 text-sm text-slate-600">Pulling votes, options, and reasons.</div>
           </div>
         </div>
       </main>
@@ -394,8 +319,7 @@ export default function ResultsPage() {
     );
   }
 
-  // ❌ Block results only while OPEN
-  // ✅ For awaiting_user and resolved, show results immediately (percentages should display)
+  // Block results only while OPEN
   if (status === "open") {
     return (
       <main className="min-h-screen" style={{ background: SOFT_BG }}>
@@ -441,9 +365,7 @@ export default function ResultsPage() {
             <h1 className="mt-3 text-2xl font-extrabold" style={{ color: NAVY }}>
               Results unlock after voting closes
             </h1>
-            <div className="mt-2 text-sm text-slate-600">
-              Head back to the Quandr3 to vote while it’s open.
-            </div>
+            <div className="mt-2 text-sm text-slate-600">Head back to the Quandr3 to vote while it’s open.</div>
             <div className="mt-5 flex flex-wrap gap-2">
               <Link
                 href={`/q/${id}`}
@@ -466,7 +388,7 @@ export default function ResultsPage() {
     );
   }
 
-  // If awaiting_user or resolved, show results.
+  // awaiting_user or resolved => show results
   return (
     <main className="min-h-screen" style={{ background: SOFT_BG }}>
       <header className="border-b bg-white">
@@ -510,6 +432,7 @@ export default function ResultsPage() {
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-8">
+        {/* HERO */}
         <section className="overflow-hidden rounded-[28px] border bg-white shadow-sm">
           <div className="relative h-[220px] w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -517,16 +440,10 @@ export default function ResultsPage() {
             <div className="absolute inset-0 bg-gradient-to-r from-[#0b2343cc] via-[#0b234388] to-[#0b234320]" />
 
             <div className="absolute left-5 top-5 flex items-center gap-3">
-              <span
-                className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold"
-                style={{ color: NAVY }}
-              >
+              <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
                 {safeStr(q.category || "Category")}
               </span>
-              <span
-                className="rounded-full px-3 py-1 text-xs font-extrabold"
-                style={{ background: statusPill.bg, color: statusPill.fg }}
-              >
+              <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: statusPill.bg, color: statusPill.fg }}>
                 {statusPill.label}
               </span>
             </div>
@@ -544,9 +461,7 @@ export default function ResultsPage() {
                 </span>
               </div>
 
-              <h1 className="mt-2 text-3xl font-extrabold leading-tight text-white">
-                {safeStr(q.title) || "Untitled Quandr3"}
-              </h1>
+              <h1 className="mt-2 text-3xl font-extrabold leading-tight text-white">{safeStr(q.title) || "Untitled Quandr3"}</h1>
 
               {safeStr(q.context) ? (
                 <p className="mt-2 max-w-3xl text-sm text-white/90">{safeStr(q.context)}</p>
@@ -556,11 +471,12 @@ export default function ResultsPage() {
             </div>
           </div>
 
+          {/* TOPLINE */}
           <div className="grid gap-4 p-6 lg:grid-cols-[1.2fr_0.8fr]">
             <div className="rounded-2xl border bg-slate-50 p-5">
               <div className="text-xs font-semibold tracking-widest text-slate-600">WHAT THIS MEANS</div>
               <div className="mt-2 text-sm text-slate-700">
-                The crowd picked their path. The “why” behind votes is what makes Quandr3 valuable — it turns polling into shared wisdom.
+                The crowd voted. The “why” behind votes is what makes Quandr3 valuable — it turns polling into shared wisdom.
               </div>
             </div>
 
@@ -571,25 +487,23 @@ export default function ResultsPage() {
                   Total votes: {totalVotes}
                 </span>
 
-                {status === "resolved" && resolution ? (
-                  <span
-                    className="rounded-full px-3 py-1 text-xs font-extrabold"
-                    style={{ background: "rgba(30,99,243,0.12)", color: BLUE }}
-                  >
-                    Curioso chose: {leadingLabel ? leadingLabel : "—"}
-                  </span>
-                ) : leadingLabel ? (
-                  <span
-                    className="rounded-full px-3 py-1 text-xs font-extrabold"
-                    style={{ background: "rgba(0,169,165,0.12)", color: TEAL }}
-                  >
-                    Leading: {leadingLabel}
+                {crowdWinnerOpt ? (
+                  <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "rgba(0,169,165,0.12)", color: TEAL }}>
+                    Crowd winner: {LETTER[(crowdWinnerOpt._ord || 1) - 1] ?? "?"} —{" "}
+                    {safeStr(crowdWinnerOpt.label || crowdWinnerOpt.value || "—")}
                   </span>
                 ) : (
                   <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
                     No votes yet
                   </span>
                 )}
+
+                {status === "resolved" && curiosoChoiceOpt ? (
+                  <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "rgba(30,99,243,0.12)", color: BLUE }}>
+                    Curioso chose: {LETTER[(curiosoChoiceOpt._ord || 1) - 1] ?? "?"} —{" "}
+                    {safeStr(curiosoChoiceOpt.label || curiosoChoiceOpt.value || "—")}
+                  </span>
+                ) : null}
 
                 {resolution?.note ? (
                   <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "rgba(30,99,243,0.12)", color: BLUE }}>
@@ -601,6 +515,7 @@ export default function ResultsPage() {
           </div>
         </section>
 
+        {/* RESULTS */}
         <section className="mt-7 rounded-[28px] border bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -608,9 +523,7 @@ export default function ResultsPage() {
               <div className="mt-1 text-xl font-extrabold" style={{ color: NAVY }}>
                 Vote breakdown
               </div>
-              <div className="mt-1 text-sm text-slate-600">
-                Percentages are based on total votes. Reasons are shown under each option.
-              </div>
+              <div className="mt-1 text-sm text-slate-600">Percentages are based on total votes. Reasons show under each option.</div>
             </div>
 
             <button
@@ -622,43 +535,43 @@ export default function ResultsPage() {
             </button>
           </div>
 
-          {!options?.length ? (
+          {!orderedOptions?.length ? (
             <div className="mt-6 rounded-2xl border bg-slate-50 p-4 text-sm text-slate-600">
-              No options found for this Quandr3 yet.
+              No options found for this Quandr3.
               <div className="mt-2 text-xs text-slate-500">
-                If your detail page shows options but this page doesn’t, your options FK column is different — this file now tries:
-                <span className="font-semibold"> {FK_TRIES.join(", ")} </span>
-                for both votes and options.
+                If options exist in Supabase but not here, it’s almost always RLS on <code>quandr3_options</code> or a different table name.
               </div>
             </div>
           ) : (
             <div className="mt-6 grid gap-4 md:grid-cols-2">
-              {options.map((opt: any, i: number) => {
-                const ordRaw = getOptOrder(opt, i + 1);
-                const ord = zeroBasedVotes ? ordRaw + 1 : ordRaw; // display index
+              {orderedOptions.map((opt: any, i: number) => {
+                const ord = Number(opt._ord || i + 1);
                 const count = voteCounts[ord] || 0;
                 const pct = totalVotes ? Math.round((count / totalVotes) * 100) : 0;
-                const isWinner = ord === winningOrder;
+
+                const isCrowdWinner = crowdWinnerOrd === ord;
+                const isCuriosoChoice = !!resolution?.option_id && resolution.option_id === opt.id;
 
                 const reasons = reasonsByChoiceIndex[ord] ?? [];
                 const reasonsToShow = showAllReasons ? reasons.slice(0, 20) : reasons.slice(0, 5);
 
-                const label =
-                  safeStr(opt.label || opt.title || opt.text || opt.option_text) ||
-                  `Option ${LETTER[ord - 1] ?? ord}`;
+                const label = safeStr(opt.label || opt.value || opt.option_text || opt.text) || `Option ${LETTER[ord - 1] ?? ord}`;
 
                 return (
                   <div
                     key={opt.id ?? `${i}-${label}`}
                     className="rounded-[26px] border bg-white p-5 shadow-sm"
-                    style={{ borderColor: isWinner ? "rgba(0,169,165,0.55)" : "rgba(15,23,42,0.12)" }}
+                    style={{
+                      borderColor:
+                        isCuriosoChoice ? "rgba(30,99,243,0.55)" : isCrowdWinner ? "rgba(0,169,165,0.55)" : "rgba(15,23,42,0.12)",
+                    }}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <span
                             className="flex h-9 w-9 items-center justify-center rounded-2xl text-sm font-extrabold text-white"
-                            style={{ background: isWinner ? TEAL : NAVY }}
+                            style={{ background: isCrowdWinner ? TEAL : NAVY }}
                           >
                             {LETTER[ord - 1] ?? ord}
                           </span>
@@ -666,24 +579,28 @@ export default function ResultsPage() {
                             {label}
                           </div>
                         </div>
+
                         <div className="mt-2 text-xs text-slate-600">
                           {count} vote{count === 1 ? "" : "s"} • {pct}%
                         </div>
-                      </div>
 
-                      {isWinner ? (
-                        <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-extrabold text-teal-700">
-                          {status === "resolved" ? "Chosen" : "Leading"}
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
-                          —
-                        </span>
-                      )}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {isCrowdWinner ? (
+                            <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-extrabold text-teal-700">
+                              Crowd winner
+                            </span>
+                          ) : null}
+                          {isCuriosoChoice ? (
+                            <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "rgba(30,99,243,0.10)", color: BLUE }}>
+                              Curioso chose
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
                     </div>
 
                     <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: isWinner ? TEAL : BLUE }} />
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: isCrowdWinner ? TEAL : BLUE }} />
                     </div>
 
                     <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
@@ -694,7 +611,7 @@ export default function ResultsPage() {
                       ) : (
                         <ul className="mt-2 list-disc space-y-2 pl-5 text-sm text-slate-800">
                           {reasonsToShow.map((txt: string, idx: number) => (
-                            <li key={`${i}-why-${idx}`} className="leading-snug">
+                            <li key={`${opt.id}-why-${idx}`} className="leading-snug">
                               {txt}
                             </li>
                           ))}
@@ -714,6 +631,7 @@ export default function ResultsPage() {
           )}
         </section>
 
+        {/* CURIOSO NOTE */}
         {resolution ? (
           <section className="mt-7 rounded-[28px] border bg-white p-6 shadow-sm">
             <div className="text-xs font-semibold tracking-widest text-slate-600">CURIOSO NOTE</div>
@@ -727,7 +645,7 @@ export default function ResultsPage() {
               </div>
               <div className="mt-3 text-xs text-slate-600">
                 Resolved on{" "}
-                <span className="font-semibold">{fmt(resolution.created_at || resolution.resolved_at)}</span>
+                <span className="font-semibold">{fmt(resolution.created_at || resolution.resolved_at || resolution.resolved_at)}</span>
               </div>
             </div>
           </section>
