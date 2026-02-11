@@ -209,8 +209,11 @@ export default function Quandr3DetailPage() {
     // Try common ordering columns in priority order, fallback to created_at
     const tries = ["order", "idx", "position", "choice_index", "sort_order", "created_at"];
 
-    // Use explicit columns first (avoids surprises with weird types / policies)
-    const baseSelect = "id,quandr3_id,label,value,created_at,image_url,media_url,photo_url,img_url,order,idx,position,choice_index,sort_order";
+    // ✅ IMPORTANT FIX:
+    // Your table does NOT necessarily contain all the columns in the old baseSelect list.
+    // Selecting non-existent columns causes PostgREST to error and returns no options.
+    // So we use select("*") to match your actual schema.
+    const baseSelect = "*";
 
     for (const col of tries) {
       const res = await supabase
@@ -222,9 +225,12 @@ export default function Quandr3DetailPage() {
       if (!res.error) return res.data ?? [];
 
       // ✅ If RLS blocks, tell the UI the truth and stop looping.
-      // PostgREST often returns 401/403-like messages; we surface it.
       const msg = res.error?.message || "";
-      if (msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("row level security") || msg.toLowerCase().includes("not allowed")) {
+      if (
+        msg.toLowerCase().includes("permission") ||
+        msg.toLowerCase().includes("row level security") ||
+        msg.toLowerCase().includes("not allowed")
+      ) {
         setOptionsErr(msg);
         return [];
       }
