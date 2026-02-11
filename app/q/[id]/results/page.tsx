@@ -136,18 +136,18 @@ export default function ResultsPage() {
     // 3) ✅ Options (simple + reliable)
     // Order by created_at so the UI order is deterministic.
     const { data: optRows, error: optErr } = await supabase
-      .from("quandr3_options")
-      .select("id,quandr3_id,label,value,created_at,image_url,media_url,photo_url,img_url")
-      .eq("quandr3_id", qid)
-      .order("created_at", { ascending: true });
+  .from("quandr3_options")
+  .select("*")
+  .eq("quandr3_id", qid)
+  .order("created_at", { ascending: true });
 
-    if (optErr) {
-      // If this errors, it’s RLS or table/column mismatch.
-      // We keep empty options, UI will show it clearly.
-      setOptions([]);
-    } else {
-      setOptions(optRows ?? []);
-    }
+if (optErr) {
+  console.error("OPTIONS ERROR:", optErr);
+  setOptions([]);
+} else {
+  setOptions(optRows ?? []);
+}
+
 
     // 4) Votes
     const { data: vRows } = await supabase.from("quandr3_votes").select("*").eq("quandr3_id", qid);
