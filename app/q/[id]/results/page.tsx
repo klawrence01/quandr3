@@ -78,6 +78,31 @@ function statusLabel(kind: "open" | "awaiting_user" | "resolved") {
 }
 
 /* =========================
+   Robust FK tries (THIS FIXES “wrong FK name” bugs)
+========================= */
+
+const FK_TRIES = ["quandr3_id", "quandary_id", "q_id", "question_id"];
+
+async function fetchByFK(table: string, selectCols: string, qid: string, orderCol?: string) {
+  let lastErr: any = null;
+
+  for (const fk of FK_TRIES) {
+    let q = supabase.from(table).select(selectCols).eq(fk, qid);
+    if (orderCol) q = q.order(orderCol, { ascending: true });
+
+    const res = await q;
+
+    if (!res.error) {
+      return { rows: res.data ?? [], fkUsed: fk, error: null };
+    }
+
+    lastErr = res.error;
+  }
+
+  return { rows: [], fkUsed: null, error: lastErr };
+}
+
+/* =========================
    Page
 ========================= */
 
@@ -96,6 +121,12 @@ export default function ResultsPage() {
   const [resolution, setResolution] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  // Debug
+  const [optFKUsed, setOptFKUsed] = useState<string | null>(null);
+  const [voteFKUsed, setVoteFKUsed] = useState<string | null>(null);
+  const [optErrMsg, setOptErrMsg] = useState<string | null>(null);
+  const [voteErrMsg, setVoteErrMsg] = useState<string | null>(null);
 
   const [reasonsByVoteId, setReasonsByVoteId] = useState<Record<string, string>>({});
   const [showAllReasons, setShowAllReasons] = useState(false);
@@ -116,6 +147,11 @@ export default function ResultsPage() {
   }
 
   async function refreshAll(qid: string) {
+    setOptErrMsg(null);
+    setVoteErrMsg(null);
+    setOptFKUsed(null);
+    setVoteFKUsed(null);
+
     // 1) Core question
     const { data: qRow } = await supabase.from("quandr3s").select("*").eq("id", qid).single();
     setQ(qRow ?? null);
@@ -133,34 +169,30 @@ export default function ResultsPage() {
       setProfile(null);
     }
 
-    // 3) ✅ Options (simple + reliable)
-    // Order by created_at so the UI order is deterministic.
-    const { data: optRows, error: optErr } = await supabase
-  .from("quandr3_options")
-  .select("*")
-  .eq("quandr3_id", qid)
-  .order("created_at", { ascending: true });
+    // 3) OPTIONS (robust FK)
+    const optRes = await fetchByFK(
+      "quandr3_options",
+      "id,quandr3_id,quandary_id,q_id,question_id,label,value,order,created_at,image_url",
+      qid,
+      "created_at"
+    );
 
-if (optErr) {
-  console.error("OPTIONS ERROR:", optErr);
-  setOptions([]);
-} else {
-  setOptions(optRows ?? []);
-}
+    setOptions(optRes.rows ?? []);
+    setOptFKUsed(optRes.fkUsed);
+    if (optRes.error) setOptErrMsg(optRes.error?.message ? String(optRes.error.message) : String(optRes.error));
 
-
-    // 4) Votes
-    const { data: vRows } = await supabase.from("quandr3_votes").select("*").eq("quandr3_id", qid);
-    setVotes(vRows ?? []);
+    // 4) VOTES (robust FK)
+    const voteRes = await fetchByFK("quandr3_votes", "*", qid, "created_at");
+    setVotes(voteRes.rows ?? []);
+    setVoteFKUsed(voteRes.fkUsed);
+    if (voteRes.error) setVoteErrMsg(voteRes.error?.message ? String(voteRes.error.message) : String(voteRes.error));
 
     // 5) Reasons (vote_id -> reason)
-    if ((vRows ?? []).length) {
-      const voteIds = (vRows ?? []).map((x: any) => x.id).filter(Boolean);
+    const vRows = voteRes.rows ?? [];
+    if (vRows.length) {
+      const voteIds = vRows.map((x: any) => x.id).filter(Boolean);
 
-      const { data: rs } = await supabase
-        .from("vote_reasons")
-        .select("vote_id, reason")
-        .in("vote_id", voteIds);
+      const { data: rs } = await supabase.from("vote_reasons").select("vote_id, reason").in("vote_id", voteIds);
 
       const map: Record<string, string> = {};
       (rs ?? []).forEach((r: any) => {
@@ -172,13 +204,9 @@ if (optErr) {
       setReasonsByVoteId({});
     }
 
-    // 6) Resolution (optional)
-    const { data: r } = await supabase
-      .from("quandr3_resolutions")
-      .select("*")
-      .eq("quandr3_id", qid)
-      .maybeSingle();
-    setResolution(r ?? null);
+    // 6) Resolution (optional, robust FK)
+    const resoRes = await fetchByFK("quandr3_resolutions", "*", qid);
+    setResolution((resoRes.rows && resoRes.rows[0]) ? resoRes.rows[0] : null);
   }
 
   useEffect(() => {
@@ -217,7 +245,7 @@ if (optErr) {
 
   const statusPill = useMemo(() => statusLabel(status as any), [status]);
 
-  // Build orderedOptions with a stable 1-based display order
+  // Stable 1-based display order
   const orderedOptions = useMemo(() => {
     const arr = [...(options ?? [])];
     return arr.map((o: any, i: number) => ({ ...o, _ord: i + 1 }));
@@ -338,9 +366,7 @@ if (optErr) {
                 <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                   Back to Quandr3
                 </div>
-                <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">
-                  RESULTS LOCKED
-                </div>
+                <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">RESULTS LOCKED</div>
               </div>
             </Link>
 
@@ -406,9 +432,7 @@ if (optErr) {
               <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                 Results
               </div>
-              <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">
-                SEE HOW IT PLAYED OUT
-              </div>
+              <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">SEE HOW IT PLAYED OUT</div>
             </div>
           </Link>
 
@@ -443,7 +467,10 @@ if (optErr) {
               <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
                 {safeStr(q.category || "Category")}
               </span>
-              <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: statusPill.bg, color: statusPill.fg }}>
+              <span
+                className="rounded-full px-3 py-1 text-xs font-extrabold"
+                style={{ background: statusPill.bg, color: statusPill.fg }}
+              >
                 {statusPill.label}
               </span>
             </div>
@@ -461,7 +488,9 @@ if (optErr) {
                 </span>
               </div>
 
-              <h1 className="mt-2 text-3xl font-extrabold leading-tight text-white">{safeStr(q.title) || "Untitled Quandr3"}</h1>
+              <h1 className="mt-2 text-3xl font-extrabold leading-tight text-white">
+                {safeStr(q.title) || "Untitled Quandr3"}
+              </h1>
 
               {safeStr(q.context) ? (
                 <p className="mt-2 max-w-3xl text-sm text-white/90">{safeStr(q.context)}</p>
@@ -476,7 +505,8 @@ if (optErr) {
             <div className="rounded-2xl border bg-slate-50 p-5">
               <div className="text-xs font-semibold tracking-widest text-slate-600">WHAT THIS MEANS</div>
               <div className="mt-2 text-sm text-slate-700">
-                The crowd voted. The “why” behind votes is what makes Quandr3 valuable — it turns polling into shared wisdom.
+                The crowd voted. The “why” behind votes is what makes Quandr3 valuable — it turns polling into shared
+                wisdom.
               </div>
             </div>
 
@@ -488,7 +518,10 @@ if (optErr) {
                 </span>
 
                 {crowdWinnerOpt ? (
-                  <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "rgba(0,169,165,0.12)", color: TEAL }}>
+                  <span
+                    className="rounded-full px-3 py-1 text-xs font-extrabold"
+                    style={{ background: "rgba(0,169,165,0.12)", color: TEAL }}
+                  >
                     Crowd winner: {LETTER[(crowdWinnerOpt._ord || 1) - 1] ?? "?"} —{" "}
                     {safeStr(crowdWinnerOpt.label || crowdWinnerOpt.value || "—")}
                   </span>
@@ -499,17 +532,28 @@ if (optErr) {
                 )}
 
                 {status === "resolved" && curiosoChoiceOpt ? (
-                  <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "rgba(30,99,243,0.12)", color: BLUE }}>
+                  <span
+                    className="rounded-full px-3 py-1 text-xs font-extrabold"
+                    style={{ background: "rgba(30,99,243,0.12)", color: BLUE }}
+                  >
                     Curioso chose: {LETTER[(curiosoChoiceOpt._ord || 1) - 1] ?? "?"} —{" "}
                     {safeStr(curiosoChoiceOpt.label || curiosoChoiceOpt.value || "—")}
                   </span>
                 ) : null}
 
                 {resolution?.note ? (
-                  <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "rgba(30,99,243,0.12)", color: BLUE }}>
+                  <span
+                    className="rounded-full px-3 py-1 text-xs font-extrabold"
+                    style={{ background: "rgba(30,99,243,0.12)", color: BLUE }}
+                  >
                     Curioso note included
                   </span>
                 ) : null}
+              </div>
+
+              {/* DEBUG STRIP */}
+              <div className="mt-3 text-xs text-slate-500">
+                Debug: options FK={optFKUsed || "none"} • votes FK={voteFKUsed || "none"}
               </div>
             </div>
           </div>
@@ -537,10 +581,21 @@ if (optErr) {
 
           {!orderedOptions?.length ? (
             <div className="mt-6 rounded-2xl border bg-slate-50 p-4 text-sm text-slate-600">
-              No options found for this Quandr3.
+              <div className="font-semibold">No options found for this Quandr3.</div>
+
               <div className="mt-2 text-xs text-slate-500">
-                If options exist in Supabase but not here, it’s almost always RLS on <code>quandr3_options</code> or a different table name.
+                Options FK tried: <span className="font-semibold">{FK_TRIES.join(", ")}</span>
               </div>
+
+              {optErrMsg ? (
+                <div className="mt-3 rounded-xl border bg-white p-3 text-xs text-slate-700">
+                  <div className="font-semibold">Supabase error (options):</div>
+                  <div className="mt-1 font-mono">{optErrMsg}</div>
+                  <div className="mt-2 text-slate-500">
+                    If this mentions permission/rls, add a SELECT policy for <code>quandr3_options</code>.
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="mt-6 grid gap-4 md:grid-cols-2">
@@ -563,7 +618,11 @@ if (optErr) {
                     className="rounded-[26px] border bg-white p-5 shadow-sm"
                     style={{
                       borderColor:
-                        isCuriosoChoice ? "rgba(30,99,243,0.55)" : isCrowdWinner ? "rgba(0,169,165,0.55)" : "rgba(15,23,42,0.12)",
+                        isCuriosoChoice
+                          ? "rgba(30,99,243,0.55)"
+                          : isCrowdWinner
+                          ? "rgba(0,169,165,0.55)"
+                          : "rgba(15,23,42,0.12)",
                     }}
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -591,7 +650,10 @@ if (optErr) {
                             </span>
                           ) : null}
                           {isCuriosoChoice ? (
-                            <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "rgba(30,99,243,0.10)", color: BLUE }}>
+                            <span
+                              className="rounded-full px-3 py-1 text-xs font-extrabold"
+                              style={{ background: "rgba(30,99,243,0.10)", color: BLUE }}
+                            >
                               Curioso chose
                             </span>
                           ) : null}
@@ -645,7 +707,7 @@ if (optErr) {
               </div>
               <div className="mt-3 text-xs text-slate-600">
                 Resolved on{" "}
-                <span className="font-semibold">{fmt(resolution.created_at || resolution.resolved_at || resolution.resolved_at)}</span>
+                <span className="font-semibold">{fmt(resolution.created_at || resolution.resolved_at)}</span>
               </div>
             </div>
           </section>
