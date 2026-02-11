@@ -169,6 +169,7 @@ export default function Quandr3DetailPage() {
   const [user, setUser] = useState<any>(null);
   const [q, setQ] = useState<any>(null);
   const [options, setOptions] = useState<any[]>([]);
+  const [optionsErr, setOptionsErr] = useState<string>(""); // ✅ NEW
   const [votes, setVotes] = useState<any[]>([]);
   const [resolution, setResolution] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
@@ -202,20 +203,44 @@ export default function Quandr3DetailPage() {
      Robust Options Fetch
   ========================= */
 
-  async function fetchOptionsRobust(qid: string) {
+  async function fetchOptionsRobust(quandr3Id: string) {
+    setOptionsErr("");
+
     // Try common ordering columns in priority order, fallback to created_at
     const tries = ["order", "idx", "position", "choice_index", "sort_order", "created_at"];
+
+    // Use explicit columns first (avoids surprises with weird types / policies)
+    const baseSelect = "id,quandr3_id,label,value,created_at,image_url,media_url,photo_url,img_url,order,idx,position,choice_index,sort_order";
+
     for (const col of tries) {
       const res = await supabase
         .from("quandr3_options")
-        .select("*")
-        .eq("quandr3_id", qid)
+        .select(baseSelect)
+        .eq("quandr3_id", quandr3Id)
         .order(col, { ascending: true });
+
       if (!res.error) return res.data ?? [];
+
+      // ✅ If RLS blocks, tell the UI the truth and stop looping.
+      // PostgREST often returns 401/403-like messages; we surface it.
+      const msg = res.error?.message || "";
+      if (msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("row level security") || msg.toLowerCase().includes("not allowed")) {
+        setOptionsErr(msg);
+        return [];
+      }
     }
 
     // last resort: no order applied
-    const res2 = await supabase.from("quandr3_options").select("*").eq("quandr3_id", qid);
+    const res2 = await supabase
+      .from("quandr3_options")
+      .select(baseSelect)
+      .eq("quandr3_id", quandr3Id);
+
+    if (res2.error) {
+      setOptionsErr(res2.error.message || "Could not load options.");
+      return [];
+    }
+
     return res2.data ?? [];
   }
 
@@ -382,7 +407,7 @@ export default function Quandr3DetailPage() {
       let ordRaw = getOptOrder(opt, i + 1);
       // if options are 0-based, map 0->1, 1->2...
       const ord = ordRaw === 0 ? 1 : ordRaw;
-      const ordFixed = zeroBasedVotes ? ord : ord; // keep consistent; votes normalization handles votes
+      const ordFixed = zeroBasedVotes ? ord : ord;
       return { ...opt, _ord: ordFixed };
     });
 
@@ -441,13 +466,11 @@ export default function Quandr3DetailPage() {
   }, [status, q, didVote]);
 
   const winningOrder = useMemo(() => {
-    // If resolution has option_id, use it
     if (resolution?.option_id) {
       const opt = orderedOptions.find((o: any) => o.id === resolution.option_id);
       if (opt) return opt._ord;
     }
 
-    // Otherwise, highest votes
     let max = -1;
     let win: any = null;
     Object.entries(voteCounts).forEach(([k, v]: any) => {
@@ -472,7 +495,6 @@ export default function Quandr3DetailPage() {
     return grouped;
   }, [votes, reasonsByVoteId, zeroBasedVotes]);
 
-  // Only allow editing reasons while voting is open AND user already voted
   const canEditReason = useMemo(() => {
     return !!user && status === "open" && !votingExpired && !resolution && !!myVote?.id;
   }, [user, status, votingExpired, resolution, myVote]);
@@ -527,9 +549,8 @@ export default function Quandr3DetailPage() {
       return;
     }
     if (votingExpired || resolution) return;
-    if (didVote) return; // ✅ one vote per user
+    if (didVote) return;
 
-    // If DB stores 0-based votes, write 0-based; else write 1-based
     const storedChoice = zeroBasedVotes ? choiceOrd - 1 : choiceOrd;
 
     const { data: inserted, error } = await supabase
@@ -972,14 +993,21 @@ export default function Quandr3DetailPage() {
           {!orderedOptions?.length ? (
             <div className="mt-6 rounded-2xl border bg-slate-50 p-4 text-sm text-slate-600">
               No options found for this Quandr3 yet.
-              <div className="mt-2 text-xs text-slate-500">
-                This was the bug: your table doesn’t match the assumed sort column. This page now tries multiple columns automatically.
-              </div>
+              {optionsErr ? (
+                <div className="mt-2 rounded-xl border bg-white p-3 text-xs text-slate-700">
+                  <b style={{ color: NAVY }}>Likely RLS:</b> your app is not allowed to read <code>quandr3_options</code>.
+                  <div className="mt-2 text-slate-500">{optionsErr}</div>
+                </div>
+              ) : (
+                <div className="mt-2 text-xs text-slate-500">
+                  If you see options in the Supabase dashboard but not here, it’s almost always RLS.
+                </div>
+              )}
             </div>
           ) : (
             <div className="mt-6 grid gap-4 md:grid-cols-2">
               {orderedOptions.map((opt: any, i: number) => {
-                const ord = Number(opt._ord || i + 1); // ✅ always 1-based for UI
+                const ord = Number(opt._ord || i + 1);
                 const count = voteCounts[ord] || 0;
                 const pct = totalVotes ? Math.round((count / totalVotes) * 100) : 0;
 
