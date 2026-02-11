@@ -1,225 +1,156 @@
 // app/login/page.tsx
 "use client";
+// @ts-nocheck
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "@/utils/supabase/browser";
 
-type Profile = {
-  id: string;
-  username: string | null;
-};
+const NAVY = "#0b2343";
+const BLUE = "#1e63f3";
+const TEAL = "#00a9a5";
+const CORAL = "#ff6b6b";
+const SOFT_BG = "#f5f7fc";
+
+function safeStr(v: any) {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v.trim();
+  return String(v);
+}
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const nextPath = useMemo(() => {
+    const n = safeStr(searchParams?.get("next"));
+    return n || "/explore";
+  }, [searchParams]);
 
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [status, setStatus] = useState<string>("Checking session...");
-  const [error, setError] = useState<string>("");
+  const [sending, setSending] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
 
+  // If already logged in, bounce
   useEffect(() => {
-    async function check() {
-      const {
-        data: { user },
-        error,
-      } = await supabase.auth.getUser();
+    let alive = true;
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      if (!alive) return;
+      if (data?.user) router.replace(nextPath);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [router, nextPath]);
 
-      if (error) {
-        console.error(error);
-        setStatus("Error checking session.");
-        return;
-      }
+  async function sendMagicLink(e: any) {
+    e?.preventDefault?.();
+    setErr("");
+    setMsg("");
 
-      if (!user) {
-        setStatus("You are NOT signed in yet.");
-        return;
-      }
-
-      setStatus(`Signed in as ${user.email ?? user.id}`);
-    }
-
-    check();
-  }, []);
-
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setStatus("Signing in...");
-
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      console.error(error);
-      setError(error.message);
-      setStatus("Sign in failed.");
+    const e1 = safeStr(email).toLowerCase();
+    if (!e1 || !e1.includes("@")) {
+      setErr("Enter a valid email.");
       return;
     }
 
-    setStatus(`Signed in as ${data.user?.email ?? data.user?.id}`);
-  }
+    try {
+      setSending(true);
 
-  async function goToMyProfile() {
-    setError("");
+      // IMPORTANT: redirectTo must match a URL allowed in Supabase Auth settings
+      const redirectTo =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(
+              nextPath
+            )}`
+          : undefined;
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+      const { error } = await supabase.auth.signInWithOtp({
+        email: e1,
+        options: {
+          emailRedirectTo: redirectTo,
+        },
+      });
 
-    if (userError || !user) {
-      setError("You are not signed in. Sign in first.");
-      return;
+      if (error) throw error;
+
+      setMsg("✅ Check your email for a sign-in link (magic link).");
+    } catch (ex: any) {
+      setErr(safeStr(ex?.message) || "Could not send the magic link.");
+    } finally {
+      setSending(false);
     }
-
-    // assumes profiles.id = auth.user.id and has username
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("id, username")
-      .eq("id", user.id)
-      .maybeSingle<Profile>();
-
-    if (profileError) {
-      console.error(profileError);
-      setError("Could not load your profile.");
-      return;
-    }
-
-    if (!profile || !profile.username) {
-      setError("Profile exists but username is missing.");
-      return;
-    }
-
-    router.push(`/u/${profile.username}`);
   }
 
   return (
     <main
-      style={{
-        minHeight: "100vh",
-        padding: "40px 24px",
-        fontFamily: "system-ui",
-        background: "#f9fafb",
-      }}
+      className="min-h-screen flex items-center justify-center px-4"
+      style={{ background: `linear-gradient(180deg, ${SOFT_BG}, #fff)` }}
     >
-      <div style={{ maxWidth: 460, margin: "0 auto" }}>
-        <h1 style={{ fontSize: 30, fontWeight: 900, marginBottom: 8 }}>
-          Account
-        </h1>
-        <p style={{ fontSize: 14, color: "#4b5563", marginBottom: 16 }}>
-          Use this page to sign in and jump straight to your own profile.
-        </p>
-
-        <div
-          style={{
-            padding: 12,
-            borderRadius: 12,
-            background: "#eef2ff",
-            fontSize: 13,
-            marginBottom: 20,
-          }}
-        >
-          <strong>Status:</strong> {status}
+      <div className="w-full max-w-md rounded-3xl border bg-white p-6 shadow-sm">
+        <div className="mb-5">
+          <div className="text-xs font-semibold tracking-[0.22em] text-slate-500">
+            QUANDR3
+          </div>
+          <h1 className="mt-1 text-2xl font-extrabold" style={{ color: NAVY }}>
+            Log in with Magic Link
+          </h1>
+          <p className="mt-2 text-sm text-slate-600">
+            No password needed. We’ll email you a secure sign-in link.
+          </p>
         </div>
 
-        <button
-          type="button"
-          onClick={goToMyProfile}
-          style={{
-            marginBottom: 20,
-            padding: "10px 18px",
-            borderRadius: 999,
-            border: "none",
-            background: "#1e63f3",
-            color: "#fff",
-            fontWeight: 700,
-            cursor: "pointer",
-          }}
-        >
-          Go to my profile
-        </button>
-
-        {error && (
-          <p style={{ color: "#b91c1c", fontSize: 13, marginTop: 4 }}>
-            {error}
-          </p>
-        )}
-
-        <hr style={{ margin: "24px 0" }} />
-
-        <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>
-          Sign in
-        </h2>
-        <form onSubmit={handleLogin}>
-          <div style={{ marginBottom: 12 }}>
-            <label
-              style={{
-                display: "block",
-                fontSize: 13,
-                fontWeight: 600,
-                marginBottom: 4,
-              }}
-            >
-              Email
-            </label>
+        <form onSubmit={sendMagicLink} className="space-y-3">
+          <label className="block">
+            <span className="text-xs font-bold text-slate-700">Email</span>
             <input
-              type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              style={{
-                width: "100%",
-                padding: 8,
-                borderRadius: 8,
-                border: "1px solid #d1d5db",
-                fontSize: 14,
-              }}
+              placeholder="you@email.com"
+              className="mt-1 w-full rounded-2xl border px-4 py-3 text-sm outline-none focus:ring-2"
+              style={{ borderColor: "rgba(15,23,42,0.12)" }}
+              autoComplete="email"
             />
-          </div>
+          </label>
 
-          <div style={{ marginBottom: 12 }}>
-            <label
-              style={{
-                display: "block",
-                fontSize: 13,
-                fontWeight: 600,
-                marginBottom: 4,
-              }}
-            >
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={{
-                width: "100%",
-                padding: 8,
-                borderRadius: 8,
-                border: "1px solid #d1d5db",
-                fontSize: 14,
-              }}
-            />
-          </div>
+          {err ? (
+            <div className="rounded-2xl border px-4 py-3 text-sm"
+                 style={{ borderColor: "rgba(255,107,107,0.35)", background: "rgba(255,107,107,0.08)", color: NAVY }}>
+              {err}
+            </div>
+          ) : null}
+
+          {msg ? (
+            <div className="rounded-2xl border px-4 py-3 text-sm"
+                 style={{ borderColor: "rgba(0,169,165,0.35)", background: "rgba(0,169,165,0.08)", color: NAVY }}>
+              {msg}
+            </div>
+          ) : null}
 
           <button
             type="submit"
+            disabled={sending}
+            className="w-full rounded-full px-5 py-3 text-sm font-extrabold text-white shadow-sm disabled:opacity-60"
             style={{
-              padding: "10px 18px",
-              borderRadius: 999,
-              border: "none",
-              background: "#0b2343",
-              color: "#fff",
-              fontWeight: 700,
-              cursor: "pointer",
-              marginTop: 4,
+              background:
+                "linear-gradient(90deg, #1e63f3 0%, #00a9a5 50%, #ff6b6b 100%)",
             }}
           >
-            Sign in
+            {sending ? "Sending…" : "Send Magic Link"}
           </button>
         </form>
+
+        <div className="mt-4 flex items-center justify-between text-xs text-slate-600">
+          <Link href="/explore" className="font-semibold" style={{ color: BLUE }}>
+            ← Back to Explore
+          </Link>
+          <Link href="/signup" className="font-semibold" style={{ color: BLUE }}>
+            Create account
+          </Link>
+        </div>
       </div>
     </main>
   );
