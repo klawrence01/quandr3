@@ -8,6 +8,7 @@ import Image from "next/image";
 import { supabase } from "@/utils/supabase/browser";
 
 type AuthedUser = {
+  id: string;
   email?: string | null;
 };
 
@@ -25,10 +26,14 @@ export default function TopNav() {
       try {
         const { data, error } = await supabase.auth.getUser();
         if (!isMounted) return;
+
         if (error || !data.user) {
           setUser(null);
         } else {
-          setUser({ email: data.user.email });
+          setUser({
+            id: data.user.id,
+            email: data.user.email,
+          });
         }
       } catch {
         if (isMounted) setUser(null);
@@ -115,9 +120,18 @@ export default function TopNav() {
           {/* Auth state */}
           {checkingAuth ? null : user ? (
             <div className="flex items-center gap-2">
-              {/* Make the Wayfinder capsule clickable -> member page */}
+              {/* ✅ View Profile (correct route: /u/[id]) */}
               <Link
-                href={`/u/${encodeURIComponent(user.email ?? "")}`}
+                href={`/u/${user.id}`}
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                title="View your public profile"
+              >
+                View Profile
+              </Link>
+
+              {/* Capsule (also clickable to profile) */}
+              <Link
+                href={`/u/${user.id}`}
                 className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 shadow-sm cursor-pointer"
               >
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white">
