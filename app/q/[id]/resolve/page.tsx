@@ -19,11 +19,12 @@ const TEAL = "#00a9a5";
 const CORAL = "#ff6b6b";
 const SOFT_BG = "#f5f7fc";
 
-const ALLOWED = ["A", "B", "C", "D"];
+const ALLOWED = ["A", "B", "C", "D"] as const;
+type Label = (typeof ALLOWED)[number];
 
-function cleanLabel(x?: any) {
+function cleanLabel(x?: any): Label | "" {
   const s = (x || "").toString().trim().toUpperCase();
-  return ALLOWED.includes(s) ? s : "";
+  return (ALLOWED as readonly string[]).includes(s) ? (s as Label) : "";
 }
 
 function fmt(ts?: string) {
@@ -35,14 +36,14 @@ function fmt(ts?: string) {
   }
 }
 
-function computeInternetDecided(counts: any) {
-  const entries = ALLOWED.map((L) => [L, counts?.[L] || 0]);
-  const sorted = entries.slice().sort((a: any, b: any) => (b?.[1] || 0) - (a?.[1] || 0));
+function computeInternetDecided(counts: Record<Label, number>) {
+  const entries = ALLOWED.map((L) => [L, counts[L] || 0] as const);
+  const sorted = entries.slice().sort((a, b) => (b[1] || 0) - (a[1] || 0));
   const top = sorted[0];
-  if (!top || (top[1] || 0) <= 0) return { label: "", isTie: false, tied: [] };
+  if (!top || (top[1] || 0) <= 0) return { label: "" as Label | "", isTie: false, tied: [] as Label[] };
 
-  const tied = sorted.filter((x: any) => (x?.[1] || 0) === top[1]).map((x: any) => x[0]);
-  return { label: tied.length === 1 ? top[0] : "", isTie: tied.length > 1, tied };
+  const tied = sorted.filter((x) => (x[1] || 0) === top[1]).map((x) => x[0]);
+  return { label: tied.length === 1 ? top[0] : ("" as Label | ""), isTie: tied.length > 1, tied };
 }
 
 export default function ResolveQuandr3Page() {
@@ -53,33 +54,35 @@ export default function ResolveQuandr3Page() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  const [q, setQ] = useState(null);
+  const [q, setQ] = useState<any>(null);
 
   // ✅ IMPORTANT: store only safe (non-null) option rows
-  const [options, setOptions] = useState([]);
+  const [options, setOptions] = useState<any[]>([]);
 
-  const [counts, setCounts] = useState({ A: 0, B: 0, C: 0, D: 0 });
-  const [reasonsByLabel, setReasonsByLabel] = useState({ A: [], B: [], C: [], D: [] });
+  const [counts, setCounts] = useState<Record<Label, number>>({ A: 0, B: 0, C: 0, D: 0 });
+  const [reasonsByLabel, setReasonsByLabel] = useState<Record<Label, string[]>>({
+    A: [],
+    B: [],
+    C: [],
+    D: [],
+  });
 
-  const [finalChoice, setFinalChoice] = useState("");
+  const [finalChoice, setFinalChoice] = useState<Label | "">("");
   const [finalNote, setFinalNote] = useState("");
 
   const totalVotes = useMemo(() => {
-    return ALLOWED.reduce((sum, L) => sum + (counts?.[L] || 0), 0);
+    return ALLOWED.reduce((sum, L) => sum + (counts[L] || 0), 0);
   }, [counts]);
 
-  function pct(label: string) {
+  function pct(label: Label) {
     if (!totalVotes) return 0;
-    return Math.round(((counts?.[label] || 0) / totalVotes) * 100);
+    return Math.round(((counts[label] || 0) / totalVotes) * 100);
   }
 
   // ✅ helper: grab option text by label (so we can display option copy)
-  function optionText(label: string) {
-    const L = cleanLabel(label);
-    if (!L) return "";
-    const row: any = (options || []).find((o: any) => cleanLabel(o?.label) === L);
-    const txt = (row?.value ?? "").toString().trim();
-    return txt;
+  function optionText(label: Label) {
+    const row: any = (options || []).find((o: any) => cleanLabel(o?.label) === label);
+    return ((row?.value ?? "") as any).toString().trim();
   }
 
   const internet = useMemo(() => computeInternetDecided(counts), [counts]);
@@ -107,19 +110,19 @@ export default function ResolveQuandr3Page() {
 
       const { data: choiceRows } = await supabase.from("quandr3_choices").select("label,text").eq("quandr3_id", id);
 
-      const nextCounts: any = { A: 0, B: 0, C: 0, D: 0 };
-      const nextReasons: any = { A: [], B: [], C: [], D: [] };
+      const nextCounts: Record<Label, number> = { A: 0, B: 0, C: 0, D: 0 };
+      const nextReasons: Record<Label, string[]> = { A: [], B: [], C: [], D: [] };
 
       (choiceRows || []).forEach((r: any) => {
         const L = cleanLabel(r?.label);
         if (L) {
-          nextCounts[L]++;
+          nextCounts[L] += 1;
           const t = (r?.text || "").toString().trim();
           if (t) nextReasons[L].push(t);
         }
       });
 
-      // ✅ null-safe options (prevents “o is possibly null” + keeps UI stable)
+      // ✅ null-safe options
       const safeOptions = (oRows || [])
         .filter(Boolean)
         .filter((o: any) => cleanLabel(o?.label))
@@ -198,10 +201,10 @@ export default function ResolveQuandr3Page() {
           ) : (
             <>
               <h1 className="text-3xl font-extrabold" style={{ color: NAVY }}>
-                Resolve: {(q as any).title}
+                Resolve: {q.title}
               </h1>
 
-              <p className="mt-2 text-slate-700">{(q as any).prompt || (q as any).context}</p>
+              <p className="mt-2 text-slate-700">{q.prompt || q.context}</p>
 
               {/* Internet Decided (not final) */}
               <div className="mt-5 rounded-2xl border bg-slate-50 p-4">
@@ -220,7 +223,8 @@ export default function ResolveQuandr3Page() {
                   <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
                     Top Voted: <span style={{ color: BLUE }}>{internet.label}</span>{" "}
                     <span className="text-slate-500 font-semibold">
-                      ({counts?.[internet.label] || 0} votes • {pct(internet.label)}% • {totalVotes} total)
+                      ({internet.label ? counts[internet.label] : 0} votes •{" "}
+                      {internet.label ? pct(internet.label) : 0}% • {totalVotes} total)
                     </span>
                   </div>
                 )}
@@ -231,18 +235,15 @@ export default function ResolveQuandr3Page() {
               </div>
 
               {/* Final Decision (Curioso) */}
-              {cleanLabel((q as any)?.resolved_choice_label) ? (
+              {cleanLabel(q?.resolved_choice_label) ? (
                 <div className="mt-4 rounded-2xl border p-4">
-                  <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">FINAL DECISION (CURIO SO)</div>
+                  <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">FINAL DECISION (CURIOUSO)</div>
                   <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
-                    Final Decision:{" "}
-                    <span style={{ color: BLUE }}>{cleanLabel((q as any)?.resolved_choice_label)}</span>{" "}
-                    <span className="text-slate-500 font-semibold">
-                      {(q as any)?.resolved_at ? `• ${fmt((q as any).resolved_at)}` : ""}
-                    </span>
+                    Final Decision: <span style={{ color: BLUE }}>{cleanLabel(q?.resolved_choice_label)}</span>{" "}
+                    <span className="text-slate-500 font-semibold">{q?.resolved_at ? `• ${fmt(q.resolved_at)}` : ""}</span>
                   </div>
-                  {(q as any)?.resolution_note ? (
-                    <div className="mt-2 text-sm text-slate-700">{(q as any).resolution_note}</div>
+                  {q?.resolution_note ? (
+                    <div className="mt-2 text-sm text-slate-700">{q.resolution_note}</div>
                   ) : (
                     <div className="mt-2 text-xs text-slate-500">(No final note provided.)</div>
                   )}
@@ -263,12 +264,12 @@ export default function ResolveQuandr3Page() {
                     )}
 
                     <div className="mt-2 text-sm text-slate-700">
-                      Votes: <b>{counts?.[L] || 0}</b> ({pct(L)}%)
+                      Votes: <b>{counts[L] || 0}</b> ({pct(L)}%)
                     </div>
 
                     <div className="mt-3 text-xs font-extrabold tracking-[0.18em] text-slate-500">COMMUNITY REASONS</div>
                     <ul className="mt-2 list-disc pl-5 text-xs text-slate-600 space-y-1">
-                      {(reasonsByLabel as any)?.[L]?.slice?.(0, 6)?.map?.((t: any, i: any) => (
+                      {(reasonsByLabel[L] || []).slice(0, 6).map((t, i) => (
                         <li key={i}>{t}</li>
                       ))}
                     </ul>
