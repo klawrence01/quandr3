@@ -29,7 +29,25 @@ function safeStr(x: any) {
 }
 
 /* =========================
-   ✅ NEW: time-aware status helpers
+   ✅ NEW: location parser
+   Expects: "City, County, ST" (or any subset)
+========================= */
+function parseLocation(loc?: string) {
+  const parts = safeStr(loc)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  return {
+    city: parts[0] || "",
+    region: parts[1] || "", // e.g. "New Haven County"
+    state: parts[2] || "", // e.g. "CT"
+    country: parts[3] || "",
+  };
+}
+
+/* =========================
+   ✅ time-aware status helpers
 ========================= */
 
 function hoursLeft(closesAt?: string) {
@@ -72,6 +90,7 @@ export default function ExploreClient() {
   const [meId, setMeId] = useState("");
   const [meCity, setMeCity] = useState("");
   const [meState, setMeState] = useState("");
+  const [meRegion, setMeRegion] = useState(""); // ✅ county/region fallback
 
   // UI filters
   const [scope, setScope] = useState<"global" | "local">("global");
@@ -130,10 +149,22 @@ export default function ExploreClient() {
 
       if (!uid) return;
 
-      const { data: prof } = await supabase.from("profiles").select("city,state").eq("id", uid).maybeSingle();
+      // ✅ pull location (preferred) + keep your old city/state fallback
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("location,city,state")
+        .eq("id", uid)
+        .maybeSingle();
 
-      setMeCity(safeStr(prof?.city).trim());
-      setMeState(safeStr(prof?.state).trim());
+      const parsed = parseLocation(prof?.location);
+
+      const city = safeStr(parsed.city || prof?.city).trim();
+      const state = safeStr(parsed.state || prof?.state).trim();
+      const region = safeStr(parsed.region).trim();
+
+      setMeCity(city);
+      setMeState(state);
+      setMeRegion(region);
     } catch {
       // ok
     }
@@ -146,10 +177,10 @@ export default function ExploreClient() {
     try {
       await loadMe();
 
-      // ✅ FIX: select prompt (not context)
+      // ✅ include region so local can filter by county/region too
       const { data, error } = await supabase
         .from("quandr3s")
-        .select("id,title,prompt,category,status,created_at,closes_at,city,state,author_id")
+        .select("id,title,prompt,category,status,created_at,closes_at,city,region,state,author_id")
         .order("created_at", { ascending: false })
         .limit(SAFE_LIMIT);
 
@@ -237,17 +268,30 @@ export default function ExploreClient() {
   const filtered = useMemo(() => {
     let out = [...(rows || [])];
 
-    // Local/Global
+    // ✅ Local/Global: City-first, County/Region fallback
     if (scope === "local") {
-      const mc = meCity.trim().toLowerCase();
-      const ms = meState.trim().toLowerCase();
+      const mc = safeStr(meCity).trim().toLowerCase();
+      const mr = safeStr(meRegion).trim().toLowerCase();
+      const ms = safeStr(meState).trim().toLowerCase();
 
-      if (mc || ms) {
+      if (mc || mr || ms) {
         out = out.filter((r) => {
           const rc = safeStr(r?.city).trim().toLowerCase();
+          const rr = safeStr(r?.region).trim().toLowerCase();
           const rs = safeStr(r?.state).trim().toLowerCase();
-          if (ms && rs && rs === ms) return true;
+
+          // ✅ if you want strict "in my state only", uncomment this:
+          // if (ms && rs && rs !== ms) return false;
+
+          // City match wins
           if (mc && rc && rc === mc) return true;
+
+          // County/Region fallback
+          if (mr && rr && rr === mr) return true;
+
+          // final soft fallback: state-only (prevents empty local feed early on)
+          if (!mc && !mr && ms && rs && rs === ms) return true;
+
           return false;
         });
       }
@@ -263,7 +307,7 @@ export default function ExploreClient() {
       out = out.filter((r) => safeStr(r?.category).trim() === categoryFilter);
     }
 
-    // Search (title/prompt/category/city/state/status/author)
+    // Search (title/prompt/category/city/region/state/status/author)
     const q = searchQ.trim().toLowerCase();
     if (q) {
       out = out.filter((r) => {
@@ -272,8 +316,8 @@ export default function ExploreClient() {
           r?.prompt,
           r?.category,
           r?.city,
+          r?.region,
           r?.state,
-          // include both raw and effective status strings for search matching
           r?.status,
           effectiveStatus(r),
           r?.author_id,
@@ -285,7 +329,7 @@ export default function ExploreClient() {
     }
 
     return out;
-  }, [rows, scope, statusFilter, categoryFilter, searchQ, meCity, meState]);
+  }, [rows, scope, statusFilter, categoryFilter, searchQ, meCity, meRegion, meState]);
 
   return (
     <div>
