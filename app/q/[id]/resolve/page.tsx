@@ -36,14 +36,15 @@ function fmt(ts: any) {
 }
 
 function computeInternetDecided(counts: any) {
-  const entries = ALLOWED.map((L) => [L, Number(counts?.[L] || 0)]);
-  entries.sort((a: any, b: any) => (b?.[1] || 0) - (a?.[1] || 0));
+  // force a stable numeric shape for TS
+  const entries = ALLOWED.map((L) => ({ label: L, votes: Number(counts?.[L] || 0) }));
+  entries.sort((a, b) => b.votes - a.votes);
 
   const top = entries[0];
-  if (!top || (top[1] || 0) <= 0) return { label: "", isTie: false, tied: [] };
+  if (!top || top.votes <= 0) return { label: "", isTie: false, tied: [] };
 
-  const tied = entries.filter((x: any) => (x?.[1] || 0) === top[1]).map((x: any) => x[0]);
-  return { label: tied.length === 1 ? top[0] : "", isTie: tied.length > 1, tied };
+  const tied = entries.filter((x) => x.votes === top.votes).map((x) => x.label);
+  return { label: tied.length === 1 ? top.label : "", isTie: tied.length > 1, tied };
 }
 
 export default function ResolveQuandr3Page() {
