@@ -44,7 +44,10 @@ export default function ResolveQuandr3Page() {
   const [err, setErr] = useState("");
 
   const [q, setQ] = useState<any>(null);
+
+  // ✅ IMPORTANT: store only safe (non-null) option rows
   const [options, setOptions] = useState<any[]>([]);
+
   const [counts, setCounts] = useState<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0 });
   const [reasonsByLabel, setReasonsByLabel] = useState<Record<string, string[]>>({
     A: [],
@@ -63,6 +66,15 @@ export default function ResolveQuandr3Page() {
   function pct(label: string) {
     if (!totalVotes) return 0;
     return Math.round(((counts[label] || 0) / totalVotes) * 100);
+  }
+
+  // ✅ helper: grab option text by label (so we can display option copy)
+  function optionText(label: string) {
+    const L = cleanLabel(label);
+    if (!L) return "";
+    const row = (options || []).find((o: any) => cleanLabel(o?.label) === L);
+    const txt = (row?.value ?? "").toString().trim();
+    return txt;
   }
 
   async function load() {
@@ -89,21 +101,33 @@ export default function ResolveQuandr3Page() {
         .select("label,text")
         .eq("quandr3_id", id);
 
-      const counts: any = { A: 0, B: 0, C: 0, D: 0 };
-      const reasons: any = { A: [], B: [], C: [], D: [] };
+      const nextCounts: any = { A: 0, B: 0, C: 0, D: 0 };
+      const nextReasons: any = { A: [], B: [], C: [], D: [] };
 
       (choiceRows || []).forEach((r: any) => {
         const L = cleanLabel(r?.label);
         if (L) {
-          counts[L]++;
-          if (r?.text) reasons[L].push(r.text);
+          nextCounts[L]++;
+          const t = (r?.text || "").toString().trim();
+          if (t) nextReasons[L].push(t);
         }
       });
 
+      // ✅ THIS is the null-safe fix (prevents TS: “o is possibly null”)
+      const safeOptions = (oRows || [])
+        .filter(Boolean)
+        .filter((o: any) => cleanLabel(o?.label))
+        .map((o: any) => ({
+          id: o.id,
+          label: cleanLabel(o.label),
+          value: (o.value ?? "").toString(),
+          order: o.order,
+        }));
+
       setQ(qRow);
-      setOptions((oRows || []).filter((o: any) => cleanLabel(o?.label)));
-      setCounts(counts);
-      setReasonsByLabel(reasons);
+      setOptions(safeOptions);
+      setCounts(nextCounts);
+      setReasonsByLabel(nextReasons);
     } catch (e: any) {
       setErr(e?.message || "Failed to load resolve page.");
     } finally {
@@ -113,6 +137,7 @@ export default function ResolveQuandr3Page() {
 
   useEffect(() => {
     if (id) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   async function submitResolution() {
@@ -173,7 +198,15 @@ export default function ResolveQuandr3Page() {
                     <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                       Option {L}
                     </div>
-                    <div className="mt-1 text-sm text-slate-700">
+
+                    {/* ✅ show option text if we have it */}
+                    {optionText(L) ? (
+                      <div className="mt-1 text-sm font-semibold text-slate-900">{optionText(L)}</div>
+                    ) : (
+                      <div className="mt-1 text-xs text-slate-500">(No option text found)</div>
+                    )}
+
+                    <div className="mt-2 text-sm text-slate-700">
                       Votes: <b>{counts[L]}</b> ({pct(L)}%)
                     </div>
 
