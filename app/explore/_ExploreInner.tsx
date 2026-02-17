@@ -1,189 +1,240 @@
 // /app/explore/_ExploreInner.tsx
+"use client";
 // @ts-nocheck
 
 import Link from "next/link";
-import Image from "next/image";
+import { useMemo, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 const NAVY = "#0b2343";
+const BLUE = "#1e63f3";
 const TEAL = "#00a9a5";
 const CORAL = "#ff6b6b";
-const BLUE = "#1e63f3";
 const SOFT_BG = "#f5f7fc";
 
-function fmtDateTime(ts?: string) {
+function fmt(ts?: string) {
   if (!ts) return "";
-  return new Date(ts).toLocaleString();
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return ts;
+  }
 }
 
 function hoursLeft(closesAt?: string) {
-  if (!closesAt) return 0;
-  const diff = new Date(closesAt).getTime() - Date.now();
-  return Math.max(0, Math.ceil(diff / 36e5));
+  if (!closesAt) return null;
+  const end = new Date(closesAt).getTime();
+  const diff = end - Date.now();
+  return Math.max(0, Math.ceil(diff / 3600000));
 }
 
-function statusPill(status: string) {
-  if (status === "open") return { label: "Open", color: TEAL };
-  if (status === "awaiting_user") return { label: "Internet Decided", color: CORAL };
-  return { label: "Resolved", color: BLUE };
+/**
+ * ✅ A) Effective status for Explore UI
+ * - If status=open but closes_at is in the past (or missing), treat as closed for badge + ordering.
+ * - awaiting_user is "closed" in UI.
+ */
+function effectiveStatus(row: any) {
+  const raw = (row?.status || "").toLowerCase();
+
+  // already closed/resolved by backend state
+  if (raw === "awaiting_user") return "closed";
+  if (raw === "resolved") return "resolved";
+
+  if (raw === "open") {
+    const ca = row?.closes_at;
+    if (!ca) return "open"; // if you allow open with no closes_at, keep as open
+    const end = new Date(ca).getTime();
+    if (!isFinite(end)) return "open";
+    if (Date.now() >= end) return "closed"; // expired open becomes closed in UI
+    return "open";
+  }
+
+  return "other";
 }
 
-function svgBannerDataUrl(categoryLabel: string) {
-  const label = (categoryLabel || "QUANDR3").toUpperCase();
-  const safe = label.replace(/[^A-Z0-9 \-_.]/g, "");
-  const bg1 = "#0b2343";
-  const bg2 = "#1e63f3";
-  const bg3 = "#00a9a5";
-  const fg = "#ffffff";
-
-  const svg = `
-  <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420">
-    <defs>
-      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="${bg1}"/>
-        <stop offset="0.55" stop-color="${bg2}"/>
-        <stop offset="1" stop-color="${bg3}"/>
-      </linearGradient>
-      <filter id="s" x="-20%" y="-20%" width="140%" height="140%">
-        <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#000" flood-opacity="0.25"/>
-      </filter>
-    </defs>
-
-    <rect width="1200" height="420" rx="40" fill="url(#g)"/>
-
-    <g filter="url(#s)">
-      <rect x="56" y="64" width="1088" height="292" rx="28" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.18)"/>
-    </g>
-
-    <text x="88" y="140" fill="${fg}" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" opacity="0.95">
-      REAL PEOPLE. REAL DILEMMAS.
-    </text>
-
-    <text x="88" y="220" fill="${fg}" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="900">
-      ${safe}
-    </text>
-
-    <text x="88" y="282" fill="${fg}" font-family="Arial, Helvetica, sans-serif" font-size="26" opacity="0.92">
-      Ask • Share • Decide
-    </text>
-
-    <circle cx="1120" cy="112" r="28" fill="rgba(255,255,255,0.18)"/>
-    <text x="1106" y="122" fill="${fg}" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="800">?</text>
-  </svg>`.trim();
-
-  const encoded = encodeURIComponent(svg).replace(/'/g, "%27").replace(/"/g, "%22");
-  return `data:image/svg+xml;charset=utf-8,${encoded}`;
+function statusBadge(status?: string) {
+  const s = (status || "").toLowerCase();
+  if (s === "open") return { bg: "#e8f3ff", fg: BLUE, label: "open" };
+  if (s === "closed") return { bg: "#fff4e6", fg: "#b45309", label: "closed" };
+  if (s === "resolved") return { bg: "#ecfdf5", fg: "#059669", label: "resolved" };
+  return { bg: "#f1f5f9", fg: "#334155", label: status || "unknown" };
 }
 
-function pickCardImageSrc(r: any) {
-  if (r?.media_url) return r.media_url;
-  if (r?.hero_image_url) return r.hero_image_url;
-  return svgBannerDataUrl(r?.category || "QUANDR3");
+function tiny(s?: string, n = 52) {
+  const x = (s || "").toString().trim();
+  if (!x) return "";
+  if (x.length <= n) return x;
+  return x.slice(0, n - 1) + "…";
 }
 
-function canShowDiscussionHint(r: any) {
-  return r?.status === "resolved";
+async function shareUrl(url: string, title?: string) {
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: title || "Quandr3", url });
+      return;
+    }
+  } catch {}
+  try {
+    await navigator.clipboard.writeText(url);
+    alert("Link copied.");
+  } catch {
+    try {
+      prompt("Copy this link:", url);
+    } catch {}
+  }
 }
 
-function displayCuriosoName(r: any) {
-  const name =
-    (r?._curioso_name || "").trim() ||
-    (r?.creator_name || "").trim() ||
-    (r?.created_by_name || "").trim() ||
-    (r?.curioso_name || "").trim() ||
-    (r?.author_name || "").trim() ||
-    "";
-
-  if (name) return name;
-
-  const id =
-    r?._curioso_id ||
-    r?.created_by ||
-    r?.creator_id ||
-    r?.user_id ||
-    r?.curioso_id ||
-    r?.author_id ||
-    null;
-
-  if (id) return `Curioso ${String(id).slice(0, 6)}`;
-  return "Curioso";
+function getOrigin() {
+  if (typeof window === "undefined") return "";
+  return window.location.origin || "";
 }
 
-export default function ExploreInner({
-  loading,
-  err,
-  rows,
-  q,
-  setQ,
-  status,
-  setStatus,
-  sort,
-  setSort,
-  scope,
-  setScope,
-  activeCategory,
-  setActiveCategory,
-  categories,
-}: any) {
-  const STATUS_TABS = [
-    { key: "all", label: "All" },
-    { key: "open", label: "Open" },
-    { key: "awaiting_user", label: "Internet Decided" },
-    { key: "resolved", label: "Resolved" },
-  ];
+export default function ExploreInner(props: any) {
+  const router = useRouter();
 
-  const safeRows = rows || [];
+  const {
+    loading,
+    error,
+    rows,
+    rawRows,
+    meCity,
+    meState,
+    scope,
+    setScope,
+    statusFilter,
+    setStatusFilter,
+    categoryFilter,
+    setCategoryFilter,
+    categories,
+    searchOpen,
+    setSearchOpen,
+    searchQ,
+    setSearchQ,
+  } = props;
+
+  // PWA install support
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [installReady, setInstallReady] = useState(false);
+
+  useEffect(() => {
+    function onBeforeInstallPrompt(e: any) {
+      e.preventDefault();
+      setInstallPrompt(e);
+      setInstallReady(true);
+    }
+    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    return () => window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+  }, []);
+
+  async function handleInstall() {
+    if (installPrompt) {
+      try {
+        installPrompt.prompt();
+        await installPrompt.userChoice;
+        setInstallPrompt(null);
+        setInstallReady(false);
+        return;
+      } catch {}
+    }
+
+    alert(
+      "Install Quandr3:\n\n" +
+        "• iPhone/iPad (Safari): tap Share → Add to Home Screen\n" +
+        "• Android (Chrome): tap ⋮ menu → Install app / Add to Home screen\n" +
+        "• Desktop (Chrome/Edge): look for Install in the address bar or browser menu"
+    );
+  }
+
+  const liveCounts = useMemo(() => {
+    const all = rawRows || [];
+    const open = all.filter((r: any) => effectiveStatus(r) === "open").length;
+    return { open, total: all.length };
+  }, [rawRows]);
+
+  const openNow = useMemo(() => {
+    const list = (rows || []).filter((r: any) => effectiveStatus(r) === "open");
+    return list
+      .slice()
+      .sort((a: any, b: any) => {
+        const ah = hoursLeft(a?.closes_at) ?? 999999;
+        const bh = hoursLeft(b?.closes_at) ?? 999999;
+        return ah - bh;
+      })
+      .slice(0, 6);
+  }, [rows]);
+
+  const feed = useMemo(() => {
+    const list = [...(rows || [])];
+
+    const rank = (row: any) => {
+      const s = effectiveStatus(row);
+      if (s === "open") return 0;
+      if (s === "closed") return 1;
+      if (s === "resolved") return 2;
+      return 3;
+    };
+
+    return list
+      .slice()
+      .sort((a: any, b: any) => {
+        const ra = rank(a);
+        const rb = rank(b);
+        if (ra !== rb) return ra - rb;
+
+        // If both are open, close-soonest first
+        if (ra === 0) {
+          const ah = hoursLeft(a?.closes_at) ?? 999999;
+          const bh = hoursLeft(b?.closes_at) ?? 999999;
+          if (ah !== bh) return ah - bh;
+        }
+
+        // Otherwise newest first
+        return new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime();
+      });
+  }, [rows]);
+
+  function goToQuandr3(id: string) {
+    router.push(`/q/${id}`);
+  }
+
+  function buildShareLink(id: string) {
+    const origin = getOrigin();
+    return origin ? `${origin}/q/${id}` : `/q/${id}`;
+  }
 
   return (
-    <div style={{ minHeight: "100vh", background: SOFT_BG }}>
-      <div className="mx-auto max-w-6xl px-4 py-8">
-        {/* SOUL HEADER */}
-        <div className="rounded-3xl bg-white border p-6">
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-            <div>
-              <div className="text-xs tracking-widest font-semibold text-slate-500">
-                REAL PEOPLE. REAL DILEMMAS.
-              </div>
-              <h1 className="mt-1 text-4xl font-extrabold" style={{ color: NAVY }}>
-                Explore
-              </h1>
-              <p className="mt-2 text-slate-600 max-w-2xl">
-                This is where decisions live. Browse open Quandr3s, see what the internet decided,
-                and learn from final outcomes — real questions, real reasoning, real closure.
-              </p>
+    <main style={{ minHeight: "100vh", background: SOFT_BG }}>
+      <div className="mx-auto max-w-5xl px-4 py-10">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">EXPLORE</div>
+            <h1 className="mt-2 text-4xl font-extrabold leading-tight" style={{ color: NAVY }}>
+              Help someone decide.
+            </h1>
+            <p className="mt-2 text-slate-700">
+              Real people, real dilemmas. Pick A–D and (if you can) add a quick “why.”
+            </p>
+          </div>
 
-              <div className="mt-4 flex flex-wrap gap-3">
-                <Link
-                  href="/q/create"
-                  className="inline-flex items-center rounded-full px-5 py-3 text-white font-semibold"
-                  style={{ background: "linear-gradient(90deg, #1e63f3 0%, #ff6b6b 100%)" }}
-                >
-                  Create a Quandr3
-                </Link>
-
-                <Link
-                  href="/about"
-                  className="inline-flex items-center rounded-full px-5 py-3 border font-semibold"
-                  style={{ color: NAVY }}
-                >
-                  About
-                </Link>
-
-                <Link
-                  href="/contact"
-                  className="inline-flex items-center rounded-full px-5 py-3 border font-semibold"
-                  style={{ color: NAVY }}
-                >
-                  Contact
-                </Link>
-              </div>
+          <div className="shrink-0 rounded-2xl border bg-white px-5 py-4 text-sm shadow-sm">
+            <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">LIVE NOW</div>
+            <div className="mt-1 font-extrabold" style={{ color: NAVY }}>
+              <span className="text-lg">{liveCounts.open}</span> open{" "}
+              <span className="text-slate-400">•</span> <span className="text-lg">{liveCounts.total}</span> total
             </div>
+          </div>
+        </div>
 
-            {/* Global / Local toggle */}
-            <div className="rounded-2xl border p-3 w-full md:w-[320px]">
-              <div className="flex gap-2">
+        {/* Control bar */}
+        <div className="mt-6 rounded-[24px] border bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex overflow-hidden rounded-full border">
                 <button
-                  onClick={() => setScope?.("global")}
-                  className="flex-1 rounded-xl px-4 py-2 font-semibold border"
+                  type="button"
+                  onClick={() => setScope("global")}
+                  className="px-4 py-2 text-sm font-extrabold"
                   style={{
                     background: scope === "global" ? NAVY : "white",
                     color: scope === "global" ? "white" : NAVY,
@@ -192,251 +243,329 @@ export default function ExploreInner({
                   Global
                 </button>
                 <button
-                  onClick={() => setScope?.("local")}
-                  className="flex-1 rounded-xl px-4 py-2 font-semibold border"
+                  type="button"
+                  onClick={() => setScope("local")}
+                  className="px-4 py-2 text-sm font-extrabold"
                   style={{
                     background: scope === "local" ? NAVY : "white",
                     color: scope === "local" ? "white" : NAVY,
                   }}
+                  title={
+                    scope === "local"
+                      ? `Local: ${meCity || "—"}${meCity && meState ? ", " : ""}${meState || "—"}`
+                      : ""
+                  }
                 >
                   Local
                 </button>
               </div>
-              <div className="mt-2 text-xs text-slate-600">
-                Local shows posts with a city/state attached.
-              </div>
-            </div>
-          </div>
 
-          {/* Search row */}
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-12 gap-3">
-            <input
-              className="md:col-span-7 rounded-2xl border px-4 py-3"
-              placeholder="Search title, context, city, or id…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-
-            <select
-              className="md:col-span-3 rounded-2xl border px-4 py-3"
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-            >
-              <option value="all">All statuses</option>
-              <option value="open">Open</option>
-              <option value="awaiting_user">Internet Decided</option>
-              <option value="resolved">Resolved</option>
-            </select>
-
-            <select
-              className="md:col-span-2 rounded-2xl border px-4 py-3"
-              value={sort}
-              onChange={(e) => setSort(e.target.value)}
-            >
-              <option value="trending">Trending</option>
-              <option value="new">Newest</option>
-              <option value="closing">Closing Soon</option>
-            </select>
-          </div>
-
-          {/* Status buttons */}
-          <div className="mt-4 rounded-2xl border bg-white p-2">
-            <div className="flex flex-wrap gap-2">
-              {STATUS_TABS.map((t) => {
-                const selected = status === t.key;
-                return (
+              <div className="inline-flex flex-wrap gap-2">
+                {[
+                  ["all", "All"],
+                  ["open", "Open"],
+                  ["closed", "Closed"],
+                  ["resolved", "Resolved"],
+                ].map(([k, label]) => (
                   <button
-                    key={t.key}
-                    onClick={() => setStatus?.(t.key)}
-                    className="rounded-full px-4 py-2 border font-semibold text-sm"
+                    key={k}
+                    type="button"
+                    onClick={() => setStatusFilter(k)}
+                    className="rounded-full border px-4 py-2 text-sm font-extrabold"
                     style={{
-                      background: selected ? NAVY : "white",
-                      color: selected ? "white" : NAVY,
+                      background: statusFilter === k ? "#eef2ff" : "white",
+                      color: NAVY,
+                      borderColor: statusFilter === k ? "#c7d2fe" : "#e2e8f0",
                     }}
                   >
-                    {t.label}
+                    {label}
                   </button>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          </div>
-        </div>
 
-        {/* CATEGORY PILLS */}
-        <div className="mt-6 rounded-3xl bg-white border p-4">
-          <div className="flex flex-wrap gap-2">
-            {(categories || ["all"]).map((c: string) => {
-              const selected = (activeCategory || "all") === c;
-              return (
-                <button
-                  key={c}
-                  onClick={() => setActiveCategory?.(c)}
-                  className="rounded-full px-4 py-2 border font-semibold text-sm"
-                  style={{
-                    background: selected ? NAVY : "white",
-                    color: selected ? "white" : NAVY,
-                  }}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="rounded-full border bg-white px-3 py-2">
+                <label className="mr-2 text-xs font-extrabold tracking-[0.18em] text-slate-500">CATEGORY</label>
+                <select
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  className="bg-transparent text-sm font-bold outline-none"
+                  style={{ color: NAVY }}
                 >
-                  {c}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+                  {(categories || ["all"]).map((c: string) => (
+                    <option key={c} value={c}>
+                      {c === "all" ? "All" : c}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-        {/* 4 STAT BOXES */}
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="rounded-3xl bg-white border p-5">
-            <div className="text-xs tracking-widest font-semibold text-slate-500">TOP CURIOSO</div>
-            <div className="mt-2 text-slate-700">Coming soon (needs stats wiring).</div>
-          </div>
+              <button
+                type="button"
+                onClick={() => setSearchOpen(true)}
+                className="inline-flex items-center justify-center rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50"
+                style={{ color: NAVY }}
+                aria-label="Search"
+                title="Search"
+              >
+                🔎 Search
+              </button>
 
-          <div className="rounded-3xl bg-white border p-5">
-            <div className="text-xs tracking-widest font-semibold text-slate-500">TOP WAYFINDER</div>
-            <div className="mt-2 text-slate-700">Coming soon (needs stats wiring).</div>
-          </div>
+              <Link
+                href="/blog"
+                className="inline-flex items-center justify-center rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50"
+                style={{ color: NAVY }}
+                title="Blog"
+              >
+                📝 Blog
+              </Link>
 
-          <div className="rounded-3xl bg-white border p-5">
-            <div className="text-xs tracking-widest font-semibold text-slate-500">TOP QUANDR3</div>
-            <div className="mt-2 text-slate-700">Coming soon (needs stats wiring).</div>
-          </div>
+              <button
+                type="button"
+                onClick={handleInstall}
+                className="inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
+                style={{ background: installReady ? BLUE : NAVY }}
+                title={installReady ? "Install Quandr3" : "Add to Home Screen"}
+              >
+                ⬇️ {installReady ? "Install" : "Add"}
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setSort?.("trending");
-              const el = document.getElementById("feed");
-              if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
-            className="rounded-3xl bg-white border p-5 text-left hover:shadow-sm transition"
-          >
-            <div className="text-xs tracking-widest font-semibold text-slate-500">TRENDING</div>
-            <div className="mt-2 text-slate-700">Click to sort the feed by Trending.</div>
-            <div className="mt-3 text-sm font-semibold" style={{ color: NAVY }}>
-              {sort === "trending" ? "✓ Trending is active" : "Switch to Trending"}
+              <Link
+                href="/q/create"
+                className="rounded-full px-5 py-2 text-sm font-extrabold text-white shadow-sm hover:opacity-95"
+                style={{ background: BLUE }}
+              >
+                Create a Quandr3
+              </Link>
             </div>
-          </button>
-        </div>
+          </div>
 
-        {/* FEED */}
-        <div id="feed" className="mt-6">
-          {loading && <div className="text-slate-600">Loading…</div>}
-
-          {/* Hide debug error in production */}
-          {err && process.env.NODE_ENV !== "production" && (
-            <div className="text-red-600">{err}</div>
-          )}
-
-          <div className="flex flex-col gap-5">
-            {safeRows.map((r: any) => {
-              const pill = statusPill(r.status);
-              const imgSrc = pickCardImageSrc(r);
-              const curiosoName = displayCuriosoName(r);
-
-              return (
-                <div key={r.id} className="rounded-3xl bg-white border overflow-hidden">
-                  <div className="relative w-full h-[220px] md:h-[260px]">
-                    <Image
-                      src={imgSrc}
-                      alt={r.category || "Quandr3"}
-                      fill
-                      className="object-cover"
-                      sizes="(max-width: 768px) 100vw, 1100px"
-                      unoptimized
-                      priority={false}
-                    />
-
-                    <div className="absolute left-4 top-4 flex gap-2">
-                      {r.category && (
-                        <span
-                          className="text-xs px-3 py-1 rounded-full bg-white/90 border font-semibold"
-                          style={{ color: NAVY }}
-                        >
-                          {String(r.category).toUpperCase()}
-                        </span>
-                      )}
-                      <span
-                        className="text-xs px-3 py-1 rounded-full text-white font-semibold"
-                        style={{ background: pill.color }}
-                      >
-                        {pill.label}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="p-6">
-                    <Link href={`/q/${r.id}`}>
-                      <h2 className="text-3xl font-extrabold leading-tight" style={{ color: NAVY }}>
-                        {r.title || "Untitled Quandr3"}
-                      </h2>
-                    </Link>
-
-                    {/* Posted by (B) */}
-                    <div className="mt-1 text-sm text-slate-500">
-                      Posted by{" "}
-                      <span className="font-semibold" style={{ color: NAVY }}>
-                        {curiosoName}
-                      </span>
-                    </div>
-
-                    {r.context && <p className="mt-2 text-slate-700 text-base">{r.context}</p>}
-
-                    <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
-                      <span>{fmtDateTime(r.created_at)}</span>
-
-                      {sort === "trending" && (
-                        <span className="text-slate-500">
-                          🔥 {Number(r._trendScore || 0).toFixed(1)} · {r._votes24h || 0} votes (24h)
-                        </span>
-                      )}
-
-                      {(r.city || r.state) && (
-                        <span>
-                          {r.city}
-                          {r.state ? `, ${r.state}` : ""}
-                        </span>
-                      )}
-
-                      {r.status === "open" && r.closes_at && <span>{hoursLeft(r.closes_at)}h left</span>}
-
-                      {canShowDiscussionHint(r) ? (
-                        <span className="text-slate-500">
-                          Discussion available after resolve (voters only to post)
-                        </span>
-                      ) : (
-                        <span className="text-slate-500">Discussion after resolve</span>
-                      )}
-                    </div>
-
-                    <div className="mt-5 flex items-center justify-between gap-3">
-                      <Link
-                        href={`/q/${r.id}`}
-                        className="rounded-full px-5 py-3 font-semibold text-white"
-                        style={{ background: NAVY }}
-                      >
-                        View Quandr3
-                      </Link>
-
-                      <div className="flex items-center gap-3">
-                        <button className="rounded-full px-5 py-3 border font-semibold" style={{ color: NAVY }}>
-                          Share
-                        </button>
-                        <button className="rounded-full px-5 py-3 border font-semibold text-red-500">
-                          Report
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {!loading && !err && safeRows.length === 0 && (
-              <div className="rounded-3xl bg-white border p-6 text-slate-600">No results yet.</div>
+          <div className="mt-3 text-xs text-slate-500">
+            {scope === "local" ? (
+              <span>
+                Showing <span className="font-semibold">Local</span> results
+                {meCity || meState ? (
+                  <>
+                    {" "}
+                    for{" "}
+                    <span className="font-semibold">
+                      {meCity || "—"}
+                      {meCity && meState ? ", " : ""}
+                      {meState || "—"}
+                    </span>
+                  </>
+                ) : (
+                  <> (set your city/state on your profile for best results)</>
+                )}
+                .
+              </span>
+            ) : (
+              <span>
+                Showing <span className="font-semibold">Global</span> results.
+              </span>
             )}
           </div>
         </div>
+
+        {/* Search modal */}
+        {searchOpen ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+            <div className="w-full max-w-lg rounded-[24px] border bg-white p-5 shadow-xl">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-extrabold" style={{ color: NAVY }}>
+                    Search Quandr3s
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">Search title, prompt, category, city/state.</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSearchOpen(false)}
+                  className="rounded-full border bg-white px-3 py-1 text-sm font-extrabold"
+                  style={{ color: NAVY }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <input
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                autoFocus
+                placeholder="Try: rent, marriage, family, Meriden, Money…"
+                className="mt-4 w-full rounded-2xl border p-3 text-sm outline-none"
+              />
+
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSearchQ("")}
+                  className="rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50"
+                  style={{ color: NAVY }}
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSearchOpen(false)}
+                  className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
+                  style={{ background: NAVY }}
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Open right now list */}
+        <section className="mt-8 rounded-[28px] border bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-base font-extrabold" style={{ color: NAVY }}>
+              Open right now
+            </div>
+            <div className="text-sm text-slate-500">Closing soonest first.</div>
+          </div>
+
+          {loading ? (
+            <div className="mt-4 text-slate-600">Loading…</div>
+          ) : error ? (
+            <div className="mt-4 text-red-600 font-semibold">{error}</div>
+          ) : openNow.length === 0 ? (
+            <div className="mt-4 text-slate-600">No open Quandr3s match your filters.</div>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 gap-3">
+              {openNow.map((r: any) => {
+                const badge = statusBadge(effectiveStatus(r));
+                const h = hoursLeft(r?.closes_at);
+                const url = buildShareLink(r.id);
+
+                return (
+                  <div
+                    key={r.id}
+                    className="flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 hover:bg-slate-50 cursor-pointer"
+                    onClick={() => goToQuandr3(r.id)}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: badge.bg, color: badge.fg }}>
+                        {badge.label}
+                      </span>
+                      <div className="text-sm font-extrabold" style={{ color: NAVY }}>
+                        {tiny(r?.title, 56)}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs font-bold text-slate-500">{h != null ? `${h}h` : "—"}</div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          shareUrl(url, r?.title || "Quandr3");
+                        }}
+                        className="rounded-full border px-3 py-1 text-xs font-extrabold hover:bg-slate-50"
+                        style={{ color: NAVY }}
+                        title="Share"
+                      >
+                        Share
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* Feed */}
+        <section className="mt-8 grid grid-cols-1 gap-5">
+          {feed.map((r: any) => {
+            const badge = statusBadge(effectiveStatus(r));
+            const h = hoursLeft(r?.closes_at);
+            const url = buildShareLink(r.id);
+
+            return (
+              <div
+                key={r.id}
+                className="rounded-[28px] border bg-white p-6 shadow-sm hover:shadow-md transition cursor-pointer"
+                onClick={() => goToQuandr3(r.id)}
+                role="button"
+                tabIndex={0}
+              >
+                <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">
+                  {(r?.category || "QUANDR3").toString().toUpperCase()}
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-2xl font-extrabold leading-tight" style={{ color: NAVY }}>
+                    {r?.title}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: badge.bg, color: badge.fg }}>
+                      {badge.label}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        shareUrl(url, r?.title || "Quandr3");
+                      }}
+                      className="rounded-full border px-3 py-1 text-xs font-extrabold hover:bg-slate-50"
+                      style={{ color: NAVY }}
+                      title="Share"
+                    >
+                      Share
+                    </button>
+                  </div>
+                </div>
+
+                {/* ✅ prompt */}
+                {r?.prompt ? <p className="mt-3 text-slate-700">{tiny(r?.prompt, 170)}</p> : null}
+
+                <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                  {r.city || r.state ? (
+                    <span className="rounded-full border px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
+                      {r.city ? r.city : ""}
+                      {r.city && r.state ? ", " : ""}
+                      {r.state ? r.state : ""}
+                    </span>
+                  ) : null}
+
+                  <span className="text-slate-400">•</span>
+                  <span>
+                    <span className="font-semibold">Posted:</span> {fmt(r?.created_at)}
+                  </span>
+
+                  {r?.closes_at ? (
+                    <>
+                      <span className="text-slate-400">•</span>
+                      <span>
+                        <span className="font-semibold">Closes:</span> {fmt(r?.closes_at)}
+                      </span>
+                      <span className="text-slate-400">•</span>
+                      <span className="inline-flex items-center gap-2">
+                        ⏳ <span className="font-semibold">{h ?? 0}</span> hour(s) left
+                      </span>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </section>
+
+        <div className="mt-10 text-center text-xs text-slate-500">
+          Quandr3: <span className="font-semibold">Ask.</span> <span className="font-semibold">Share.</span>{" "}
+          <span className="font-semibold">Decide.</span>
+        </div>
       </div>
-    </div>
+    </main>
   );
 }

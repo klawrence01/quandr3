@@ -4,433 +4,344 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/utils/supabase/browser";
 import ExploreInner from "./_ExploreInner";
 
-const SAFE_LIMIT = 200;
+const SAFE_LIMIT = 250;
 
-const MS_HOUR = 36e5;
-const MS_DAY = 24 * MS_HOUR;
-const MS_7D = 7 * MS_DAY;
-const MS_30D = 30 * MS_DAY;
+/* =========================
+   Brand
+========================= */
+const NAVY = "#0b2343";
+const BLUE = "#1e63f3";
+const TEAL = "#00a9a5";
+const CORAL = "#ff6b6b";
+const SOFT_BG = "#f5f7fc";
 
 function uniq(arr: any[]) {
   return Array.from(new Set((arr || []).filter(Boolean)));
 }
 
-function includesLoose(hay?: string, needle?: string) {
-  if (!needle) return true;
-  if (!hay) return false;
-  return String(hay).toLowerCase().includes(String(needle).toLowerCase());
-}
-
-function normStatus(s: any) {
-  return String(s || "").trim().toLowerCase();
-}
-
-function recencyFactor(createdAt?: string) {
-  if (!createdAt) return 1;
-  const ageMs = Date.now() - new Date(createdAt).getTime();
-  const ageDays = Math.max(0, ageMs / MS_DAY);
-  return 1 / (1 + ageDays / 3);
-}
-
-/**
- * ✅ UPDATED: stronger Trending formula (vote velocity matters most)
- * - 24h votes dominate
- * - open posts get a boost
- * - recency matters but less than velocity
- */
-function computeTrendScore(r: any, voteStats: any) {
-  const v24 = voteStats?.votes_24h || 0;
-  const v7 = voteStats?.votes_7d || 0;
-  const v30 = voteStats?.votes_30d || 0;
-
-  // HARD bias to velocity so Trending changes even with small vote counts
-  const base = v24 * 50 + v7 * 10 + v30 * 2;
-
-  // Open gets extra boost because it's “live”
-  const openBoost = r?.status === "open" ? 1.35 : 1.0;
-
-  // Recency still matters but less than velocity
-  const rf = recencyFactor(r?.created_at);
-
-  // Keep stable / readable
-  return base * openBoost * (0.6 + 0.4 * rf);
-}
-
-function computeInternetDecided(row: any, totalVotes: number) {
-  // Resolved stays resolved
-  if (normStatus(row?.status) === "resolved") return false;
-
-  const createdAt = row?.created_at ? new Date(row.created_at).getTime() : 0;
-  const dur = Number(row?.voting_duration_hours || 0);
-  const maxVotes = Number(row?.voting_max_votes || 0);
-
-  const timeExpired = createdAt && dur ? Date.now() > createdAt + dur * MS_HOUR : false;
-  const capReached = maxVotes ? totalVotes >= maxVotes : false;
-
-  return timeExpired || capReached;
-}
-
-async function tryLoadVotes(tableName: string, sinceISO: string) {
-  // We try common columns: (quandr3_id, created_at) OR (q_id, created_at)
-  const r1 = await supabase
-    .from(tableName)
-    .select("quandr3_id, created_at")
-    .gte("created_at", sinceISO)
-    .order("created_at", { ascending: false })
-    .limit(5000);
-
-  if (!r1.error) return { table: tableName, key: "quandr3_id", res: r1 };
-
-  const r2 = await supabase
-    .from(tableName)
-    .select("q_id, created_at")
-    .gte("created_at", sinceISO)
-    .order("created_at", { ascending: false })
-    .limit(5000);
-
-  if (!r2.error) return { table: tableName, key: "q_id", res: r2 };
-
-  return { table: tableName, key: null, res: r2 };
+function safeStr(x: any) {
+  return (x ?? "").toString();
 }
 
 /* =========================
-   B) Curioso identity helpers
+   ✅ NEW: time-aware status helpers
 ========================= */
 
-// Try to extract a creator/user id from a row, without assuming a single column name.
-function getCreatorId(r: any) {
-  return r?.created_by || r?.creator_id || r?.user_id || r?.curioso_id || r?.author_id || null;
+function hoursLeft(closesAt?: string) {
+  if (!closesAt) return null;
+  const end = new Date(closesAt).getTime();
+  const diff = end - Date.now();
+  return Math.max(0, Math.ceil(diff / 3600000));
 }
 
-// Try to extract a “best effort” creator display name directly from the row (if it exists).
-function getCreatorNameFromRow(r: any) {
-  return (
-    r?.creator_name ||
-    r?.created_by_name ||
-    r?.curioso_name ||
-    r?.author_name ||
-    r?.username ||
-    r?.display_name ||
-    r?.full_name ||
-    ""
-  );
+/**
+ * ✅ UI-only effective status:
+ * If status is "open" but closes_at already passed, treat as "awaiting_user"
+ */
+function effectiveStatus(row: any) {
+  const s = (row?.status || "").toLowerCase();
+  if (s === "open") {
+    const h = hoursLeft(row?.closes_at);
+    if (h !== null && h <= 0) return "awaiting_user";
+  }
+  return s || "unknown";
+}
+
+/**
+ * ✅ Used ONLY for the status filter buttons (all/open/closed/resolved)
+ */
+function normStatusForFilter(row: any) {
+  const s = effectiveStatus(row);
+  if (s === "open") return "open";
+  if (s === "awaiting_user") return "closed"; // user-facing “Closed”
+  if (s === "resolved") return "resolved";
+  return "other";
 }
 
 export default function ExploreClient() {
   const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState<any[]>([]);
   const [err, setErr] = useState("");
 
-  const [raw, setRaw] = useState<any[]>([]);
-  const [voteMap, setVoteMap] = useState<Record<string, any>>({});
+  // viewer profile (for Local toggle)
+  const [meId, setMeId] = useState("");
+  const [meCity, setMeCity] = useState("");
+  const [meState, setMeState] = useState("");
 
-  // ✅ keep trendInfo internally, but DO NOT show it (and DO NOT treat it like an error)
-  const [trendInfo, setTrendInfo] = useState<string>("");
+  // UI filters
+  const [scope, setScope] = useState<"global" | "local">("global");
+  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed" | "resolved">("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
 
-  // UI state
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState("all");
-  const [sort, setSort] = useState("trending"); // trending|new|closing
-  const [scope, setScope] = useState("global");
-  const [activeCategory, setActiveCategory] = useState("all");
+  // ✅ PWA Install
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [installReady, setInstallReady] = useState(false);
+
+  // ✅ avoid rapid double-refresh storms
+  const lastReloadRef = useRef<number>(0);
+  function shouldReloadNow() {
+    const now = Date.now();
+    if (now - lastReloadRef.current < 800) return false;
+    lastReloadRef.current = now;
+    return true;
+  }
 
   useEffect(() => {
-    let ignore = false;
+    function onBeforeInstallPrompt(e: any) {
+      e.preventDefault();
+      setInstallPrompt(e);
+      setInstallReady(true);
+    }
+    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    return () => window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+  }, []);
 
-    async function load() {
-      setLoading(true);
-      setErr("");
-      setTrendInfo("");
+  async function handleInstall() {
+    if (installPrompt) {
+      try {
+        installPrompt.prompt();
+        await installPrompt.userChoice;
+        setInstallPrompt(null);
+        setInstallReady(false);
+        return;
+      } catch {}
+    }
+    alert(
+      "Install Quandr3:\n\n" +
+        "• iPhone/iPad (Safari): Share → Add to Home Screen\n" +
+        "• Android (Chrome): ⋮ → Install app / Add to Home screen\n" +
+        "• Desktop (Chrome/Edge): Install in address bar or browser menu"
+    );
+  }
 
-      // 1) Load Quandr3s
-      // ✅ Include vote timing fields for Internet Decided computation
-      const primarySelect =
-        "id,title,context,created_at,status,closes_at,category,city,state,media_url,hero_image_url,voting_duration_hours,voting_max_votes,created_by,creator_id,user_id,curioso_id,author_id,creator_name,created_by_name,curioso_name,author_name,username,display_name,full_name";
+  // load auth + profile
+  async function loadMe() {
+    try {
+      const { data } = await supabase.auth.getUser();
+      const uid = data?.user?.id ? String(data.user.id) : "";
+      setMeId(uid);
 
-      let qData: any[] | null = null;
-      let qErr: any = null;
+      if (!uid) return;
 
-      const r1 = await supabase
+      const { data: prof } = await supabase.from("profiles").select("city,state").eq("id", uid).maybeSingle();
+
+      setMeCity(safeStr(prof?.city).trim());
+      setMeState(safeStr(prof?.state).trim());
+    } catch {
+      // ok
+    }
+  }
+
+  async function load(reason = "load") {
+    setLoading(true);
+    setErr("");
+
+    try {
+      await loadMe();
+
+      // ✅ FIX: select prompt (not context)
+      const { data, error } = await supabase
         .from("quandr3s")
-        .select(primarySelect)
+        .select("id,title,prompt,category,status,created_at,closes_at,city,state,author_id")
         .order("created_at", { ascending: false })
         .limit(SAFE_LIMIT);
 
-      qData = r1.data;
-      qErr = r1.error;
+      if (error) throw error;
 
-      // Fallback select if unknown columns error
-      if (qErr) {
-        const r2 = await supabase
-          .from("quandr3s")
-          .select(
-            "id,title,context,created_at,status,closes_at,category,city,state,media_url,hero_image_url,voting_duration_hours,voting_max_votes"
-          )
-          .order("created_at", { ascending: false })
-          .limit(SAFE_LIMIT);
-
-        qData = r2.data;
-        qErr = r2.error;
-      }
-
-      if (ignore) return;
-
-      if (qErr) {
-        setErr(qErr.message || "Failed to load explore feed.");
-        setRaw([]);
-        setVoteMap({});
-        setLoading(false);
-        return;
-      }
-
-      let quandr3s = qData || [];
-
-      // ✅ B) Attach Curioso name best-effort (row fields first, then profiles lookup)
-      try {
-        // always attach fallbacks so UI can show something
-        quandr3s = quandr3s.map((r: any) => ({
-          ...r,
-          _curioso_id: getCreatorId(r),
-          _curioso_name: (getCreatorNameFromRow(r) || "").trim(),
-          _curioso_avatar: null,
-        }));
-
-        const creatorIds = uniq(quandr3s.map((r: any) => r?._curioso_id)).filter(Boolean);
-
-        if (creatorIds.length) {
-          const prof = await supabase
-            .from("profiles")
-            .select("id, username, display_name, full_name, avatar_url")
-            .in("id", creatorIds.slice(0, 300));
-
-          if (!prof.error && Array.isArray(prof.data)) {
-            const pMap: Record<string, any> = {};
-            for (const p of prof.data) pMap[p.id] = p;
-
-            quandr3s = quandr3s.map((r: any) => {
-              const cid = r?._curioso_id;
-              const p = cid ? pMap[cid] : null;
-
-              const name =
-                (r?._curioso_name || "").trim() ||
-                (p?.display_name || "").trim() ||
-                (p?.full_name || "").trim() ||
-                (p?.username || "").trim() ||
-                "";
-
-              return {
-                ...r,
-                _curioso_name: name,
-                _curioso_avatar: p?.avatar_url || null,
-              };
-            });
-          }
-        }
-      } catch {
-        // safety: never break explore
-      }
-
-      // 2) Load recent votes for Trending (auto-detect table/column)
-      const since30dISO = new Date(Date.now() - MS_30D).toISOString();
-
-      const tableCandidates = ["quandr3_votes", "votes", "quandr3_votes_view"];
-      let picked: any = null;
-
-      for (const t of tableCandidates) {
-        const attempt = await tryLoadVotes(t, since30dISO);
-        if (!attempt?.res?.error) {
-          picked = attempt;
-          break;
-        }
-      }
-
-      const map: Record<string, any> = {};
-
-      if (!picked) {
-        // ✅ keep as internal debug text only
-        setTrendInfo("Trending: vote table not readable (RLS or name mismatch). Trending will use fallback ordering.");
-      } else {
-        const votes = picked?.res?.data || [];
-        const idKey = picked?.key;
-
-        // ✅ keep as internal debug text only
-        setTrendInfo(`Trending source: ${picked.table}.${idKey}`);
-
-        const now = Date.now();
-        for (const v of votes) {
-          const id = v?.[idKey];
-          const ts = v?.created_at ? new Date(v.created_at).getTime() : null;
-          if (!id || !ts) continue;
-
-          if (!map[id]) map[id] = { votes_24h: 0, votes_7d: 0, votes_30d: 0, trendScore: 0, _totalVotes: 0 };
-
-          const age = now - ts;
-          if (age <= MS_DAY) map[id].votes_24h += 1;
-          if (age <= MS_7D) map[id].votes_7d += 1;
-          if (age <= MS_30D) map[id].votes_30d += 1;
-        }
-
-        // Also compute a totalVotes estimate from the same vote data
-        for (const id of Object.keys(map)) {
-          // votes_30d is what we have loaded; use it as total estimate for now
-          map[id]._totalVotes = map[id].votes_30d || 0;
-        }
-      }
-
-      // 3) Compute trendScore + compute UI status (open/awaiting_user/resolved)
-      for (const r of quandr3s) {
-        const id = r?.id;
-
-        const stats =
-          map[id] || { votes_24h: 0, votes_7d: 0, votes_30d: 0, trendScore: 0, _totalVotes: 0 };
-
-        // ✅ compute the UI status we want
-        const decided = computeInternetDecided(r, stats._totalVotes || 0);
-        const s = normStatus(r?.status);
-
-        const uiStatus =
-          s === "resolved" ? "resolved" : decided ? "awaiting_user" : "open";
-
-        // overwrite status only for UI purposes
-        r.status = uiStatus;
-
-        stats.trendScore = computeTrendScore(r, stats);
-        map[id] = stats;
-      }
-
-      if (ignore) return;
-
-      setRaw(quandr3s);
-      setVoteMap(map);
+      setRows(data || []);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load Explore.");
+    } finally {
       setLoading(false);
     }
+  }
 
-    load();
+  // Initial load
+  useEffect(() => {
+    load("mount");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ✅ Refresh when returning to tab / window
+  useEffect(() => {
+    function onFocus() {
+      if (!shouldReloadNow()) return;
+      load("focus");
+    }
+    function onVis() {
+      if (document.visibilityState === "visible") {
+        if (!shouldReloadNow()) return;
+        load("visible");
+      }
+    }
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVis);
     return () => {
-      ignore = true;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVis);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ✅ Refresh when Create sets localStorage flag
+  useEffect(() => {
+    function tick() {
+      try {
+        const v = localStorage.getItem("quandr3_explore_refresh") || "";
+        if (!v) return;
+
+        if ((tick as any)._last !== v) {
+          (tick as any)._last = v;
+          if (!shouldReloadNow()) return;
+          load("storage-flag");
+        }
+      } catch {}
+    }
+
+    tick();
+    const t = setInterval(tick, 800);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ✅ Realtime: refresh on INSERT to quandr3s
+  useEffect(() => {
+    const channel = supabase
+      .channel("quandr3s-explore-inserts")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "quandr3s" }, () => {
+        if (!shouldReloadNow()) return;
+        load("realtime-insert");
+      })
+      .subscribe();
+
+    return () => {
+      try {
+        supabase.removeChannel(channel);
+      } catch {}
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const categories = useMemo(() => {
-    const cats = uniq(
-      (raw || [])
-        .map((r: any) => r?.category)
-        .filter((c: any) => typeof c === "string" && c.trim().length > 0)
-        .map((c: string) => c.trim())
-    );
-    return ["all", ...cats];
-  }, [raw]);
+    const cats = uniq((rows || []).map((r) => safeStr(r?.category).trim()).filter(Boolean));
+    return ["all", ...cats.sort((a: string, b: string) => a.localeCompare(b))];
+  }, [rows]);
 
-  useEffect(() => {
-    if (!categories.includes(activeCategory)) setActiveCategory("all");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categories.join("|")]);
+  const filtered = useMemo(() => {
+    let out = [...(rows || [])];
 
-  const rows = useMemo(() => {
-    let out = [...(raw || [])];
-
+    // Local/Global
     if (scope === "local") {
-      out = out.filter((r: any) => (r?.city && String(r.city).trim()) || (r?.state && String(r.state).trim()));
-    }
+      const mc = meCity.trim().toLowerCase();
+      const ms = meState.trim().toLowerCase();
 
-    if (status && status !== "all") {
-      out = out.filter((r: any) => r?.status === status);
-    }
-
-    if (activeCategory && activeCategory !== "all") {
-      out = out.filter((r: any) => String(r?.category || "").trim() === activeCategory);
-    }
-
-    const needle = (q || "").trim();
-    if (needle) {
-      out = out.filter((r: any) => {
-        return (
-          includesLoose(r?.title, needle) ||
-          includesLoose(r?.context, needle) ||
-          includesLoose(r?.city, needle) ||
-          includesLoose(r?.state, needle) ||
-          includesLoose(r?.id, needle)
-        );
-      });
-    }
-
-    // ✅ helper for “fallback trending” when votes are flat
-    function fallbackTrendingSort(a: any, b: any) {
-      const aOpen = a?.status === "open";
-      const bOpen = b?.status === "open";
-      if (aOpen && !bOpen) return -1;
-      if (!aOpen && bOpen) return 1;
-
-      const aT = a?.created_at ? new Date(a.created_at).getTime() : 0;
-      const bT = b?.created_at ? new Date(b.created_at).getTime() : 0;
-      return bT - aT;
-    }
-
-    if (sort === "closing") {
-      out.sort((a: any, b: any) => {
-        const aOpen = a?.status === "open";
-        const bOpen = b?.status === "open";
-        if (aOpen && !bOpen) return -1;
-        if (!aOpen && bOpen) return 1;
-
-        const aT = a?.closes_at ? new Date(a.closes_at).getTime() : Number.MAX_SAFE_INTEGER;
-        const bT = b?.closes_at ? new Date(b.closes_at).getTime() : Number.MAX_SAFE_INTEGER;
-        return aT - bT;
-      });
-    } else if (sort === "trending") {
-      // ✅ Determine if trending is “flat” (all scores are 0)
-      const anyTrending = out.some((r: any) => (voteMap?.[r?.id]?.trendScore || 0) > 0);
-
-      if (!anyTrending) {
-        // Fallback so Trending ALWAYS changes visibly
-        out.sort(fallbackTrendingSort);
-      } else {
-        out.sort((a: any, b: any) => {
-          const aS = voteMap?.[a?.id]?.trendScore || 0;
-          const bS = voteMap?.[b?.id]?.trendScore || 0;
-          if (bS !== aS) return bS - aS;
-
-          // tie-breaker: open first, then newest
-          return fallbackTrendingSort(a, b);
+      if (mc || ms) {
+        out = out.filter((r) => {
+          const rc = safeStr(r?.city).trim().toLowerCase();
+          const rs = safeStr(r?.state).trim().toLowerCase();
+          if (ms && rs && rs === ms) return true;
+          if (mc && rc && rc === mc) return true;
+          return false;
         });
       }
-    } else {
-      out.sort((a: any, b: any) => {
-        const aT = a?.created_at ? new Date(a.created_at).getTime() : 0;
-        const bT = b?.created_at ? new Date(b.created_at).getTime() : 0;
-        return bT - aT;
+    }
+
+    // ✅ Status filter (time-aware)
+    if (statusFilter !== "all") {
+      out = out.filter((r) => normStatusForFilter(r) === statusFilter);
+    }
+
+    // Category filter
+    if (categoryFilter !== "all") {
+      out = out.filter((r) => safeStr(r?.category).trim() === categoryFilter);
+    }
+
+    // Search (title/prompt/category/city/state/status/author)
+    const q = searchQ.trim().toLowerCase();
+    if (q) {
+      out = out.filter((r) => {
+        const blob = [
+          r?.title,
+          r?.prompt,
+          r?.category,
+          r?.city,
+          r?.state,
+          // include both raw and effective status strings for search matching
+          r?.status,
+          effectiveStatus(r),
+          r?.author_id,
+        ]
+          .map((x) => safeStr(x).toLowerCase())
+          .join(" ");
+        return blob.includes(q);
       });
     }
 
-    return out.map((r: any) => ({
-      ...r,
-      _votes24h: voteMap?.[r?.id]?.votes_24h || 0,
-      _votes7d: voteMap?.[r?.id]?.votes_7d || 0,
-      _votes30d: voteMap?.[r?.id]?.votes_30d || 0,
-      _trendScore: voteMap?.[r?.id]?.trendScore || 0,
-    }));
-  }, [raw, q, status, sort, scope, activeCategory, voteMap]);
+    return out;
+  }, [rows, scope, statusFilter, categoryFilter, searchQ, meCity, meState]);
 
   return (
-    <ExploreInner
-      loading={loading}
-      // ✅ FIX: only pass REAL errors. Do NOT pass trendInfo.
-      err={err}
-      rows={rows || []}
-      q={q}
-      setQ={setQ}
-      status={status}
-      setStatus={setStatus}
-      sort={sort}
-      setSort={setSort}
-      scope={scope}
-      setScope={setScope}
-      activeCategory={activeCategory}
-      setActiveCategory={setActiveCategory}
-      categories={categories}
-    />
+    <div>
+      {/* Utility bar */}
+      <div className="mx-auto max-w-6xl px-4 pt-4">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => load("manual")}
+            className="rounded-full border bg-white px-4 py-2 text-xs font-extrabold hover:bg-slate-50"
+            style={{ color: NAVY }}
+            title="Refresh Explore"
+          >
+            Refresh
+          </button>
+
+          <Link
+            href="/blog"
+            className="rounded-full border bg-white px-4 py-2 text-xs font-extrabold hover:bg-slate-50"
+            style={{ color: NAVY }}
+          >
+            Blog
+          </Link>
+
+          <button
+            type="button"
+            onClick={handleInstall}
+            className="rounded-full px-4 py-2 text-xs font-extrabold text-white hover:opacity-95"
+            style={{ background: installReady ? BLUE : NAVY }}
+            title={installReady ? "Install Quandr3" : "Add Quandr3 to your home screen"}
+          >
+            {installReady ? "Install App" : "Add to Home Screen"}
+          </button>
+        </div>
+      </div>
+
+      <ExploreInner
+        loading={loading}
+        error={err}
+        rows={filtered}
+        rawRows={rows}
+        meId={meId}
+        meCity={meCity}
+        meState={meState}
+        scope={scope}
+        setScope={setScope}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        categoryFilter={categoryFilter}
+        setCategoryFilter={setCategoryFilter}
+        categories={categories}
+        searchOpen={searchOpen}
+        setSearchOpen={setSearchOpen}
+        searchQ={searchQ}
+        setSearchQ={setSearchQ}
+      />
+    </div>
   );
 }

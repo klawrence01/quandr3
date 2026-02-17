@@ -24,19 +24,28 @@ export default function RegisterInner() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
       });
 
       if (error) {
         setMsg(error.message);
-        setLoading(false);
         return;
       }
 
-      setMsg("Account created ✅ Check your email if confirmation is required.");
-      router.push(next);
+      // If session exists, user is logged in immediately.
+      // If session is null, Supabase is requiring email confirmation or OTP.
+      const session = data?.session;
+
+      if (session) {
+        setMsg("Account created ✅ Logged in.");
+        router.push(next);
+        return;
+      }
+
+      setMsg("Account created ✅ Now check your email to confirm/sign in.");
+      // stay on page so they can read the message
     } catch (err: any) {
       setMsg(err?.message ?? "Something went wrong.");
     } finally {
@@ -47,7 +56,7 @@ export default function RegisterInner() {
   return (
     <main style={{ maxWidth: 520, margin: "0 auto", padding: 24 }}>
       <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <Link href="/login">Back to Login</Link>
+        <Link href="/auth/login">Back to Login</Link>
         <Link href="/explore">Explore</Link>
       </div>
 
