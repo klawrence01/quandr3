@@ -35,6 +35,16 @@ function fmt(ts?: string) {
   }
 }
 
+function computeInternetDecided(counts: any) {
+  const entries = ALLOWED.map((L) => [L, counts?.[L] || 0]);
+  const sorted = entries.slice().sort((a: any, b: any) => (b?.[1] || 0) - (a?.[1] || 0));
+  const top = sorted[0];
+  if (!top || (top[1] || 0) <= 0) return { label: "", isTie: false, tied: [] };
+
+  const tied = sorted.filter((x: any) => (x?.[1] || 0) === top[1]).map((x: any) => x[0]);
+  return { label: tied.length === 1 ? top[0] : "", isTie: tied.length > 1, tied };
+}
+
 export default function ResolveQuandr3Page() {
   const params = useParams();
   const router = useRouter();
@@ -43,39 +53,36 @@ export default function ResolveQuandr3Page() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  const [q, setQ] = useState<any>(null);
+  const [q, setQ] = useState(null);
 
   // ✅ IMPORTANT: store only safe (non-null) option rows
-  const [options, setOptions] = useState<any[]>([]);
+  const [options, setOptions] = useState([]);
 
-  const [counts, setCounts] = useState<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0 });
-  const [reasonsByLabel, setReasonsByLabel] = useState<Record<string, string[]>>({
-    A: [],
-    B: [],
-    C: [],
-    D: [],
-  });
+  const [counts, setCounts] = useState({ A: 0, B: 0, C: 0, D: 0 });
+  const [reasonsByLabel, setReasonsByLabel] = useState({ A: [], B: [], C: [], D: [] });
 
-  const [finalChoice, setFinalChoice] = useState<string>("");
-  const [finalNote, setFinalNote] = useState<string>("");
+  const [finalChoice, setFinalChoice] = useState("");
+  const [finalNote, setFinalNote] = useState("");
 
   const totalVotes = useMemo(() => {
-    return ALLOWED.reduce((sum, L) => sum + (counts[L] || 0), 0);
+    return ALLOWED.reduce((sum, L) => sum + (counts?.[L] || 0), 0);
   }, [counts]);
 
   function pct(label: string) {
     if (!totalVotes) return 0;
-    return Math.round(((counts[label] || 0) / totalVotes) * 100);
+    return Math.round(((counts?.[label] || 0) / totalVotes) * 100);
   }
 
   // ✅ helper: grab option text by label (so we can display option copy)
   function optionText(label: string) {
     const L = cleanLabel(label);
     if (!L) return "";
-    const row = (options || []).find((o: any) => cleanLabel(o?.label) === L);
+    const row: any = (options || []).find((o: any) => cleanLabel(o?.label) === L);
     const txt = (row?.value ?? "").toString().trim();
     return txt;
   }
+
+  const internet = useMemo(() => computeInternetDecided(counts), [counts]);
 
   async function load() {
     setLoading(true);
@@ -84,7 +91,9 @@ export default function ResolveQuandr3Page() {
     try {
       const { data: qRow, error: qErr } = await supabase
         .from("quandr3s")
-        .select("id,title,prompt,context,status,author_id,created_at,closes_at")
+        .select(
+          "id,title,prompt,context,status,author_id,created_at,closes_at,resolved_choice_label,resolved_at,resolution_note"
+        )
         .eq("id", id)
         .single();
 
@@ -96,10 +105,7 @@ export default function ResolveQuandr3Page() {
         .eq("quandr3_id", id)
         .order("order", { ascending: true });
 
-      const { data: choiceRows } = await supabase
-        .from("quandr3_choices")
-        .select("label,text")
-        .eq("quandr3_id", id);
+      const { data: choiceRows } = await supabase.from("quandr3_choices").select("label,text").eq("quandr3_id", id);
 
       const nextCounts: any = { A: 0, B: 0, C: 0, D: 0 };
       const nextReasons: any = { A: [], B: [], C: [], D: [] };
@@ -113,7 +119,7 @@ export default function ResolveQuandr3Page() {
         }
       });
 
-      // ✅ THIS is the null-safe fix (prevents TS: “o is possibly null”)
+      // ✅ null-safe options (prevents “o is possibly null” + keeps UI stable)
       const safeOptions = (oRows || [])
         .filter(Boolean)
         .filter((o: any) => cleanLabel(o?.label))
@@ -124,10 +130,15 @@ export default function ResolveQuandr3Page() {
           order: o.order,
         }));
 
-      setQ(qRow);
+      setQ(qRow || null);
       setOptions(safeOptions);
       setCounts(nextCounts);
       setReasonsByLabel(nextReasons);
+
+      // prefill UI with existing resolution if present
+      const existingChoice = cleanLabel((qRow as any)?.resolved_choice_label);
+      if (existingChoice) setFinalChoice(existingChoice);
+      if (typeof (qRow as any)?.resolution_note === "string") setFinalNote((qRow as any).resolution_note);
     } catch (e: any) {
       setErr(e?.message || "Failed to load resolve page.");
     } finally {
@@ -187,10 +198,56 @@ export default function ResolveQuandr3Page() {
           ) : (
             <>
               <h1 className="text-3xl font-extrabold" style={{ color: NAVY }}>
-                Resolve: {q.title}
+                Resolve: {(q as any).title}
               </h1>
 
-              <p className="mt-2 text-slate-700">{q.prompt || q.context}</p>
+              <p className="mt-2 text-slate-700">{(q as any).prompt || (q as any).context}</p>
+
+              {/* Internet Decided (not final) */}
+              <div className="mt-5 rounded-2xl border bg-slate-50 p-4">
+                <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">INTERNET DECIDED</div>
+
+                {totalVotes === 0 ? (
+                  <div className="mt-1 text-sm font-bold" style={{ color: NAVY }}>
+                    No votes yet.
+                  </div>
+                ) : internet.isTie ? (
+                  <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
+                    Tie: {internet.tied.join(" / ")}{" "}
+                    <span className="text-slate-500 font-semibold">({totalVotes} total votes)</span>
+                  </div>
+                ) : (
+                  <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
+                    Top Voted: <span style={{ color: BLUE }}>{internet.label}</span>{" "}
+                    <span className="text-slate-500 font-semibold">
+                      ({counts?.[internet.label] || 0} votes • {pct(internet.label)}% • {totalVotes} total)
+                    </span>
+                  </div>
+                )}
+
+                <div className="mt-2 text-xs text-slate-600">
+                  This is the crowd outcome. The <b>Final Decision</b> is made by the Curioso below.
+                </div>
+              </div>
+
+              {/* Final Decision (Curioso) */}
+              {cleanLabel((q as any)?.resolved_choice_label) ? (
+                <div className="mt-4 rounded-2xl border p-4">
+                  <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">FINAL DECISION (CURIO SO)</div>
+                  <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
+                    Final Decision:{" "}
+                    <span style={{ color: BLUE }}>{cleanLabel((q as any)?.resolved_choice_label)}</span>{" "}
+                    <span className="text-slate-500 font-semibold">
+                      {(q as any)?.resolved_at ? `• ${fmt((q as any).resolved_at)}` : ""}
+                    </span>
+                  </div>
+                  {(q as any)?.resolution_note ? (
+                    <div className="mt-2 text-sm text-slate-700">{(q as any).resolution_note}</div>
+                  ) : (
+                    <div className="mt-2 text-xs text-slate-500">(No final note provided.)</div>
+                  )}
+                </div>
+              ) : null}
 
               <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
                 {ALLOWED.map((L) => (
@@ -199,7 +256,6 @@ export default function ResolveQuandr3Page() {
                       Option {L}
                     </div>
 
-                    {/* ✅ show option text if we have it */}
                     {optionText(L) ? (
                       <div className="mt-1 text-sm font-semibold text-slate-900">{optionText(L)}</div>
                     ) : (
@@ -207,11 +263,12 @@ export default function ResolveQuandr3Page() {
                     )}
 
                     <div className="mt-2 text-sm text-slate-700">
-                      Votes: <b>{counts[L]}</b> ({pct(L)}%)
+                      Votes: <b>{counts?.[L] || 0}</b> ({pct(L)}%)
                     </div>
 
+                    <div className="mt-3 text-xs font-extrabold tracking-[0.18em] text-slate-500">COMMUNITY REASONS</div>
                     <ul className="mt-2 list-disc pl-5 text-xs text-slate-600 space-y-1">
-                      {(reasonsByLabel[L] || []).slice(0, 6).map((t, i) => (
+                      {(reasonsByLabel as any)?.[L]?.slice?.(0, 6)?.map?.((t: any, i: any) => (
                         <li key={i}>{t}</li>
                       ))}
                     </ul>
@@ -224,7 +281,7 @@ export default function ResolveQuandr3Page() {
                         checked={finalChoice === L}
                         onChange={() => setFinalChoice(L)}
                       />
-                      Choose {L}
+                      Set Final Decision to {L}
                     </label>
                   </div>
                 ))}
@@ -236,11 +293,22 @@ export default function ResolveQuandr3Page() {
                 </label>
                 <textarea
                   value={finalNote}
-                  onChange={(e) => setFinalNote(e.target.value)}
+                  onChange={(e) => setFinalNote((e.target as any).value)}
                   className="mt-2 w-full rounded-2xl border p-3 text-sm"
                   rows={4}
                   placeholder="Explain your final decision..."
                 />
+              </div>
+
+              {/* Discussion placeholder (honest Phase 1) */}
+              <div className="mt-6 rounded-2xl border bg-white p-4">
+                <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">DISCUSSION</div>
+                <div className="mt-2 text-sm text-slate-700">
+                  Coming soon. Phase 2 adds an open discussion thread with replies and back-and-forth.
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  For now, the “Community Reasons” above show why people leaned the way they did.
+                </div>
               </div>
 
               <button
