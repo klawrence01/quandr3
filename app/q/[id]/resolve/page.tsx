@@ -12,77 +12,71 @@ import { supabase } from "@/utils/supabase/browser";
 /* =========================
    Brand
 ========================= */
-
 const NAVY = "#0b2343";
 const BLUE = "#1e63f3";
 const TEAL = "#00a9a5";
 const CORAL = "#ff6b6b";
 const SOFT_BG = "#f5f7fc";
 
-const ALLOWED = ["A", "B", "C", "D"] as const;
-type Label = (typeof ALLOWED)[number];
+const ALLOWED = ["A", "B", "C", "D"];
 
-function cleanLabel(x?: any): Label | "" {
-  const s = (x || "").toString().trim().toUpperCase();
-  return (ALLOWED as readonly string[]).includes(s) ? (s as Label) : "";
+function cleanLabel(x) {
+  const s = (x ?? "").toString().trim().toUpperCase();
+  return ALLOWED.includes(s) ? s : "";
 }
 
-function fmt(ts?: string) {
+function fmt(ts) {
   if (!ts) return "";
   try {
     return new Date(ts).toLocaleString();
   } catch {
-    return ts;
+    return String(ts);
   }
 }
 
-function computeInternetDecided(counts: Record<Label, number>) {
-  const entries = ALLOWED.map((L) => [L, counts[L] || 0] as const);
-  const sorted = entries.slice().sort((a, b) => (b[1] || 0) - (a[1] || 0));
-  const top = sorted[0];
-  if (!top || (top[1] || 0) <= 0) return { label: "" as Label | "", isTie: false, tied: [] as Label[] };
+function computeInternetDecided(counts) {
+  const entries = ALLOWED.map((L) => [L, Number(counts?.[L] || 0)]);
+  entries.sort((a, b) => (b?.[1] || 0) - (a?.[1] || 0));
 
-  const tied = sorted.filter((x) => (x[1] || 0) === top[1]).map((x) => x[0]);
-  return { label: tied.length === 1 ? top[0] : ("" as Label | ""), isTie: tied.length > 1, tied };
+  const top = entries[0];
+  if (!top || (top[1] || 0) <= 0) return { label: "", isTie: false, tied: [] };
+
+  const tied = entries.filter((x) => (x?.[1] || 0) === top[1]).map((x) => x[0]);
+  return { label: tied.length === 1 ? top[0] : "", isTie: tied.length > 1, tied };
 }
 
 export default function ResolveQuandr3Page() {
   const params = useParams();
   const router = useRouter();
-  const id = (params as any)?.id as string;
+  const id = (params || {})?.id ? String(params.id) : "";
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  const [q, setQ] = useState<any>(null);
+  const [q, setQ] = useState(null);
 
-  // ✅ IMPORTANT: store only safe (non-null) option rows
-  const [options, setOptions] = useState<any[]>([]);
+  // keep options null-safe + simple (avoid TS generic parsing weirdness)
+  const [options, setOptions] = useState([]);
+  const [counts, setCounts] = useState({ A: 0, B: 0, C: 0, D: 0 });
+  const [reasonsByLabel, setReasonsByLabel] = useState({ A: [], B: [], C: [], D: [] });
 
-  const [counts, setCounts] = useState<Record<Label, number>>({ A: 0, B: 0, C: 0, D: 0 });
-  const [reasonsByLabel, setReasonsByLabel] = useState<Record<Label, string[]>>({
-    A: [],
-    B: [],
-    C: [],
-    D: [],
-  });
-
-  const [finalChoice, setFinalChoice] = useState<Label | "">("");
+  const [finalChoice, setFinalChoice] = useState("");
   const [finalNote, setFinalNote] = useState("");
 
   const totalVotes = useMemo(() => {
-    return ALLOWED.reduce((sum, L) => sum + (counts[L] || 0), 0);
+    return ALLOWED.reduce((sum, L) => sum + Number(counts?.[L] || 0), 0);
   }, [counts]);
 
-  function pct(label: Label) {
+  function pct(label) {
     if (!totalVotes) return 0;
-    return Math.round(((counts[label] || 0) / totalVotes) * 100);
+    return Math.round((Number(counts?.[label] || 0) / totalVotes) * 100);
   }
 
-  // ✅ helper: grab option text by label (so we can display option copy)
-  function optionText(label: Label) {
-    const row: any = (options || []).find((o: any) => cleanLabel(o?.label) === label);
-    return ((row?.value ?? "") as any).toString().trim();
+  function optionText(label) {
+    const L = cleanLabel(label);
+    if (!L) return "";
+    const row = (options || []).find((o) => cleanLabel(o?.label) === L);
+    return (row?.value ?? "").toString().trim();
   }
 
   const internet = useMemo(() => computeInternetDecided(counts), [counts]);
@@ -108,41 +102,43 @@ export default function ResolveQuandr3Page() {
         .eq("quandr3_id", id)
         .order("order", { ascending: true });
 
-      const { data: choiceRows } = await supabase.from("quandr3_choices").select("label,text").eq("quandr3_id", id);
+      const { data: choiceRows } = await supabase
+        .from("quandr3_choices")
+        .select("label,text")
+        .eq("quandr3_id", id);
 
-      const nextCounts: Record<Label, number> = { A: 0, B: 0, C: 0, D: 0 };
-      const nextReasons: Record<Label, string[]> = { A: [], B: [], C: [], D: [] };
+      const nextCounts = { A: 0, B: 0, C: 0, D: 0 };
+      const nextReasons = { A: [], B: [], C: [], D: [] };
 
-      (choiceRows || []).forEach((r: any) => {
+      (choiceRows || []).forEach((r) => {
         const L = cleanLabel(r?.label);
-        if (L) {
-          nextCounts[L] += 1;
-          const t = (r?.text || "").toString().trim();
-          if (t) nextReasons[L].push(t);
-        }
+        if (!L) return;
+        nextCounts[L] = Number(nextCounts[L] || 0) + 1;
+
+        const t = (r?.text || "").toString().trim();
+        if (t) nextReasons[L].push(t);
       });
 
-      // ✅ null-safe options
       const safeOptions = (oRows || [])
         .filter(Boolean)
-        .filter((o: any) => cleanLabel(o?.label))
-        .map((o: any) => ({
-          id: o.id,
-          label: cleanLabel(o.label),
-          value: (o.value ?? "").toString(),
-          order: o.order,
-        }));
+        .map((o) => ({
+          id: o?.id,
+          label: cleanLabel(o?.label),
+          value: (o?.value ?? "").toString(),
+          order: o?.order,
+        }))
+        .filter((o) => !!o.label);
 
       setQ(qRow || null);
       setOptions(safeOptions);
       setCounts(nextCounts);
       setReasonsByLabel(nextReasons);
 
-      // prefill UI with existing resolution if present
-      const existingChoice = cleanLabel((qRow as any)?.resolved_choice_label);
+      // prefill from existing resolution (if any)
+      const existingChoice = cleanLabel(qRow?.resolved_choice_label);
       if (existingChoice) setFinalChoice(existingChoice);
-      if (typeof (qRow as any)?.resolution_note === "string") setFinalNote((qRow as any).resolution_note);
-    } catch (e: any) {
+      if (typeof qRow?.resolution_note === "string") setFinalNote(qRow.resolution_note);
+    } catch (e) {
       setErr(e?.message || "Failed to load resolve page.");
     } finally {
       setLoading(false);
@@ -175,10 +171,12 @@ export default function ResolveQuandr3Page() {
 
       alert("Resolution saved.");
       router.push(`/q/${id}`);
-    } catch (e: any) {
+    } catch (e) {
       alert(e?.message || "Failed to resolve.");
     }
   }
+
+  const curiosoFinal = cleanLabel(q?.resolved_choice_label);
 
   return (
     <main style={{ minHeight: "100vh", background: SOFT_BG }}>
@@ -201,12 +199,12 @@ export default function ResolveQuandr3Page() {
           ) : (
             <>
               <h1 className="text-3xl font-extrabold" style={{ color: NAVY }}>
-                Resolve: {q.title}
+                Resolve: {q?.title}
               </h1>
 
-              <p className="mt-2 text-slate-700">{q.prompt || q.context}</p>
+              <p className="mt-2 text-slate-700">{q?.prompt || q?.context}</p>
 
-              {/* Internet Decided (not final) */}
+              {/* Internet Decided (crowd winner) */}
               <div className="mt-5 rounded-2xl border bg-slate-50 p-4">
                 <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">INTERNET DECIDED</div>
 
@@ -216,15 +214,14 @@ export default function ResolveQuandr3Page() {
                   </div>
                 ) : internet.isTie ? (
                   <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
-                    Tie: {internet.tied.join(" / ")}{" "}
+                    Crowd tie: {internet.tied.join(" / ")}{" "}
                     <span className="text-slate-500 font-semibold">({totalVotes} total votes)</span>
                   </div>
                 ) : (
                   <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
-                    Top Voted: <span style={{ color: BLUE }}>{internet.label}</span>{" "}
+                    Top voted: <span style={{ color: BLUE }}>{internet.label}</span>{" "}
                     <span className="text-slate-500 font-semibold">
-                      ({internet.label ? counts[internet.label] : 0} votes •{" "}
-                      {internet.label ? pct(internet.label) : 0}% • {totalVotes} total)
+                      ({Number(counts?.[internet.label] || 0)} votes • {pct(internet.label)}% • {totalVotes} total)
                     </span>
                   </div>
                 )}
@@ -234,12 +231,12 @@ export default function ResolveQuandr3Page() {
                 </div>
               </div>
 
-              {/* Final Decision (Curioso) */}
-              {cleanLabel(q?.resolved_choice_label) ? (
+              {/* Curioso Final Decision */}
+              {curiosoFinal ? (
                 <div className="mt-4 rounded-2xl border p-4">
                   <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">FINAL DECISION (CURIOUSO)</div>
                   <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
-                    Final Decision: <span style={{ color: BLUE }}>{cleanLabel(q?.resolved_choice_label)}</span>{" "}
+                    Final decision: <span style={{ color: BLUE }}>{curiosoFinal}</span>{" "}
                     <span className="text-slate-500 font-semibold">{q?.resolved_at ? `• ${fmt(q.resolved_at)}` : ""}</span>
                   </div>
                   {q?.resolution_note ? (
@@ -264,12 +261,12 @@ export default function ResolveQuandr3Page() {
                     )}
 
                     <div className="mt-2 text-sm text-slate-700">
-                      Votes: <b>{counts[L] || 0}</b> ({pct(L)}%)
+                      Votes: <b>{Number(counts?.[L] || 0)}</b> ({pct(L)}%)
                     </div>
 
                     <div className="mt-3 text-xs font-extrabold tracking-[0.18em] text-slate-500">COMMUNITY REASONS</div>
                     <ul className="mt-2 list-disc pl-5 text-xs text-slate-600 space-y-1">
-                      {(reasonsByLabel[L] || []).slice(0, 6).map((t, i) => (
+                      {(reasonsByLabel?.[L] || []).slice(0, 6).map((t, i) => (
                         <li key={i}>{t}</li>
                       ))}
                     </ul>
@@ -294,14 +291,14 @@ export default function ResolveQuandr3Page() {
                 </label>
                 <textarea
                   value={finalNote}
-                  onChange={(e) => setFinalNote((e.target as any).value)}
+                  onChange={(e) => setFinalNote(e.target.value)}
                   className="mt-2 w-full rounded-2xl border p-3 text-sm"
                   rows={4}
                   placeholder="Explain your final decision..."
                 />
               </div>
 
-              {/* Discussion placeholder (honest Phase 1) */}
+              {/* Discussion placeholder */}
               <div className="mt-6 rounded-2xl border bg-white p-4">
                 <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">DISCUSSION</div>
                 <div className="mt-2 text-sm text-slate-700">
