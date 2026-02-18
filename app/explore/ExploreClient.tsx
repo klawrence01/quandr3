@@ -178,9 +178,10 @@ export default function ExploreClient() {
       await loadMe();
 
       // ✅ include region so local can filter by county/region too
+      // ✅ include published_at so we can hide future scheduled posts
       const { data, error } = await supabase
         .from("quandr3s")
-        .select("id,title,prompt,category,status,created_at,closes_at,city,region,state,author_id")
+        .select("id,title,prompt,category,status,created_at,closes_at,city,region,state,author_id,published_at")
         .order("created_at", { ascending: false })
         .limit(SAFE_LIMIT);
 
@@ -267,6 +268,14 @@ export default function ExploreClient() {
 
   const filtered = useMemo(() => {
     let out = [...(rows || [])];
+
+    // ✅ QUEUE RULE: hide posts scheduled for the future
+    out = out.filter((r) => {
+      const p = r?.published_at;
+      if (!p) return true; // show legacy/blank
+      const t = new Date(p).getTime();
+      return Number.isFinite(t) ? t <= Date.now() : true;
+    });
 
     // ✅ Local/Global: City-first, County/Region fallback
     if (scope === "local") {

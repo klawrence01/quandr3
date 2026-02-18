@@ -230,16 +230,20 @@ export default function ResolveQuandr3Page() {
     }
 
     try {
-      const { error } = await supabase
-        .from("quandr3s")
-        .update({
-          category: categoryClean, // ✅ mandatory
-          status: "resolved",
-          resolved_choice_label: chosen,
-          resolved_at: new Date().toISOString(),
-          resolution_note: finalNote,
-        })
-        .eq("id", id);
+      const nowIso = new Date().toISOString();
+
+const { error } = await supabase
+  .from("quandr3s")
+  .update({
+    category: categoryClean, // ✅ mandatory
+    status: "resolved",
+    resolved_choice_label: chosen,
+    resolved_at: nowIso,
+    resolution_note: finalNote,
+    published_at: nowIso, // ✅ NEW: makes it immediately "released" unless queue schedules it later
+  })
+  .eq("id", id);
+
 
       if (error) throw error;
 
