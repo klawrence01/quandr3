@@ -29,7 +29,7 @@ function safeStr(x: any) {
 }
 
 /* =========================
-   ✅ NEW: location parser
+   ✅ location parser
    Expects: "City, County, ST" (or any subset)
 ========================= */
 function parseLocation(loc?: string) {
@@ -40,8 +40,8 @@ function parseLocation(loc?: string) {
 
   return {
     city: parts[0] || "",
-    region: parts[1] || "", // e.g. "New Haven County"
-    state: parts[2] || "", // e.g. "CT"
+    region: parts[1] || "",
+    state: parts[2] || "",
     country: parts[3] || "",
   };
 }
@@ -76,7 +76,7 @@ function effectiveStatus(row: any) {
 function normStatusForFilter(row: any) {
   const s = effectiveStatus(row);
   if (s === "open") return "open";
-  if (s === "awaiting_user") return "closed"; // user-facing “Closed”
+  if (s === "awaiting_user") return "closed";
   if (s === "resolved") return "resolved";
   return "other";
 }
@@ -90,7 +90,7 @@ export default function ExploreClient() {
   const [meId, setMeId] = useState("");
   const [meCity, setMeCity] = useState("");
   const [meState, setMeState] = useState("");
-  const [meRegion, setMeRegion] = useState(""); // ✅ county/region fallback
+  const [meRegion, setMeRegion] = useState("");
 
   // UI filters
   const [scope, setScope] = useState<"global" | "local">("global");
@@ -149,7 +149,6 @@ export default function ExploreClient() {
 
       if (!uid) return;
 
-      // ✅ pull location (preferred) + keep your old city/state fallback
       const { data: prof } = await supabase
         .from("profiles")
         .select("location,city,state")
@@ -177,11 +176,14 @@ export default function ExploreClient() {
     try {
       await loadMe();
 
-      // ✅ include region so local can filter by county/region too
-      // ✅ include published_at so we can hide future scheduled posts
+      // ✅ QUEUE QUERY: show only released posts (published_at <= now) OR legacy rows (published_at is null)
+      const nowIso = new Date().toISOString();
+
       const { data, error } = await supabase
         .from("quandr3s")
         .select("id,title,prompt,category,status,created_at,closes_at,city,region,state,author_id,published_at")
+        .or(`published_at.is.null,published_at.lte.${nowIso}`)
+        .order("published_at", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(SAFE_LIMIT);
 
@@ -222,7 +224,7 @@ export default function ExploreClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ Refresh when Create sets localStorage flag
+  // ✅ Refresh when Create/Resolve sets localStorage flag
   useEffect(() => {
     function tick() {
       try {
@@ -269,14 +271,6 @@ export default function ExploreClient() {
   const filtered = useMemo(() => {
     let out = [...(rows || [])];
 
-    // ✅ QUEUE RULE: hide posts scheduled for the future
-    out = out.filter((r) => {
-      const p = r?.published_at;
-      if (!p) return true; // show legacy/blank
-      const t = new Date(p).getTime();
-      return Number.isFinite(t) ? t <= Date.now() : true;
-    });
-
     // ✅ Local/Global: City-first, County/Region fallback
     if (scope === "local") {
       const mc = safeStr(meCity).trim().toLowerCase();
@@ -289,16 +283,8 @@ export default function ExploreClient() {
           const rr = safeStr(r?.region).trim().toLowerCase();
           const rs = safeStr(r?.state).trim().toLowerCase();
 
-          // ✅ if you want strict "in my state only", uncomment this:
-          // if (ms && rs && rs !== ms) return false;
-
-          // City match wins
           if (mc && rc && rc === mc) return true;
-
-          // County/Region fallback
           if (mr && rr && rr === mr) return true;
-
-          // final soft fallback: state-only (prevents empty local feed early on)
           if (!mc && !mr && ms && rs && rs === ms) return true;
 
           return false;
@@ -316,7 +302,7 @@ export default function ExploreClient() {
       out = out.filter((r) => safeStr(r?.category).trim() === categoryFilter);
     }
 
-    // Search (title/prompt/category/city/region/state/status/author)
+    // Search
     const q = searchQ.trim().toLowerCase();
     if (q) {
       out = out.filter((r) => {

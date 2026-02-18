@@ -18,7 +18,6 @@ type Quandr3Row = {
   category: string;
   status: string;
 
-  // context (prompt-first, context fallback)
   prompt?: string | null;
   context?: string | null;
 
@@ -31,6 +30,9 @@ type Quandr3Row = {
   resolved_at?: string | null;
   resolved_choice_label?: string | null;
   resolution_note?: string | null;
+
+  // ✅ QUEUE / scheduled release
+  published_at?: string | null;
 };
 
 const FEED_CATEGORIES = [
@@ -43,7 +45,6 @@ const FEED_CATEGORIES = [
   "Real Estate",
 ];
 
-// Canonical route for a Quandr3 detail page.
 function qHref(id: string) {
   return `/q/${id}`;
 }
@@ -76,6 +77,30 @@ function snippet(s?: any, n = 160) {
   return t.length > n ? `${t.slice(0, n).trim()}…` : t;
 }
 
+function isReleased(row: Quandr3Row) {
+  // If published_at is missing, treat as released (back-compat)
+  if (!row?.published_at) return true;
+  const t = new Date(row.published_at).getTime();
+  return Number.isFinite(t) ? t <= Date.now() : true;
+}
+
+async function shareOrCopy(url: string) {
+  try {
+    // @ts-ignore
+    if (navigator?.share) {
+      // @ts-ignore
+      await navigator.share({ title: "Quandr3", url });
+      return { ok: true, mode: "share" as const };
+    }
+  } catch {}
+  try {
+    // @ts-ignore
+    await navigator.clipboard.writeText(url);
+    return { ok: true, mode: "copy" as const };
+  } catch {}
+  return { ok: false, mode: "none" as const };
+}
+
 export default function HomePage() {
   const [items, setItems] = useState<Quandr3Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,11 +112,16 @@ export default function HomePage() {
       setLoading(true);
       setMessage(null);
 
+      const nowIso = new Date().toISOString();
+
       const { data, error } = await supabase
         .from("quandr3s")
         .select(
-          "id,title,category,status,prompt,context,city,state,created_at,closes_at,resolved_at,resolved_choice_label,resolution_note"
+          "id,title,category,status,prompt,context,city,state,created_at,closes_at,resolved_at,resolved_choice_label,resolution_note,published_at"
         )
+        // ✅ show released posts only (or back-compat null)
+        .or(`published_at.is.null,published_at.lte.${nowIso}`)
+        .order("published_at", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(40);
 
@@ -99,7 +129,9 @@ export default function HomePage() {
         console.error("[Home] load quandr3s error", error);
         setMessage(error.message);
       } else {
-        setItems(data || []);
+        // extra safety (in case query behavior differs)
+        const safe = (data || []).filter(isReleased);
+        setItems(safe);
       }
 
       setLoading(false);
@@ -109,12 +141,14 @@ export default function HomePage() {
   }, []);
 
   const filteredItems = useMemo(() => {
-    if (activeCategory === "All") return items;
-    return items.filter((q) => q.category === activeCategory);
+    const base = (items || []).filter(isReleased);
+    if (activeCategory === "All") return base;
+    return base.filter((q) => q.category === activeCategory);
   }, [items, activeCategory]);
 
   const liveItems = useMemo(() => {
-    return items.slice(0, 3);
+    // first 3 released items (already filtered by query)
+    return (items || []).filter(isReleased).slice(0, 3);
   }, [items]);
 
   return (
@@ -173,8 +207,7 @@ export default function HomePage() {
                 marginBottom: 16,
               }}
             >
-              Real decisions deserve real perspective, real reasoning, and real
-              closure. Quandr3 closes the loop so you gain clarity — and the
+              Real decisions deserve real perspective, real reasoning, and real closure. Quandr3 closes the loop so you gain clarity — and the
               community gains shared wisdom.
             </p>
             <p
@@ -186,21 +219,11 @@ export default function HomePage() {
                 marginBottom: 20,
               }}
             >
-              Quandr3 is a{" "}
-              <span style={{ fontWeight: 700 }}>clarity engine</span> — a social
-              decision platform built around real human perspective. You ask a
-              question, real people share their reasoning, and you reveal what
-              you chose.
+              Quandr3 is a <span style={{ fontWeight: 700 }}>clarity engine</span> — a social decision platform built around real human perspective. You
+              ask a question, real people share their reasoning, and you reveal what you chose.
             </p>
 
-            <div
-              style={{
-                display: "flex",
-                gap: 12,
-                flexWrap: "wrap",
-                marginBottom: 10,
-              }}
-            >
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
               <Link href="/explore" style={{ textDecoration: "none" }}>
                 <button
                   type="button"
@@ -212,8 +235,7 @@ export default function HomePage() {
                     fontSize: 14,
                     fontWeight: 800,
                     color: "#ffffff",
-                    background:
-                      "linear-gradient(135deg, #1e63f3, #00a9a5, #ff6b6b)",
+                    background: "linear-gradient(135deg, #1e63f3, #00a9a5, #ff6b6b)",
                     boxShadow: "0 18px 40px rgba(15,23,42,0.45)",
                   }}
                 >
@@ -240,15 +262,8 @@ export default function HomePage() {
               </Link>
             </div>
 
-            <p
-              style={{
-                fontSize: 12,
-                color: "#9ca3af",
-                marginTop: 4,
-              }}
-            >
-              No bots. No “hot takes.” Just real choices, real context, and real
-              outcomes.
+            <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>
+              No bots. No “hot takes.” Just real choices, real context, and real outcomes.
             </p>
 
             {/* The Quandr3 loop card */}
@@ -262,39 +277,14 @@ export default function HomePage() {
                 border: "1px solid rgba(15,23,42,0.06)",
               }}
             >
-              <div
-                style={{
-                  fontSize: 11,
-                  letterSpacing: 1.5,
-                  textTransform: "uppercase",
-                  fontWeight: 800,
-                  color: "#1e63f3",
-                  marginBottom: 6,
-                }}
-              >
+              <div style={{ fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase", fontWeight: 800, color: "#1e63f3", marginBottom: 6 }}>
                 THE QUANDR3 LOOP
               </div>
-              <div
-                style={{
-                  fontSize: 13,
-                  fontWeight: 800,
-                  marginBottom: 4,
-                  color: NAVY,
-                }}
-              >
-                Ask → Perspectives → Reasoning → Decision → Outcome → Shared
-                wisdom.
+              <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4, color: NAVY }}>
+                Ask → Perspectives → Reasoning → Decision → Outcome → Shared wisdom.
               </div>
-              <p
-                style={{
-                  fontSize: 12,
-                  color: "#6b7280",
-                  margin: 0,
-                }}
-              >
-                Most platforms stop at the advice. Quandr3 completes the loop so
-                helpers get closure and the community gains “unlived
-                experience.”
+              <p style={{ fontSize: 12, color: "#6b7280", margin: 0 }}>
+                Most platforms stop at the advice. Quandr3 completes the loop so helpers get closure and the community gains “unlived experience.”
               </p>
             </div>
           </div>
@@ -314,28 +304,13 @@ export default function HomePage() {
             }}
           >
             <div>
-              <div
-                style={{
-                  fontSize: 11,
-                  letterSpacing: 2,
-                  textTransform: "uppercase",
-                  fontWeight: 800,
-                  color: TEAL,
-                  marginBottom: 10,
-                }}
-              >
+              <div style={{ fontSize: 11, letterSpacing: 2, textTransform: "uppercase", fontWeight: 800, color: TEAL, marginBottom: 10 }}>
                 Live right now
               </div>
 
               {liveItems.length === 0 && (
-                <p
-                  style={{
-                    fontSize: 13,
-                    color: "#cbd5f5",
-                  }}
-                >
-                  No live Quandr3s yet. Once people start posting, you’ll see
-                  them here.
+                <p style={{ fontSize: 13, color: "#cbd5f5" }}>
+                  No live Quandr3s yet. Once people start posting, you’ll see them here.
                 </p>
               )}
 
@@ -346,31 +321,12 @@ export default function HomePage() {
                     <div
                       style={{
                         padding: "12px 4px",
-                        borderTop:
-                          idx === 0
-                            ? "none"
-                            : "1px solid rgba(148, 163, 184, 0.3)",
+                        borderTop: idx === 0 ? "none" : "1px solid rgba(148, 163, 184, 0.3)",
                         cursor: "pointer",
                       }}
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 10,
-                          marginBottom: 6,
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontSize: 11,
-                            fontWeight: 900,
-                            letterSpacing: 1,
-                            color: "#cbd5e1",
-                            textTransform: "uppercase",
-                          }}
-                        >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
+                        <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 1, color: "#cbd5e1", textTransform: "uppercase" }}>
                           {q.category}
                         </div>
 
@@ -390,16 +346,7 @@ export default function HomePage() {
                         </span>
                       </div>
 
-                      <div
-                        style={{
-                          fontSize: 14,
-                          fontWeight: 900,
-                          color: "#e5e7eb",
-                          marginBottom: 6,
-                        }}
-                      >
-                        {q.title}
-                      </div>
+                      <div style={{ fontSize: 14, fontWeight: 900, color: "#e5e7eb", marginBottom: 6 }}>{q.title}</div>
 
                       <div style={{ fontSize: 11, color: "#9ca3af" }}>
                         {fmt(q.created_at)}
@@ -422,22 +369,8 @@ export default function HomePage() {
 
         {/* Category pills */}
         <section style={{ marginTop: 40 }}>
-          <div
-            style={{
-              marginBottom: 10,
-              fontSize: 12,
-              color: "#6b7280",
-            }}
-          >
-            Browse Quandr3s by category.
-          </div>
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              flexWrap: "wrap",
-            }}
-          >
+          <div style={{ marginBottom: 10, fontSize: 12, color: "#6b7280" }}>Browse Quandr3s by category.</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {FEED_CATEGORIES.map((cat) => {
               const active = cat === activeCategory;
               return (
@@ -465,26 +398,13 @@ export default function HomePage() {
 
         {/* Feed list */}
         <section style={{ marginTop: 22 }}>
-          {loading && (
-            <p style={{ fontSize: 13, color: "#6b7280" }}>Loading…</p>
-          )}
-          {message && (
-            <p style={{ fontSize: 13, color: "#c0392b" }}>{message}</p>
-          )}
+          {loading && <p style={{ fontSize: 13, color: "#6b7280" }}>Loading…</p>}
+          {message && <p style={{ fontSize: 13, color: "#c0392b" }}>{message}</p>}
           {!loading && !message && filteredItems.length === 0 && (
-            <p style={{ fontSize: 13, color: "#6b7280" }}>
-              No Quandr3s match these filters yet.
-            </p>
+            <p style={{ fontSize: 13, color: "#6b7280" }}>No Quandr3s match these filters yet.</p>
           )}
 
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 16,
-              marginTop: 6,
-            }}
-          >
+          <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 6 }}>
             {filteredItems.map((q) => (
               <HomeFeedCard key={q.id} q={q} />
             ))}
@@ -502,6 +422,15 @@ function HomeFeedCard({ q }: { q: Quandr3Row }) {
   const finalChoice = cleanLabel(q.resolved_choice_label);
   const note = snippet(q.resolution_note, 200);
 
+  async function onShare(e: any) {
+    e.preventDefault();
+    e.stopPropagation();
+    const url = typeof window !== "undefined" ? `${window.location.origin}/q/${q.id}` : `/q/${q.id}`;
+    const res = await shareOrCopy(url);
+    if (!res.ok) alert("Could not share/copy on this device.");
+    else alert(res.mode === "share" ? "Shared." : "Link copied.");
+  }
+
   return (
     <Link href={qHref(q.id)} style={{ textDecoration: "none" }}>
       <article
@@ -517,24 +446,8 @@ function HomeFeedCard({ q }: { q: Quandr3Row }) {
         }}
       >
         {/* Top row: category + status pill */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            marginBottom: 10,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 900,
-              letterSpacing: 1.2,
-              textTransform: "uppercase",
-              color: "#64748b",
-            }}
-          >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 1.2, textTransform: "uppercase", color: "#64748b" }}>
             {(q.category || "QUANDR3").toString().toUpperCase()}
           </div>
 
@@ -555,31 +468,11 @@ function HomeFeedCard({ q }: { q: Quandr3Row }) {
         </div>
 
         {/* Title */}
-        <h3
-          style={{
-            fontSize: 18,
-            fontWeight: 950,
-            margin: 0,
-            marginBottom: 6,
-            color: NAVY,
-            lineHeight: 1.25,
-          }}
-        >
-          {q.title}
-        </h3>
+        <h3 style={{ fontSize: 18, fontWeight: 950, margin: 0, marginBottom: 6, color: NAVY, lineHeight: 1.25 }}>{q.title}</h3>
 
-        {/* Context (prompt-first, context fallback) */}
+        {/* Context */}
         {contextLine ? (
-          <div
-            style={{
-              fontSize: 13,
-              color: "#475569",
-              lineHeight: 1.55,
-              marginBottom: 12,
-            }}
-          >
-            {contextLine}
-          </div>
+          <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.55, marginBottom: 12 }}>{contextLine}</div>
         ) : null}
 
         {/* Meta row */}
@@ -595,8 +488,7 @@ function HomeFeedCard({ q }: { q: Quandr3Row }) {
           }}
         >
           <span>
-            <span style={{ fontWeight: 800, color: NAVY }}>Posted:</span>{" "}
-            {fmt(q.created_at)}
+            <span style={{ fontWeight: 800, color: NAVY }}>Posted:</span> {fmt(q.created_at)}
           </span>
 
           {(q.city || q.state) ? (
@@ -609,20 +501,18 @@ function HomeFeedCard({ q }: { q: Quandr3Row }) {
 
           {q.closes_at ? (
             <span>
-              • <span style={{ fontWeight: 800, color: NAVY }}>Closes:</span>{" "}
-              {fmt(q.closes_at)}
+              • <span style={{ fontWeight: 800, color: NAVY }}>Closes:</span> {fmt(q.closes_at)}
             </span>
           ) : null}
 
           {q.resolved_at ? (
             <span>
-              • <span style={{ fontWeight: 800, color: NAVY }}>Resolved:</span>{" "}
-              {fmt(q.resolved_at)}
+              • <span style={{ fontWeight: 800, color: NAVY }}>Resolved:</span> {fmt(q.resolved_at)}
             </span>
           ) : null}
         </div>
 
-        {/* Resolved mini-format (no images; matches new vibe) */}
+        {/* Resolved mini-format */}
         {q.status?.toLowerCase() === "resolved" ? (
           <div
             style={{
@@ -633,16 +523,7 @@ function HomeFeedCard({ q }: { q: Quandr3Row }) {
               marginTop: 10,
             }}
           >
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 900,
-                letterSpacing: 2,
-                textTransform: "uppercase",
-                color: "#64748b",
-                marginBottom: 8,
-              }}
-            >
+            <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 2, textTransform: "uppercase", color: "#64748b", marginBottom: 8 }}>
               Curioso Verdict
             </div>
 
@@ -660,33 +541,20 @@ function HomeFeedCard({ q }: { q: Quandr3Row }) {
                   color: NAVY,
                 }}
               >
-                Final decision:{" "}
-                <span style={{ color: BLUE }}>{finalChoice || "—"}</span>
+                Final decision: <span style={{ color: BLUE }}>{finalChoice || "—"}</span>
               </span>
 
-              <span
-                style={{
-                  fontSize: 12,
-                  fontWeight: 800,
-                  color: TEAL,
-                }}
-              >
-                View full results + reasons →
-              </span>
+              <span style={{ fontSize: 12, fontWeight: 800, color: TEAL }}>View full results + reasons →</span>
             </div>
 
-            {note ? (
-              <div style={{ marginTop: 10, fontSize: 13, color: "#334155", lineHeight: 1.55 }}>
-                {note}
-              </div>
-            ) : null}
+            {note ? <div style={{ marginTop: 10, fontSize: 13, color: "#334155", lineHeight: 1.55 }}>{note}</div> : null}
           </div>
         ) : null}
 
-        {/* Share pill (non-functional placeholder for now) */}
+        {/* Share */}
         <button
           type="button"
-          onClick={(e) => e.preventDefault()}
+          onClick={onShare}
           style={{
             marginTop: 14,
             borderRadius: 999,
