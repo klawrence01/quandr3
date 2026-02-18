@@ -26,6 +26,10 @@ function fmt(ts?: string) {
   }
 }
 
+function safeStr(x: any) {
+  return (x ?? "").toString();
+}
+
 function hoursLeftFromClosesAt(closesAt?: string) {
   if (!closesAt) return null;
   const end = new Date(closesAt).getTime();
@@ -66,6 +70,9 @@ export default function Quandr3DetailPage() {
   const [opts, setOpts] = useState<any[]>([]);
   const [err, setErr] = useState<string>("");
 
+  // ✅ Curioso (author) info
+  const [author, setAuthor] = useState<any>(null);
+
   // auth (for author-only toggle)
   const [meId, setMeId] = useState("");
 
@@ -104,6 +111,9 @@ export default function Quandr3DetailPage() {
   const [notifyOnResolve, setNotifyOnResolve] = useState(false);
   const [notifyMsg, setNotifyMsg] = useState("");
 
+  // Share UX
+  const [shareMsg, setShareMsg] = useState("");
+
   const badge = useMemo(() => statusBadge(q?.status), [q?.status]);
   const hrsLeft = useMemo(() => hoursLeftFromClosesAt(q?.closes_at), [q?.closes_at]);
 
@@ -122,8 +132,8 @@ export default function Quandr3DetailPage() {
     return true;
   }, [q?.status, q?.closes_at]);
 
-  const isResolved = useMemo(() => ((q?.status || "").toLowerCase() === "resolved"), [q?.status]);
-  const isAwaiting = useMemo(() => ((q?.status || "").toLowerCase() === "awaiting_user"), [q?.status]);
+  const isResolved = useMemo(() => (q?.status || "").toLowerCase() === "resolved", [q?.status]);
+  const isAwaiting = useMemo(() => (q?.status || "").toLowerCase() === "awaiting_user", [q?.status]);
 
   const isAuthor = useMemo(() => {
     if (!meId || !q?.author_id) return false;
@@ -149,6 +159,20 @@ export default function Quandr3DetailPage() {
     if (isTie) return "";
     return leaderLabel;
   }, [leaderLabel, leaderCount, isTie]);
+
+  const requiredCategoryMissing = useMemo(() => !safeStr(q?.category).trim(), [q?.category]);
+
+  const curiosoName = useMemo(() => {
+    const dn = safeStr(author?.display_name).trim();
+    const un = safeStr(author?.username).trim();
+    if (dn) return dn;
+    if (un) return un;
+    const aid = safeStr(q?.author_id);
+    if (!aid) return "Curioso";
+    return `${aid.slice(0, 6)}…${aid.slice(-4)}`;
+  }, [author?.display_name, author?.username, q?.author_id]);
+
+  const curiosoHref = useMemo(() => (q?.author_id ? `/u/${q.author_id}` : "#"), [q?.author_id]);
 
   // restore local vote + notify prefs
   useEffect(() => {
@@ -226,6 +250,19 @@ export default function Quandr3DetailPage() {
     setReasonsByLabel(grouped);
   }
 
+  async function loadAuthorProfile(authorId?: string) {
+    if (!authorId) return;
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id,display_name,username,avatar_url,role,city,state,location")
+        .eq("id", authorId)
+        .maybeSingle();
+
+      if (!error) setAuthor(data || null);
+    } catch {}
+  }
+
   useEffect(() => {
     let alive = true;
 
@@ -236,6 +273,7 @@ export default function Quandr3DetailPage() {
       setVotingMsg("");
       setDiscErr("");
       setNotifyMsg("");
+      setShareMsg("");
 
       try {
         await loadMe();
@@ -243,7 +281,7 @@ export default function Quandr3DetailPage() {
         const { data: qRow, error: qErr } = await supabase
           .from("quandr3s")
           .select(
-            // ✅ FIX: include prompt, keep context for backward compat
+            // ✅ include prompt, keep context for backward compat
             "id,title,prompt,context,category,status,created_at,closes_at,author_id,city,state,discussion_open,resolved_at,resolved_choice_label,resolution_note"
           )
           .eq("id", id)
@@ -269,6 +307,7 @@ export default function Quandr3DetailPage() {
         setQ(qRow);
         setOpts(cleaned);
 
+        await loadAuthorProfile(qRow?.author_id);
         await loadCounts(id);
         await loadReasons(id);
       } catch (e: any) {
@@ -291,6 +330,7 @@ export default function Quandr3DetailPage() {
     setVotingErr("");
     setVotingMsg("");
     setNotifyMsg("");
+    setShareMsg("");
 
     const L = cleanLabel(label);
     if (!L) return;
@@ -350,6 +390,7 @@ export default function Quandr3DetailPage() {
     setVotingErr("");
     setVotingMsg("");
     setNotifyMsg("");
+    setShareMsg("");
 
     if (!myVote) {
       setVotingErr("Vote first, then add your reason.");
@@ -406,6 +447,7 @@ export default function Quandr3DetailPage() {
 
   function handleNotifyToggle() {
     setNotifyMsg("");
+    setShareMsg("");
     const next = !notifyOnResolve;
     setNotifyOnResolve(next);
     try {
@@ -416,6 +458,34 @@ export default function Quandr3DetailPage() {
         ? "Got it — you’ll be informed when the Curioso posts the final resolution (Phase 1: saved on this device)."
         : "Removed."
     );
+  }
+
+  async function handleShare() {
+    setShareMsg("");
+    try {
+      const url = typeof window !== "undefined" ? window.location.href : "";
+      const title = safeStr(q?.title).trim() || "Quandr3";
+      const text = "See the options + the reasons behind the internet’s choice.";
+
+      // native share when available
+      if (navigator?.share) {
+        await navigator.share({ title, text, url });
+        setShareMsg("Shared.");
+        return;
+      }
+
+      // fallback: copy link
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        setShareMsg("Link copied.");
+        return;
+      }
+
+      // last fallback
+      setShareMsg(url ? `Copy this link: ${url}` : "Copy link from address bar.");
+    } catch {
+      setShareMsg("Could not share. Copy link from address bar.");
+    }
   }
 
   // Banner content (the “gentle hand”)
@@ -488,12 +558,7 @@ export default function Quandr3DetailPage() {
           </span>
         </div>
 
-        <div
-          className="mt-1 h-2 w-full rounded-full border bg-white"
-          style={{
-            borderColor: emphasize ? CORAL : "#e2e8f0",
-          }}
-        >
+        <div className="mt-1 h-2 w-full rounded-full border bg-white" style={{ borderColor: emphasize ? CORAL : "#e2e8f0" }}>
           <div
             className="h-2 rounded-full"
             style={{
@@ -550,20 +615,32 @@ export default function Quandr3DetailPage() {
             <div className="text-slate-600">Not found.</div>
           ) : (
             <>
+              {/* ✅ Category is mandatory */}
               <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">
-                {(q.category || "QUANDR3").toString().toUpperCase()}
+                {requiredCategoryMissing ? (
+                  <span className="rounded-full border px-3 py-1" style={{ borderColor: "#fecaca", color: "#b91c1c", background: "#fef2f2" }}>
+                    CATEGORY REQUIRED
+                  </span>
+                ) : (
+                  safeStr(q.category).toUpperCase()
+                )}
               </div>
 
               <h1 className="mt-3 text-3xl font-extrabold leading-tight md:text-4xl" style={{ color: NAVY }}>
                 {q.title}
               </h1>
 
-              {/* ✅ FIX: prompt-first, context fallback */}
-              {(q.prompt || q.context) ? (
-                <p className="mt-3 text-base text-slate-700">{q.prompt || q.context}</p>
+              {/* prompt-first, context fallback */}
+              {(q.prompt || q.context) ? <p className="mt-3 text-base text-slate-700">{q.prompt || q.context}</p> : null}
+
+              {/* ✅ Category requirement callout */}
+              {requiredCategoryMissing ? (
+                <div className="mt-4 rounded-2xl border p-4 text-sm font-semibold" style={{ borderColor: "#fecaca", background: "#fef2f2", color: "#991b1b" }}>
+                  This Quandr3 is missing a category. Category is mandatory for resolved posts.
+                </div>
               ) : null}
 
-              {/* ✅ Dynamic banner */}
+              {/* Dynamic banner */}
               <div className="mt-6 rounded-2xl border p-5" style={{ background: banner.bg, borderColor: banner.border }}>
                 <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                   {banner.title}
@@ -591,6 +668,19 @@ export default function Quandr3DetailPage() {
                       {notifyOnResolve ? "✅ You’ll be informed" : "Get informed when resolution posts"}
                     </button>
                   ) : null}
+
+                  {/* ✅ Share button (required on resolved) */}
+                  {(isResolved || isAwaiting) ? (
+                    <button
+                      type="button"
+                      onClick={handleShare}
+                      className="rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50"
+                      style={{ color: NAVY }}
+                      title="Share this resolved Quandr3"
+                    >
+                      Share
+                    </button>
+                  ) : null}
                 </div>
 
                 {notifyMsg ? (
@@ -598,64 +688,13 @@ export default function Quandr3DetailPage() {
                     {notifyMsg}
                   </div>
                 ) : null}
-              </div>
 
-              {/* ✅ Internet Decided box (ONLY when awaiting_user) */}
-              {isAwaiting ? (
-                <div className="mt-5 rounded-2xl border p-5" style={{ background: "#fff7ed", borderColor: "#fed7aa" }}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-extrabold" style={{ color: NAVY }}>
-                        The internet has decided
-                      </div>
-
-                      <div className="mt-1 text-sm text-slate-700">
-                        {winnerLabel ? (
-                          <>
-                            Winner:{" "}
-                            <span className="font-extrabold" style={{ color: CORAL }}>
-                              {winnerLabel}
-                            </span>{" "}
-                            ({pct(winnerLabel)}%, {leaderCount} vote{leaderCount === 1 ? "" : "s"}).
-                          </>
-                        ) : leaderLabel && isTie ? (
-                          <>It’s currently a tie — the internet is split.</>
-                        ) : (
-                          <>No votes yet.</>
-                        )}{" "}
-                        Waiting for the Curioso to decide. Check below for details.
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => scrollToId("results")}
-                        className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
-                        style={{ background: NAVY }}
-                      >
-                        See the breakdown
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleNotifyToggle}
-                        className="rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50"
-                        style={{ color: NAVY }}
-                        title="Phase 1: saved on this device"
-                      >
-                        {notifyOnResolve ? "✅ You’ll be informed" : "Get informed when Curioso resolves"}
-                      </button>
-                    </div>
+                {shareMsg ? (
+                  <div className="mt-2 text-xs font-semibold" style={{ color: TEAL }}>
+                    {shareMsg}
                   </div>
-
-                  {notifyMsg ? (
-                    <div className="mt-2 text-xs font-semibold" style={{ color: TEAL }}>
-                      {notifyMsg}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+                ) : null}
+              </div>
 
               <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-slate-600">
                 <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: badge.bg, color: badge.fg }}>
@@ -680,6 +719,7 @@ export default function Quandr3DetailPage() {
                   </>
                 ) : null}
 
+                {/* ✅ include city/state (locked) */}
                 {(q.city || q.state) ? (
                   <>
                     <span className="text-slate-400">•</span>
@@ -692,71 +732,152 @@ export default function Quandr3DetailPage() {
                 ) : null}
               </div>
 
+              {/* ✅ Curioso link (required) + display name */}
               <div className="mt-6 flex flex-wrap items-center gap-3">
                 <Link
-                  href={q.author_id ? `/u/${q.author_id}` : "#"}
+                  href={curiosoHref}
                   className="rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50"
                   style={{ color: NAVY }}
                 >
-                  View Author Profile
+                  View Curioso
                 </Link>
 
                 <div className="text-sm text-slate-600">
-                  Author:{" "}
+                  Curioso: <span className="font-extrabold" style={{ color: NAVY }}>{curiosoName}</span>
+                </div>
+
+                <div className="text-sm text-slate-600">
+                  ID:{" "}
                   <span className="font-mono text-slate-800">
                     {String(q.author_id || "").slice(0, 6)}…{String(q.author_id || "").slice(-4)}
                   </span>
                 </div>
-
-                {isOpen && hrsLeft === 0 ? (
-                  <Link
-                    href={`/q/${id}/resolve`}
-                    className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
-                    style={{ background: BLUE }}
-                  >
-                    Resolve this
-                  </Link>
-                ) : null}
               </div>
 
+              {/* ✅ Approved resolved layout: Internet Decided + Curioso Verdict */}
               {(isResolved || isAwaiting) ? (
-                <div id="final" className="mt-8 rounded-2xl border p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="text-sm font-extrabold" style={{ color: NAVY }}>
-                      Final Resolution
+                <div id="final" className="mt-8 space-y-4">
+                  {/* INTERNET DECIDED (for awaiting_user AND resolved) */}
+                  <div className="rounded-2xl border p-5" style={{ background: "#f8fafc", borderColor: "#e2e8f0" }}>
+                    <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">INTERNET DECIDED</div>
+
+                    <div className="mt-2 text-sm text-slate-700">
+                      {winnerLabel ? (
+                        <>
+                          <span className="font-extrabold" style={{ color: NAVY }}>
+                            Top voted:
+                          </span>{" "}
+                          <span className="font-extrabold" style={{ color: CORAL }}>
+                            {winnerLabel}
+                          </span>{" "}
+                          ({leaderCount} vote{leaderCount === 1 ? "" : "s"} • {pct(winnerLabel)}% • {totalVotes} total)
+                        </>
+                      ) : leaderLabel && isTie ? (
+                        <>It’s a tie — the internet is split.</>
+                      ) : (
+                        <>No votes yet.</>
+                      )}
                     </div>
-                    <div className="text-xs text-slate-500">Resolved: {q.resolved_at ? fmt(q.resolved_at) : "—"}</div>
-                  </div>
 
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "#eef2ff", color: NAVY }}>
-                      Final Choice: {cleanLabel(q.resolved_choice_label) || "—"}
-                    </span>
+                    <div className="mt-1 text-sm text-slate-600">
+                      This is the crowd outcome. The <span className="font-extrabold" style={{ color: NAVY }}>Curioso Verdict</span> is the official final decision.
+                    </div>
 
-                    <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "#ecfeff", color: TEAL }}>
-                      Discussion: {q.discussion_open ? "Open" : "Closed"}
-                    </span>
-
-                    {isAuthor ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
-                        onClick={toggleDiscussion}
-                        disabled={discSaving}
-                        className="ml-1 rounded-full px-3 py-1 text-xs font-extrabold text-white disabled:opacity-60"
-                        style={{ background: q.discussion_open ? NAVY : BLUE }}
+                        onClick={() => scrollToId("results")}
+                        className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
+                        style={{ background: NAVY }}
                       >
-                        {discSaving ? "Saving…" : q.discussion_open ? "Close Discussion" : "Open Discussion"}
+                        View reasons
                       </button>
-                    ) : null}
+
+                      {isAwaiting ? (
+                        <button
+                          type="button"
+                          onClick={handleNotifyToggle}
+                          className="rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50"
+                          style={{ color: NAVY }}
+                          title="Phase 1: saved on this device"
+                        >
+                          {notifyOnResolve ? "✅ You’ll be informed" : "Get informed when Curioso resolves"}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
 
-                  {discErr ? <div className="mt-2 text-sm font-semibold text-red-600">{discErr}</div> : null}
+                  {/* CURIOSO VERDICT (resolved only) */}
+                  {isResolved ? (
+                    <div className="rounded-2xl border p-5" style={{ borderColor: "#c7d2fe", background: "#ffffff" }}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">CURIOSO VERDICT</div>
+                          <div className="mt-2 text-sm font-extrabold" style={{ color: NAVY }}>
+                            Final decision: {cleanLabel(q.resolved_choice_label) || "—"}
+                          </div>
+                        </div>
 
-                  <div className="mt-4 rounded-2xl border p-4 text-sm text-slate-700">
-                    {(q.resolution_note || "").toString().trim() ? q.resolution_note : "No resolution note yet."}
-                  </div>
+                        <div className="text-xs text-slate-500">Resolved: {q.resolved_at ? fmt(q.resolved_at) : "—"}</div>
+                      </div>
 
-                  <div className="mt-2 text-xs text-slate-500">(Resolve → see results → then decide whether to open discussion.)</div>
+                      {/* ✅ Curioso context (locked): show situation + city/state */}
+                      <div className="mt-4 rounded-2xl border p-4 text-sm text-slate-700">
+                        <div className="text-xs font-extrabold tracking-[0.2em] text-slate-500">CURIOSO CONTEXT</div>
+                        <div className="mt-2">
+                          {(q.prompt || q.context) ? (
+                            <div className="text-slate-700">{q.prompt || q.context}</div>
+                          ) : (
+                            <div className="text-slate-600">No context provided.</div>
+                          )}
+                        </div>
+
+                        {(q.city || q.state) ? (
+                          <div className="mt-3 text-xs font-bold text-slate-500">
+                            Location:{" "}
+                            <span className="font-extrabold" style={{ color: NAVY }}>
+                              {q.city ? q.city : ""}
+                              {q.city && q.state ? ", " : ""}
+                              {q.state ? q.state : ""}
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="mt-4 rounded-2xl border p-4 text-sm text-slate-700">
+                        {(q.resolution_note || "").toString().trim() ? q.resolution_note : "No resolution note yet."}
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "#ecfeff", color: TEAL }}>
+                          Discussion: {q.discussion_open ? "Open" : "Closed"}
+                        </span>
+
+                        {isAuthor ? (
+                          <button
+                            type="button"
+                            onClick={toggleDiscussion}
+                            disabled={discSaving}
+                            className="rounded-full px-3 py-1 text-xs font-extrabold text-white disabled:opacity-60"
+                            style={{ background: q.discussion_open ? NAVY : BLUE }}
+                          >
+                            {discSaving ? "Saving…" : q.discussion_open ? "Close Discussion" : "Open Discussion"}
+                          </button>
+                        ) : null}
+
+                        <button
+                          type="button"
+                          onClick={handleShare}
+                          className="rounded-full border bg-white px-3 py-1 text-xs font-extrabold hover:bg-slate-50"
+                          style={{ color: NAVY }}
+                        >
+                          Share
+                        </button>
+                      </div>
+
+                      {discErr ? <div className="mt-2 text-sm font-semibold text-red-600">{discErr}</div> : null}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -769,9 +890,7 @@ export default function Quandr3DetailPage() {
                   <div className="text-xs text-slate-500">{isOpen ? "Tap an option to vote." : "Votes are closed."}</div>
                 </div>
 
-                {!isOpen ? (
-                  <div className="mt-2 text-sm text-slate-700 font-semibold">Votes are no longer accepted for this Quandr3.</div>
-                ) : null}
+                {!isOpen ? <div className="mt-2 text-sm text-slate-700 font-semibold">Votes are no longer accepted for this Quandr3.</div> : null}
 
                 {openButNoOptions ? (
                   <div className="mt-3 rounded-2xl border p-4 text-sm text-amber-700 bg-amber-50">
@@ -863,7 +982,6 @@ export default function Quandr3DetailPage() {
                       const votes = voteCounts[label] || 0;
 
                       const disabled = casting || !!myVote || !isOpen || openButNoOptions;
-
                       const isWinner = !!winnerLabel && label === winnerLabel;
 
                       return (
@@ -883,7 +1001,10 @@ export default function Quandr3DetailPage() {
                             <div className="flex items-center gap-2">
                               <div className="text-xs font-extrabold tracking-[0.18em] text-slate-500">{label}</div>
                               {isWinner ? (
-                                <span className="rounded-full px-2 py-0.5 text-[11px] font-extrabold" style={{ background: "#ffe4e6", color: "#be123c" }}>
+                                <span
+                                  className="rounded-full px-2 py-0.5 text-[11px] font-extrabold"
+                                  style={{ background: "#ffe4e6", color: "#be123c" }}
+                                >
                                   WINNER
                                 </span>
                               ) : null}
@@ -939,7 +1060,10 @@ export default function Quandr3DetailPage() {
                               Why people chose {L}
                             </div>
                             {isWinner ? (
-                              <span className="rounded-full px-2 py-0.5 text-[11px] font-extrabold" style={{ background: "#ffe4e6", color: "#be123c" }}>
+                              <span
+                                className="rounded-full px-2 py-0.5 text-[11px] font-extrabold"
+                                style={{ background: "#ffe4e6", color: "#be123c" }}
+                              >
                                 WINNER
                               </span>
                             ) : null}

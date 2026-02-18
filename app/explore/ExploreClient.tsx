@@ -36,7 +36,6 @@ function parseLocation(loc?: string) {
   const parts = safeStr(loc)
     .split(",")
     .map((s: string) => s.trim())
-
     .filter(Boolean);
 
   return {
