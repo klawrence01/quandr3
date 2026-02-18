@@ -9,6 +9,7 @@ import { supabase } from "@/utils/supabase/browser";
 const NAVY = "#0b2343";
 const BLUE = "#1e63f3";
 const TEAL = "#00a9a5";
+const CORAL = "#ff6b6b";
 const SOFT_BG = "#f5f7fc";
 
 type Quandr3Row = {
@@ -16,23 +17,21 @@ type Quandr3Row = {
   title: string;
   category: string;
   status: string;
+
+  // context (prompt-first, context fallback)
+  prompt?: string | null;
+  context?: string | null;
+
   city: string | null;
+  state?: string | null;
+
   created_at: string;
-};
+  closes_at?: string | null;
 
-// Map categories to the category art in /public/images/categories
-const categoryImageMap: Record<string, string> = {
-  Money: "/images/categories/money-bonus.jpg",
-  Relationships: "/images/categories/relationships.jpg",
-  Style: "/images/categories/style.jpg",
-  Career: "/images/categories/all.jpg",
-  Lifestyle: "/images/categories/all.jpg",
-  "Real Estate": "/images/categories/all.jpg",
+  resolved_at?: string | null;
+  resolved_choice_label?: string | null;
+  resolution_note?: string | null;
 };
-
-function getCategoryImage(category: string) {
-  return categoryImageMap[category] || "/images/categories/all.jpg";
-}
 
 const FEED_CATEGORIES = [
   "All",
@@ -45,9 +44,36 @@ const FEED_CATEGORIES = [
 ];
 
 // Canonical route for a Quandr3 detail page.
-// If you truly want to keep /debug/vote/[id] on homepage, change this to `/debug/vote/${id}`
 function qHref(id: string) {
   return `/q/${id}`;
+}
+
+function fmt(ts?: string | null) {
+  if (!ts) return "";
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return String(ts);
+  }
+}
+
+function statusBadge(status?: string) {
+  const s = (status || "").toLowerCase();
+  if (s === "open") return { bg: "#e8f3ff", fg: BLUE, label: "open" };
+  if (s === "awaiting_user") return { bg: "#fff4e6", fg: "#b45309", label: "internet decided" };
+  if (s === "resolved") return { bg: "#ecfdf5", fg: "#059669", label: "resolved" };
+  return { bg: "#f1f5f9", fg: "#334155", label: s || "unknown" };
+}
+
+function cleanLabel(x?: any) {
+  const s = (x || "").toString().trim().toUpperCase();
+  return ["A", "B", "C", "D"].includes(s) ? s : "";
+}
+
+function snippet(s?: any, n = 160) {
+  const t = (s || "").toString().trim();
+  if (!t) return "";
+  return t.length > n ? `${t.slice(0, n).trim()}…` : t;
 }
 
 export default function HomePage() {
@@ -63,7 +89,9 @@ export default function HomePage() {
 
       const { data, error } = await supabase
         .from("quandr3s")
-        .select("id, title, category, status, city, created_at")
+        .select(
+          "id,title,category,status,prompt,context,city,state,created_at,closes_at,resolved_at,resolved_choice_label,resolution_note"
+        )
         .order("created_at", { ascending: false })
         .limit(40);
 
@@ -311,52 +339,83 @@ export default function HomePage() {
                 </p>
               )}
 
-              {liveItems.map((q, idx) => (
-                <Link key={q.id} href={qHref(q.id)}>
-                  <div
-                    style={{
-                      padding: "12px 4px",
-                      borderTop:
-                        idx === 0
-                          ? "none"
-                          : "1px solid rgba(148, 163, 184, 0.3)",
-                      cursor: "pointer",
-                    }}
-                  >
+              {liveItems.map((q, idx) => {
+                const b = statusBadge(q.status);
+                return (
+                  <Link key={q.id} href={qHref(q.id)} style={{ textDecoration: "none" }}>
                     <div
                       style={{
-                        fontSize: 11,
-                        fontWeight: 800,
-                        letterSpacing: 1,
-                        color:
-                          q.status === "RESOLVED" ? "#fbbf24" : "#f97373",
-                        textTransform: "uppercase",
-                        marginBottom: 4,
+                        padding: "12px 4px",
+                        borderTop:
+                          idx === 0
+                            ? "none"
+                            : "1px solid rgba(148, 163, 184, 0.3)",
+                        cursor: "pointer",
                       }}
                     >
-                      {q.category} · {q.status}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 10,
+                          marginBottom: 6,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 900,
+                            letterSpacing: 1,
+                            color: "#cbd5e1",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          {q.category}
+                        </div>
+
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 900,
+                            letterSpacing: 1,
+                            textTransform: "uppercase",
+                            padding: "3px 10px",
+                            borderRadius: 999,
+                            background: b.bg,
+                            color: b.fg,
+                          }}
+                        >
+                          {b.label}
+                        </span>
+                      </div>
+
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 900,
+                          color: "#e5e7eb",
+                          marginBottom: 6,
+                        }}
+                      >
+                        {q.title}
+                      </div>
+
+                      <div style={{ fontSize: 11, color: "#9ca3af" }}>
+                        {fmt(q.created_at)}
+                        {(q.city || q.state) ? (
+                          <>
+                            {" "}
+                            • {q.city ? q.city : ""}
+                            {q.city && q.state ? ", " : ""}
+                            {q.state ? q.state : ""}
+                          </>
+                        ) : null}
+                      </div>
                     </div>
-                    <div
-                      style={{
-                        fontSize: 14,
-                        fontWeight: 800,
-                        color: "#e5e7eb",
-                        marginBottom: 4,
-                      }}
-                    >
-                      {q.title}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "#9ca3af",
-                      }}
-                    >
-                      {new Date(q.created_at).toLocaleString()}
-                    </div>
-                  </div>
-                </Link>
-              ))}
+                  </Link>
+                );
+              })}
             </div>
           </aside>
         </section>
@@ -437,10 +496,14 @@ export default function HomePage() {
 }
 
 function HomeFeedCard({ q }: { q: Quandr3Row }) {
-  const imageSrc = getCategoryImage(q.category);
+  const b = statusBadge(q.status);
+  const contextLine = snippet(q.prompt || q.context, 190);
+
+  const finalChoice = cleanLabel(q.resolved_choice_label);
+  const note = snippet(q.resolution_note, 200);
 
   return (
-    <Link href={qHref(q.id)}>
+    <Link href={qHref(q.id)} style={{ textDecoration: "none" }}>
       <article
         style={{
           borderRadius: 20,
@@ -450,88 +513,195 @@ function HomeFeedCard({ q }: { q: Quandr3Row }) {
           border: "1px solid rgba(15,23,42,0.06)",
           cursor: "pointer",
           transition: "transform 120ms ease, box-shadow 120ms ease",
+          padding: 18,
         }}
       >
-        {/* Image */}
-        <div style={{ width: "100%", height: 210, overflow: "hidden" }}>
-          <img
-            src={imageSrc}
-            alt={q.category}
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              display: "block",
-            }}
-          />
-        </div>
-
-        {/* Content */}
+        {/* Top row: category + status pill */}
         <div
           style={{
-            padding: "14px 18px 14px",
             display: "flex",
-            alignItems: "flex-start",
+            alignItems: "center",
             justifyContent: "space-between",
-            gap: 16,
+            gap: 12,
+            marginBottom: 10,
           }}
         >
-          <div style={{ flex: 1 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 900,
+              letterSpacing: 1.2,
+              textTransform: "uppercase",
+              color: "#64748b",
+            }}
+          >
+            {(q.category || "QUANDR3").toString().toUpperCase()}
+          </div>
+
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 900,
+              letterSpacing: 1.2,
+              textTransform: "uppercase",
+              padding: "4px 12px",
+              borderRadius: 999,
+              background: b.bg,
+              color: b.fg,
+            }}
+          >
+            {b.label}
+          </span>
+        </div>
+
+        {/* Title */}
+        <h3
+          style={{
+            fontSize: 18,
+            fontWeight: 950,
+            margin: 0,
+            marginBottom: 6,
+            color: NAVY,
+            lineHeight: 1.25,
+          }}
+        >
+          {q.title}
+        </h3>
+
+        {/* Context (prompt-first, context fallback) */}
+        {contextLine ? (
+          <div
+            style={{
+              fontSize: 13,
+              color: "#475569",
+              lineHeight: 1.55,
+              marginBottom: 12,
+            }}
+          >
+            {contextLine}
+          </div>
+        ) : null}
+
+        {/* Meta row */}
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 10,
+            alignItems: "center",
+            fontSize: 12,
+            color: "#6b7280",
+            marginBottom: q.status?.toLowerCase() === "resolved" ? 12 : 0,
+          }}
+        >
+          <span>
+            <span style={{ fontWeight: 800, color: NAVY }}>Posted:</span>{" "}
+            {fmt(q.created_at)}
+          </span>
+
+          {(q.city || q.state) ? (
+            <span>
+              • {q.city ? q.city : ""}
+              {q.city && q.state ? ", " : ""}
+              {q.state ? q.state : ""}
+            </span>
+          ) : null}
+
+          {q.closes_at ? (
+            <span>
+              • <span style={{ fontWeight: 800, color: NAVY }}>Closes:</span>{" "}
+              {fmt(q.closes_at)}
+            </span>
+          ) : null}
+
+          {q.resolved_at ? (
+            <span>
+              • <span style={{ fontWeight: 800, color: NAVY }}>Resolved:</span>{" "}
+              {fmt(q.resolved_at)}
+            </span>
+          ) : null}
+        </div>
+
+        {/* Resolved mini-format (no images; matches new vibe) */}
+        {q.status?.toLowerCase() === "resolved" ? (
+          <div
+            style={{
+              borderRadius: 16,
+              border: "1px solid rgba(15,23,42,0.08)",
+              background: "#f8fafc",
+              padding: 14,
+              marginTop: 10,
+            }}
+          >
             <div
               style={{
                 fontSize: 11,
-                fontWeight: 800,
-                letterSpacing: 0.8,
-                textTransform: "uppercase",
-                color: BLUE,
-                marginBottom: 4,
-              }}
-            >
-              {q.category} · {q.status}
-            </div>
-            <h3
-              style={{
-                fontSize: 16,
                 fontWeight: 900,
-                margin: 0,
-                marginBottom: 4,
-                color: NAVY,
-                lineHeight: 1.35,
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                color: "#64748b",
+                marginBottom: 8,
               }}
             >
-              {q.title}
-            </h3>
-            <div
-              style={{
-                fontSize: 12,
-                color: "#6b7280",
-              }}
-            >
-              {q.city ? `${q.city} • ` : ""}
-              {new Date(q.created_at).toLocaleString()}
+              Curioso Verdict
             </div>
-          </div>
 
-          {/* Share pill (non-functional placeholder for now) */}
-          <button
-            type="button"
-            onClick={(e) => e.preventDefault()}
-            style={{
-              alignSelf: "flex-end",
-              borderRadius: 999,
-              border: "none",
-              padding: "6px 14px",
-              fontSize: 12,
-              fontWeight: 700,
-              background: "#eef2ff",
-              color: NAVY,
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Share
-          </button>
-        </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 12,
+                  fontWeight: 900,
+                  padding: "6px 12px",
+                  borderRadius: 999,
+                  background: "#eef2ff",
+                  color: NAVY,
+                }}
+              >
+                Final decision:{" "}
+                <span style={{ color: BLUE }}>{finalChoice || "—"}</span>
+              </span>
+
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: TEAL,
+                }}
+              >
+                View full results + reasons →
+              </span>
+            </div>
+
+            {note ? (
+              <div style={{ marginTop: 10, fontSize: 13, color: "#334155", lineHeight: 1.55 }}>
+                {note}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* Share pill (non-functional placeholder for now) */}
+        <button
+          type="button"
+          onClick={(e) => e.preventDefault()}
+          style={{
+            marginTop: 14,
+            borderRadius: 999,
+            border: "none",
+            padding: "7px 14px",
+            fontSize: 12,
+            fontWeight: 800,
+            background: "#eef2ff",
+            color: NAVY,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          Share
+        </button>
       </article>
     </Link>
   );
