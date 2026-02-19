@@ -2,28 +2,52 @@
 // @ts-nocheck
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/utils/supabase/browser";
 import { ensureProfile } from "@/utils/supabase/profile";
+
+/* =========================
+   Brand
+========================= */
+const NAVY = "#0b2343";
+const BLUE = "#1e63f3";
+const TEAL = "#00a9a5";
+const CORAL = "#ff6b6b";
+const SOFT_BG = "#f5f7fc";
+
+function safeStr(x: any) {
+  return (x ?? "").toString();
+}
+
+function notePreview(note: string | null, n = 140) {
+  if (!note) return "";
+  const t = safeStr(note).trim();
+  if (t.length <= n) return t;
+  return t.slice(0, n).trim() + "…";
+}
 
 export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
 
+  const [meId, setMeId] = useState("");
+
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
 
-  // NEW: loop stats
+  // ✅ Quandr3 loop stats (your posts)
   const [loopStats, setLoopStats] = useState<{
     total: number;
     open: number;
+    closed: number; // awaiting_user
     resolved: number;
     lastResolved: {
       id: string;
       title: string;
-      final_choice: string | null;
-      final_note: string | null;
+      resolved_choice_label: string | null;
+      resolution_note: string | null;
       resolved_at: string | null;
     } | null;
   } | null>(null);
@@ -40,54 +64,64 @@ export default function ProfilePage() {
         return;
       }
 
+      setMeId(user.id);
+
       // Profile basics
-      const { data, error: pErr } = await supabase
+      const { data: prof, error: pErr } = await supabase
         .from("profiles")
         .select("display_name, username, avatar_url")
         .eq("id", user.id)
-        .single();
+        .maybeSingle();
 
       if (pErr) {
         console.error(pErr);
         setMessage(pErr.message);
-      } else if (data) {
-        setDisplayName(data.display_name || "");
-        setUsername(data.username || "");
-        setAvatarUrl(data.avatar_url || "");
+      } else if (prof) {
+        setDisplayName(safeStr(prof.display_name));
+        setUsername(safeStr(prof.username));
+        setAvatarUrl(safeStr(prof.avatar_url));
       }
 
-      // NEW: Quandr3 loop stats for this user
+      // ✅ Loop stats: use current schema + status values
+      // - author_id is the owner of the post
+      // - status: open | awaiting_user | resolved
+      // - resolved_choice_label + resolution_note are the verdict fields
       const { data: qs, error: qErr } = await supabase
         .from("quandr3s")
-        .select(
-          "id, title, status, final_choice, final_note, resolved_at, created_at"
-        )
-        .eq("user_id", user.id)
+        .select("id,title,status,created_at,resolved_at,resolved_choice_label,resolution_note")
+        .eq("author_id", user.id)
         .order("created_at", { ascending: false })
-        .limit(50);
+        .limit(200);
 
       if (qErr) {
         console.error(qErr);
-        // don't block profile just because stats failed
+        // don't block profile
+        setLoopStats(null);
       } else {
-        const list = qs || [];
+        const list = (qs || []).map((q: any) => ({
+          ...q,
+          status: safeStr(q?.status).toLowerCase(),
+        }));
+
         const total = list.length;
-        const open = list.filter((q) => q.status !== "RESOLVED").length;
-        const resolved = list.filter((q) => q.status === "RESOLVED").length;
-        const lastResolved =
-          list.find((q) => q.status === "RESOLVED") || null;
+        const open = list.filter((q: any) => q.status === "open").length;
+        const closed = list.filter((q: any) => q.status === "awaiting_user").length;
+        const resolved = list.filter((q: any) => q.status === "resolved").length;
+
+        const lastResolved = list.find((q: any) => q.status === "resolved") || null;
 
         setLoopStats({
           total,
           open,
+          closed,
           resolved,
           lastResolved: lastResolved
             ? {
                 id: lastResolved.id,
-                title: lastResolved.title,
-                final_choice: lastResolved.final_choice,
-                final_note: lastResolved.final_note,
-                resolved_at: lastResolved.resolved_at,
+                title: safeStr(lastResolved.title),
+                resolved_choice_label: safeStr(lastResolved.resolved_choice_label) || null,
+                resolution_note: safeStr(lastResolved.resolution_note) || null,
+                resolved_at: lastResolved.resolved_at || null,
               }
             : null,
         });
@@ -99,7 +133,7 @@ export default function ProfilePage() {
     load();
   }, []);
 
-  async function handleSave(e: React.FormEvent) {
+  async function handleSave(e: any) {
     e.preventDefault();
     setMessage(null);
     setLoading(true);
@@ -111,10 +145,9 @@ export default function ProfilePage() {
       return;
     }
 
-    // Basic cleanup
-    const cleanUsername = username.trim() || null;
-    const cleanDisplayName = displayName.trim() || null;
-    const cleanAvatar = avatarUrl.trim() || null;
+    const cleanUsername = safeStr(username).trim().replace(/\s+/g, "").toLowerCase() || null;
+    const cleanDisplayName = safeStr(displayName).trim() || null;
+    const cleanAvatar = safeStr(avatarUrl).trim() || null;
 
     const { error: uErr } = await supabase
       .from("profiles")
@@ -143,338 +176,279 @@ export default function ProfilePage() {
     setLoading(false);
   }
 
-  // helper for trimming the final_note preview
-  function notePreview(note: string | null) {
-    if (!note) return "";
-    if (note.length <= 140) return note;
-    return note.slice(0, 140) + "…";
-  }
+  const previewInitial = useMemo(() => {
+    const t = (displayName || username || "?").trim();
+    return t ? t.charAt(0).toUpperCase() : "?";
+  }, [displayName, username]);
 
   return (
     <main
       style={{
         minHeight: "100vh",
+        background: SOFT_BG,
         padding: 40,
         fontFamily: "system-ui",
-        maxWidth: 640,
-        margin: "0 auto",
       }}
     >
-      <h1 style={{ fontSize: 28, fontWeight: 900, marginBottom: 8 }}>
-        Your Profile
-      </h1>
-      <p style={{ fontSize: 14, color: "#555", marginBottom: 24 }}>
-        This is how you show up next to your Quandr3s, votes, and comments.
-      </p>
-
-      {loading && <p>Loading…</p>}
-
-      {message && (
-        <p
-          style={{
-            fontSize: 14,
-            color: "#333",
-            marginBottom: 16,
-          }}
-        >
-          {message}
-        </p>
-      )}
-
-      {!loading && (
-        <form onSubmit={handleSave}>
-          {/* Display name */}
-          <div style={{ marginBottom: 16 }}>
-            <label
-              style={{
-                display: "block",
-                fontSize: 13,
-                fontWeight: 700,
-                marginBottom: 4,
-              }}
-            >
-              Display name
-            </label>
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              style={{
-                width: "100%",
-                padding: 10,
-                borderRadius: 10,
-                border: "1px solid #ddd",
-                fontSize: 14,
-              }}
-              placeholder="e.g. Kenneth Lawrence"
-            />
+      <div style={{ maxWidth: 740, margin: "0 auto" }}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 style={{ fontSize: 30, fontWeight: 900, marginBottom: 6, color: NAVY }}>
+              Your Profile
+            </h1>
+            <p style={{ fontSize: 14, color: "#475569", marginBottom: 0 }}>
+              This is how you show up next to your Quandr3s, votes, and comments.
+            </p>
           </div>
 
-          {/* Username/handle */}
-          <div style={{ marginBottom: 16 }}>
-            <label
-              style={{
-                display: "block",
-                fontSize: 13,
-                fontWeight: 700,
-                marginBottom: 4,
-              }}
-            >
-              Username (handle)
-            </label>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: 10,
-                  border: "1px solid #ddd",
-                  background: "#f7f8ff",
-                  fontSize: 14,
-                }}
+          {meId ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href={`/u/${meId}`}
+                className="rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50"
+                style={{ color: NAVY }}
               >
-                @
-              </span>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) =>
-                  setUsername(e.target.value.replace(/\s+/g, "").toLowerCase())
-                }
-                style={{
-                  flex: 1,
-                  padding: 10,
-                  borderRadius: 10,
-                  border: "1px solid #ddd",
-                  fontSize: 14,
-                }}
-                placeholder="klawrence01"
-              />
+                View public profile
+              </Link>
+              <Link
+                href={`/u/${meId}/following`}
+                className="rounded-full px-4 py-2 text-sm font-extrabold text-white"
+                style={{ background: BLUE }}
+              >
+                Following
+              </Link>
             </div>
-            <p style={{ fontSize: 12, color: "#777", marginTop: 4 }}>
-              Usernames are unique. Letters, numbers, no spaces. People will
-              find you at <strong>quandr3.com/u/yourname</strong>.
-            </p>
-          </div>
+          ) : null}
+        </div>
 
-          {/* Avatar URL */}
-          <div style={{ marginBottom: 20 }}>
-            <label
-              style={{
-                display: "block",
-                fontSize: 13,
-                fontWeight: 700,
-                marginBottom: 4,
-              }}
-            >
-              Avatar image URL (optional)
-            </label>
-            <input
-              type="text"
-              value={avatarUrl}
-              onChange={(e) => setAvatarUrl(e.target.value)}
-              style={{
-                width: "100%",
-                padding: 10,
-                borderRadius: 10,
-                border: "1px solid #ddd",
-                fontSize: 14,
-              }}
-              placeholder="https://…"
-            />
-            <p style={{ fontSize: 12, color: "#777", marginTop: 4 }}>
-              Later we can add photo uploads. For now, you can paste any image
-              URL if you have one.
-            </p>
-          </div>
+        <section className="mt-6 rounded-[28px] border bg-white p-6 shadow-sm">
+          {loading ? <p className="text-sm text-slate-500">Loading…</p> : null}
 
-          {/* Preview */}
-          <div
-            style={{
-              marginBottom: 20,
-              padding: 12,
-              borderRadius: 14,
-              border: "1px solid #e1e4ff",
-              background: "#f7f8ff",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <div
-              style={{
-                width: 42,
-                height: 42,
-                borderRadius: "50%",
-                overflow: "hidden",
-                background: "#1e63f3",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#fff",
-                fontWeight: 800,
-                fontSize: 18,
-              }}
-            >
-              {avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={avatarUrl}
-                  alt="avatar preview"
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                  }}
+          {message ? (
+            <p className="text-sm font-semibold" style={{ color: message.includes("updated") ? TEAL : "#b91c1c" }}>
+              {message}
+            </p>
+          ) : null}
+
+          {!loading ? (
+            <form onSubmit={handleSave}>
+              {/* Display name */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 800, marginBottom: 6, color: NAVY }}>
+                  Display name
+                </label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="w-full rounded-2xl border p-3 text-sm outline-none"
+                  placeholder="e.g. Kenneth Lawrence"
                 />
-              ) : (
-                (displayName || username || "?")
-                  .charAt(0)
-                  .toUpperCase()
-              )}
-            </div>
-            <div>
-              <div
-                style={{
-                  fontSize: 15,
-                  fontWeight: 800,
-                  marginBottom: 2,
-                }}
-              >
-                {displayName || "Your display name"}
               </div>
-              <div style={{ fontSize: 13, color: "#555" }}>
-                {username ? "@" + username : "@yourusername"}
-              </div>
-            </div>
-          </div>
 
-          {/* NEW: Quandr3 loop summary */}
-          <div
-            style={{
-              marginBottom: 24,
-              padding: 14,
-              borderRadius: 16,
-              border: "1px solid #e1e4ff",
-              background: "#ffffff",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 800,
-                marginBottom: 6,
-                color: "#1e3253",
-              }}
-            >
-              Your Quandr3 loop
-            </div>
-
-            {!loopStats || loopStats.total === 0 ? (
-              <p style={{ fontSize: 12, color: "#666" }}>
-                You haven&apos;t posted any Quandr3s yet. When you do, you&apos;ll see
-                how many you&apos;ve opened, resolved, and what you chose last.
-              </p>
-            ) : (
-              <>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 12,
-                    flexWrap: "wrap",
-                    marginBottom: 8,
-                    fontSize: 12,
-                    color: "#33415c",
-                  }}
-                >
-                  <span>
-                    <strong>{loopStats.total}</strong> posted
-                  </span>
-                  <span>
-                    <strong>{loopStats.open}</strong> open
-                  </span>
-                  <span>
-                    <strong>{loopStats.resolved}</strong> resolved
-                  </span>
-                </div>
-
-                {loopStats.lastResolved && (
-                  <div
+              {/* Username */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 800, marginBottom: 6, color: NAVY }}>
+                  Username (handle)
+                </label>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span
                     style={{
-                      marginTop: 4,
-                      paddingTop: 8,
-                      borderTop: "1px solid #eef1ff",
-                      fontSize: 12,
-                      color: "#444",
+                      padding: "10px 12px",
+                      borderRadius: 16,
+                      border: "1px solid #e5e7eb",
+                      background: "#f8fafc",
+                      fontSize: 14,
+                      fontWeight: 900,
+                      color: NAVY,
                     }}
                   >
-                    <div
-                      style={{
-                        fontSize: 11,
-                        textTransform: "uppercase",
-                        fontWeight: 700,
-                        color: "#1e63f3",
-                        marginBottom: 2,
-                      }}
-                    >
-                      Latest outcome shared
+                    @
+                  </span>
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value.replace(/\s+/g, "").toLowerCase())}
+                    className="w-full rounded-2xl border p-3 text-sm outline-none"
+                    placeholder="klawrence01"
+                  />
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  Usernames are unique. Letters/numbers, no spaces.
+                </p>
+              </div>
+
+              {/* Avatar URL */}
+              <div style={{ marginBottom: 18 }}>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 800, marginBottom: 6, color: NAVY }}>
+                  Avatar image URL (optional)
+                </label>
+                <input
+                  type="text"
+                  value={avatarUrl}
+                  onChange={(e) => setAvatarUrl(e.target.value)}
+                  className="w-full rounded-2xl border p-3 text-sm outline-none"
+                  placeholder="https://…"
+                />
+                <p className="mt-2 text-xs text-slate-500">Later we can add uploads. For now, paste any image URL.</p>
+              </div>
+
+              {/* Preview */}
+              <div
+                style={{
+                  marginBottom: 18,
+                  padding: 12,
+                  borderRadius: 18,
+                  border: "1px solid rgba(30,99,243,0.18)",
+                  background: "#f7f8ff",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
+                <div
+                  style={{
+                    width: 46,
+                    height: 46,
+                    borderRadius: 18,
+                    overflow: "hidden",
+                    background: "linear-gradient(135deg, #1e63f3, #00a9a5, #ff6b6b)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#fff",
+                    fontWeight: 900,
+                    fontSize: 18,
+                  }}
+                >
+                  {avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={avatarUrl}
+                      alt="avatar preview"
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    />
+                  ) : (
+                    previewInitial
+                  )}
+                </div>
+
+                <div className="min-w-0">
+                  <div style={{ fontSize: 15, fontWeight: 900, color: NAVY }} className="truncate">
+                    {displayName || "Your display name"}
+                  </div>
+                  <div style={{ fontSize: 13, color: "#475569" }} className="truncate">
+                    {username ? "@" + username : "@yourusername"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Loop summary */}
+              <div
+                style={{
+                  marginBottom: 22,
+                  padding: 14,
+                  borderRadius: 20,
+                  border: "1px solid rgba(15,23,42,0.08)",
+                  background: "#ffffff",
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 2, color: "#64748b" }}>
+                  YOUR QUANDR3 LOOP
+                </div>
+
+                {!loopStats || loopStats.total === 0 ? (
+                  <p className="mt-2 text-sm text-slate-600">
+                    You haven&apos;t posted any Quandr3s yet. When you do, you&apos;ll see your open/closed/resolved
+                    breakdown here.
+                  </p>
+                ) : (
+                  <>
+                    <div className="mt-2 flex flex-wrap gap-3 text-sm text-slate-700">
+                      <span>
+                        <b style={{ color: NAVY }}>{loopStats.total}</b> posted
+                      </span>
+                      <span>
+                        <b style={{ color: TEAL }}>{loopStats.open}</b> open
+                      </span>
+                      <span>
+                        <b style={{ color: "#b45309" }}>{loopStats.closed}</b> closed
+                      </span>
+                      <span>
+                        <b style={{ color: BLUE }}>{loopStats.resolved}</b> resolved
+                      </span>
                     </div>
-                    <div
-                      style={{
-                        fontWeight: 700,
-                        marginBottom: 2,
-                      }}
-                    >
-                      {loopStats.lastResolved.title}
-                    </div>
-                    {loopStats.lastResolved.final_choice && (
-                      <div style={{ marginBottom: 2 }}>
-                        <strong>Chose option:</strong>{" "}
-                        {loopStats.lastResolved.final_choice}
-                      </div>
-                    )}
-                    {loopStats.lastResolved.final_note && (
-                      <div style={{ fontSize: 12, color: "#555" }}>
-                        {notePreview(loopStats.lastResolved.final_note)}
-                      </div>
-                    )}
-                    {loopStats.lastResolved.resolved_at && (
+
+                    {loopStats.lastResolved ? (
                       <div
                         style={{
-                          marginTop: 2,
-                          fontSize: 11,
-                          color: "#8892b0",
+                          marginTop: 10,
+                          paddingTop: 10,
+                          borderTop: "1px solid rgba(15,23,42,0.06)",
                         }}
                       >
-                        Resolved{" "}
-                        {new Date(
-                          loopStats.lastResolved.resolved_at
-                        ).toLocaleString()}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+                        <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 2, color: BLUE }}>
+                          LATEST OUTCOME SHARED
+                        </div>
+                        <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
+                          {loopStats.lastResolved.title}
+                        </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              padding: 10,
-              borderRadius: 999,
-              border: "none",
-              background: "#1e63f3",
-              color: "#fff",
-              fontWeight: 800,
-              fontSize: 14,
-              cursor: "pointer",
-            }}
-          >
-            {loading ? "Saving…" : "Save profile"}
-          </button>
-        </form>
-      )}
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                          <span
+                            className="rounded-full px-3 py-1 text-xs font-extrabold"
+                            style={{ background: "#eef2ff", color: NAVY }}
+                          >
+                            Final decision:{" "}
+                            <span style={{ color: BLUE }}>
+                              {safeStr(loopStats.lastResolved.resolved_choice_label) || "—"}
+                            </span>
+                          </span>
+
+                          <Link
+                            href={`/q/${loopStats.lastResolved.id}`}
+                            className="text-xs font-extrabold underline"
+                            style={{ color: TEAL }}
+                          >
+                            View results →
+                          </Link>
+                        </div>
+
+                        {loopStats.lastResolved.resolution_note ? (
+                          <div className="mt-2 text-sm text-slate-700">
+                            {notePreview(loopStats.lastResolved.resolution_note, 180)}
+                          </div>
+                        ) : null}
+
+                        {loopStats.lastResolved.resolved_at ? (
+                          <div className="mt-2 text-xs text-slate-500">
+                            Resolved {new Date(loopStats.lastResolved.resolved_at).toLocaleString()}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="rounded-full px-6 py-3 text-sm font-extrabold text-white disabled:opacity-50"
+                style={{ background: BLUE }}
+              >
+                {loading ? "Saving…" : "Save profile"}
+              </button>
+            </form>
+          ) : null}
+        </section>
+
+        <div className="mt-6 text-center text-xs text-slate-500">
+          Quandr3: <span className="font-semibold">Ask.</span>{" "}
+          <span className="font-semibold">Share.</span>{" "}
+          <span className="font-semibold">Decide.</span>
+        </div>
+      </div>
     </main>
   );
 }
