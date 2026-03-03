@@ -52,7 +52,9 @@ function isUuid(s?: string) {
 
 /** ✅ Hard timeout so Loading… can never get stuck forever */
 const LOAD_TIMEOUT_MS = 8000;
-function withTimeout<T>(p: Promise<T>, label = "Request"): Promise<T> {
+
+// ✅ FIX: accept PromiseLike, but normalize to a real Promise so `.catch()` exists everywhere
+function withTimeout<T>(p: PromiseLike<T>, label = "Request"): Promise<T> {
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => {
       reject(
@@ -62,13 +64,15 @@ function withTimeout<T>(p: Promise<T>, label = "Request"): Promise<T> {
       );
     }, LOAD_TIMEOUT_MS);
 
-    p.then((v) => {
-      clearTimeout(t);
-      resolve(v);
-    }).catch((e) => {
-      clearTimeout(t);
-      reject(e);
-    });
+    Promise.resolve(p)
+      .then((v) => {
+        clearTimeout(t);
+        resolve(v as T);
+      })
+      .catch((e) => {
+        clearTimeout(t);
+        reject(e);
+      });
   });
 }
 
@@ -413,9 +417,7 @@ export default function UserProfilePage() {
         supabase
           .from("profiles")
           .select("id, display_name, username, city, state, avatar_url")
-          .or(
-            `display_name.ilike.%${q}%,username.ilike.%${q}%`
-          )
+          .or(`display_name.ilike.%${q}%,username.ilike.%${q}%`)
           .order("created_at", { ascending: false })
           .limit(30),
         "People search"
@@ -708,7 +710,13 @@ export default function UserProfilePage() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#f2f5fb" }}>
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "22px 16px 60px" }}>
+      <div
+        style={{
+          maxWidth: 1100,
+          margin: "0 auto",
+          padding: "22px 16px 60px",
+        }}
+      >
         {/* Header panel */}
         <Panel>
           <div
@@ -721,29 +729,65 @@ export default function UserProfilePage() {
             }}
           >
             <div>
-              <div style={{ fontSize: 40, fontWeight: 1100, color: NAVY, lineHeight: 1.05 }}>
+              <div
+                style={{
+                  fontSize: 40,
+                  fontWeight: 1100,
+                  color: NAVY,
+                  lineHeight: 1.05,
+                }}
+              >
                 {displayName}
               </div>
 
-              <div style={{ marginTop: 10, fontSize: 15, fontWeight: 800, color: "#2b405b" }}>
+              <div
+                style={{
+                  marginTop: 10,
+                  fontSize: 15,
+                  fontWeight: 800,
+                  color: "#2b405b",
+                }}
+              >
                 {bio ? bio : "No bio yet."}
               </div>
 
               {loc ? (
-                <div style={{ marginTop: 8, fontSize: 13, fontWeight: 900, color: "#5f7896" }}>
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 13,
+                    fontWeight: 900,
+                    color: "#5f7896",
+                  }}
+                >
                   {loc}
                 </div>
               ) : null}
 
               {!validProfileId ? (
-                <div style={{ marginTop: 10, color: "#8b1e1e", fontWeight: 900, fontSize: 13 }}>
-                  This profile link isn’t a real user id. Use “View Profile” in the top bar, or go back to Explore.
+                <div
+                  style={{
+                    marginTop: 10,
+                    color: "#8b1e1e",
+                    fontWeight: 900,
+                    fontSize: 13,
+                  }}
+                >
+                  This profile link isn’t a real user id. Use “View Profile” in
+                  the top bar, or go back to Explore.
                 </div>
               ) : null}
             </div>
 
             {/* Follow + counts */}
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 12,
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
               {me?.id && !isMe && validProfileId ? (
                 <button
                   onClick={toggleFollow}
@@ -759,7 +803,11 @@ export default function UserProfilePage() {
                     minWidth: 120,
                   }}
                 >
-                  {busyFollow ? "Working..." : isFollowing ? "Unfollow" : "Follow"}
+                  {busyFollow
+                    ? "Working..."
+                    : isFollowing
+                    ? "Unfollow"
+                    : "Follow"}
                 </button>
               ) : null}
 
@@ -838,45 +886,88 @@ export default function UserProfilePage() {
         {/* Content panel */}
         <div style={{ marginTop: 26 }}>
           <Panel>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
               <div style={{ fontSize: 26, fontWeight: 1100, color: NAVY }}>
-                {TABS.find((t) => t.key === activeTab)?.label || "Latest Quandr3s"}
+                {TABS.find((t) => t.key === activeTab)?.label ||
+                  "Latest Quandr3s"}
               </div>
 
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <Pill onClick={() => setActiveTab("latest")} active={activeTab === "latest"}>
+                <Pill
+                  onClick={() => setActiveTab("latest")}
+                  active={activeTab === "latest"}
+                >
                   Latest
                 </Pill>
-                <Pill onClick={() => validProfileId && setActiveTab("followers")} active={activeTab === "followers"}>
+                <Pill
+                  onClick={() => validProfileId && setActiveTab("followers")}
+                  active={activeTab === "followers"}
+                >
                   Followers
                 </Pill>
-                <Pill onClick={() => validProfileId && setActiveTab("following")} active={activeTab === "following"}>
+                <Pill
+                  onClick={() => validProfileId && setActiveTab("following")}
+                  active={activeTab === "following"}
+                >
                   Following
                 </Pill>
-                <Pill onClick={() => validProfileId && setActiveTab("people")} active={activeTab === "people"}>
+                <Pill
+                  onClick={() => validProfileId && setActiveTab("people")}
+                  active={activeTab === "people"}
+                >
                   People
                 </Pill>
               </div>
             </div>
 
             <div style={{ marginTop: 16 }}>
-              {loading ? <div style={{ fontWeight: 900, color: "#2b405b" }}>Loading…</div> : null}
+              {loading ? (
+                <div style={{ fontWeight: 900, color: "#2b405b" }}>
+                  Loading…
+                </div>
+              ) : null}
 
               {!loading && activeTab === "latest" ? (
                 <div style={{ display: "grid", gap: 12 }}>
-                  {latest.length ? latest.map((q) => <Quandr3Row key={q.id} q={q} />) : <div style={{ color: "#5f7896", fontWeight: 900 }}>No posts yet.</div>}
+                  {latest.length ? (
+                    latest.map((q) => <Quandr3Row key={q.id} q={q} />)
+                  ) : (
+                    <div style={{ color: "#5f7896", fontWeight: 900 }}>
+                      No posts yet.
+                    </div>
+                  )}
                 </div>
               ) : null}
 
               {!loading && activeTab === "followers" ? (
                 <div style={{ display: "grid", gap: 10 }}>
-                  {followersList.length ? followersList.map((p) => <PersonRow key={p.id} p={p} />) : <div style={{ color: "#5f7896", fontWeight: 900 }}>No followers yet.</div>}
+                  {followersList.length ? (
+                    followersList.map((p) => <PersonRow key={p.id} p={p} />)
+                  ) : (
+                    <div style={{ color: "#5f7896", fontWeight: 900 }}>
+                      No followers yet.
+                    </div>
+                  )}
                 </div>
               ) : null}
 
               {!loading && activeTab === "following" ? (
                 <div style={{ display: "grid", gap: 10 }}>
-                  {followingList.length ? followingList.map((p) => <PersonRow key={p.id} p={p} />) : <div style={{ color: "#5f7896", fontWeight: 900 }}>Not following anyone yet.</div>}
+                  {followingList.length ? (
+                    followingList.map((p) => <PersonRow key={p.id} p={p} />)
+                  ) : (
+                    <div style={{ color: "#5f7896", fontWeight: 900 }}>
+                      Not following anyone yet.
+                    </div>
+                  )}
                 </div>
               ) : null}
 
@@ -891,7 +982,13 @@ export default function UserProfilePage() {
                       background: "white",
                     }}
                   >
-                    <div style={{ fontWeight: 1000, color: NAVY, marginBottom: 8 }}>
+                    <div
+                      style={{
+                        fontWeight: 1000,
+                        color: NAVY,
+                        marginBottom: 8,
+                      }}
+                    >
                       Find people by name or username
                     </div>
 
@@ -911,12 +1008,30 @@ export default function UserProfilePage() {
                       }}
                     />
 
-                    <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                      <span style={{ fontWeight: 900, color: "#5f7896", fontSize: 12 }}>
+                    <div
+                      style={{
+                        marginTop: 10,
+                        display: "flex",
+                        gap: 10,
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontWeight: 900,
+                          color: "#5f7896",
+                          fontSize: 12,
+                        }}
+                      >
                         Tip: search “ken”, “klawrence”, etc.
                       </span>
                       {peopleLoading ? (
-                        <span style={{ fontWeight: 1000, color: NAVY, fontSize: 12 }}>Searching…</span>
+                        <span
+                          style={{ fontWeight: 1000, color: NAVY, fontSize: 12 }}
+                        >
+                          Searching…
+                        </span>
                       ) : null}
                     </div>
 
@@ -958,7 +1073,10 @@ export default function UserProfilePage() {
 
         {/* Small back link */}
         <div style={{ marginTop: 18 }}>
-          <Link href="/explore" style={{ color: NAVY, fontWeight: 1000, textDecoration: "none" }}>
+          <Link
+            href="/explore"
+            style={{ color: NAVY, fontWeight: 1000, textDecoration: "none" }}
+          >
             ← Back to Explore
           </Link>
         </div>

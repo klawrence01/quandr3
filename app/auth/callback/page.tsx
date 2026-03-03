@@ -1,54 +1,68 @@
+// /app/auth/callback/page.tsx
 "use client";
 // @ts-nocheck
 
+export const dynamic = "force-dynamic";
+
 import { useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabase/browser";
+
+const NAVY = "#0b2343";
+const SOFT_BG = "#f5f7fc";
 
 export default function AuthCallbackPage() {
   const router = useRouter();
-  const sp = useSearchParams();
 
   useEffect(() => {
+    let alive = true;
+
     (async () => {
-      const next = sp.get("next") || "/explore";
-
-      // Confirm session from magic link
-      const { data, error } = await supabase.auth.getSession();
-      if (error) {
-        router.replace(`/login?next=${encodeURIComponent(next)}`);
-        return;
+      try {
+        // Supabase will read the URL hash/query and finalize the session client-side.
+        // We don’t need to do much here besides wait a moment and then route away.
+        await supabase.auth.getSession();
+      } catch (e) {
+        // fail soft
+      } finally {
+        if (!alive) return;
+        router.replace("/explore");
       }
-
-      const user = data?.session?.user;
-      if (!user?.id) {
-        router.replace(`/login?next=${encodeURIComponent(next)}`);
-        return;
-      }
-
-      // Apply referral (only once)
-      const ref =
-        localStorage.getItem("q_referrer") ||
-        sessionStorage.getItem("q_referrer");
-
-      if (ref) {
-        await supabase
-          .from("profiles")
-          .update({ referred_by: ref })
-          .eq("id", user.id)
-          .is("referred_by", null);
-
-        localStorage.removeItem("q_referrer");
-        sessionStorage.removeItem("q_referrer");
-      }
-
-      router.replace(next);
     })();
-  }, []);
+
+    return () => {
+      alive = false;
+    };
+  }, [router]);
 
   return (
-    <div style={{ padding: 40, textAlign: "center", fontWeight: 900 }}>
-      Logging you in…
+    <div
+      style={{
+        minHeight: "100vh",
+        background: SOFT_BG,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 520,
+          background: "white",
+          border: "2px solid #0c223c",
+          borderRadius: 22,
+          padding: 22,
+        }}
+      >
+        <div style={{ fontSize: 22, fontWeight: 1100, color: NAVY }}>
+          Signing you in…
+        </div>
+        <div style={{ marginTop: 10, fontWeight: 800, color: "#2b405b" }}>
+          One moment. Redirecting you now.
+        </div>
+      </div>
     </div>
   );
 }
