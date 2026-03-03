@@ -2,6 +2,7 @@
 "use client";
 // @ts-nocheck
 
+import Link from "next/link";
 import { useMemo, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -29,8 +30,6 @@ function hoursLeft(closesAt?: string) {
 
 /**
  * ✅ A) Effective status for Explore UI
- * - If status=open but closes_at is in the past (or missing), treat as closed for badge + ordering.
- * - awaiting_user is "closed" in UI.
  */
 function effectiveStatus(row: any) {
   const raw = (row?.status || "").toLowerCase();
@@ -110,6 +109,40 @@ export default function ExploreInner(props: any) {
     setSearchQ,
   } = props;
 
+  // PWA install support
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [installReady, setInstallReady] = useState(false);
+
+  useEffect(() => {
+    function onBeforeInstallPrompt(e: any) {
+      e.preventDefault();
+      setInstallPrompt(e);
+      setInstallReady(true);
+    }
+    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    return () =>
+      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+  }, []);
+
+  async function handleInstall() {
+    if (installPrompt) {
+      try {
+        installPrompt.prompt();
+        await installPrompt.userChoice;
+        setInstallPrompt(null);
+        setInstallReady(false);
+        return;
+      } catch {}
+    }
+
+    alert(
+      "Install Quandr3:\n\n" +
+        "• iPhone/iPad (Safari): tap Share → Add to Home Screen\n" +
+        "• Android (Chrome): tap ⋮ menu → Install app / Add to Home screen\n" +
+        "• Desktop (Chrome/Edge): look for Install in the address bar or browser menu"
+    );
+  }
+
   const liveCounts = useMemo(() => {
     const all = rawRows || [];
     const open = all.filter((r: any) => effectiveStatus(r) === "open").length;
@@ -152,7 +185,10 @@ export default function ExploreInner(props: any) {
           if (ah !== bh) return ah - bh;
         }
 
-        return new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime();
+        return (
+          new Date(b?.created_at || 0).getTime() -
+          new Date(a?.created_at || 0).getTime()
+        );
       });
   }, [rows]);
 
@@ -171,20 +207,24 @@ export default function ExploreInner(props: any) {
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            {/* ✅ CHANGE: EXPLORE -> DILEMMAS */}
-            <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">DILEMMAS</div>
-
-            <h1 className="mt-2 text-4xl font-extrabold leading-tight" style={{ color: NAVY }}>
-              Help someone decide.
+            <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">
+              EXPLORE DILEMMAS
+            </div>
+            <h1
+              className="mt-2 text-4xl font-extrabold leading-tight"
+              style={{ color: NAVY }}
+            >
+              Explore dilemmas.
             </h1>
-
             <p className="mt-2 text-slate-700">
               Real people, real dilemmas. Pick A–D and (if you can) add a quick “why.”
             </p>
           </div>
 
           <div className="shrink-0 rounded-2xl border bg-white px-5 py-4 text-sm shadow-sm">
-            <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">LIVE NOW</div>
+            <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">
+              LIVE NOW
+            </div>
             <div className="mt-1 font-extrabold" style={{ color: NAVY }}>
               <span className="text-lg">{liveCounts.open}</span> open{" "}
               <span className="text-slate-400">•</span>{" "}
@@ -219,7 +259,9 @@ export default function ExploreInner(props: any) {
                   }}
                   title={
                     scope === "local"
-                      ? `Local: ${meCity || "—"}${meCity && meState ? ", " : ""}${meState || "—"}`
+                      ? `Local: ${meCity || "—"}${meCity && meState ? ", " : ""}${
+                          meState || "—"
+                        }`
                       : ""
                   }
                 >
@@ -251,7 +293,6 @@ export default function ExploreInner(props: any) {
               </div>
             </div>
 
-            {/* ✅ CLEAN RIGHT SIDE: Category + Search + Create (no Blog/Install duplicates) */}
             <div className="flex flex-wrap items-center gap-2">
               <div className="rounded-full border bg-white px-3 py-2">
                 <label className="mr-2 text-xs font-extrabold tracking-[0.18em] text-slate-500">
@@ -282,13 +323,32 @@ export default function ExploreInner(props: any) {
                 🔎 Search
               </button>
 
-              <a
+              <Link
+                href="/blog"
+                className="inline-flex items-center justify-center rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50"
+                style={{ color: NAVY }}
+                title="Blog"
+              >
+                📝 Blog
+              </Link>
+
+              <button
+                type="button"
+                onClick={handleInstall}
+                className="inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
+                style={{ background: installReady ? BLUE : NAVY }}
+                title={installReady ? "Install Quandr3" : "Add to Home Screen"}
+              >
+                ⬇️ {installReady ? "Install" : "Add"}
+              </button>
+
+              <Link
                 href="/q/create"
                 className="rounded-full px-5 py-2 text-sm font-extrabold text-white shadow-sm hover:opacity-95"
                 style={{ background: BLUE }}
               >
                 Create a Quandr3
-              </a>
+              </Link>
             </div>
           </div>
 
@@ -398,7 +458,7 @@ export default function ExploreInner(props: any) {
                   <div
                     key={r.id}
                     className="flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 hover:bg-slate-50 cursor-pointer"
-                    onClick={() => goToQuandr3(r.id)}
+                    onClick={() => router.push(`/q/${r.id}`)}
                     role="button"
                     tabIndex={0}
                   >
@@ -415,7 +475,9 @@ export default function ExploreInner(props: any) {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <div className="text-xs font-bold text-slate-500">{h != null ? `${h}h` : "—"}</div>
+                      <div className="text-xs font-bold text-slate-500">
+                        {h != null ? `${h}h` : "—"}
+                      </div>
                       <button
                         type="button"
                         onClick={(e) => {
@@ -448,7 +510,7 @@ export default function ExploreInner(props: any) {
               <div
                 key={r.id}
                 className="rounded-[28px] border bg-white p-6 shadow-sm hover:shadow-md transition cursor-pointer"
-                onClick={() => goToQuandr3(r.id)}
+                onClick={() => router.push(`/q/${r.id}`)}
                 role="button"
                 tabIndex={0}
               >
@@ -489,7 +551,10 @@ export default function ExploreInner(props: any) {
 
                 <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-slate-600">
                   {r.city || r.state ? (
-                    <span className="rounded-full border px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
+                    <span
+                      className="rounded-full border px-3 py-1 text-xs font-extrabold"
+                      style={{ color: NAVY }}
+                    >
                       {r.city ? r.city : ""}
                       {r.city && r.state ? ", " : ""}
                       {r.state ? r.state : ""}
@@ -520,7 +585,8 @@ export default function ExploreInner(props: any) {
         </section>
 
         <div className="mt-10 text-center text-xs text-slate-500">
-          Quandr3: <span className="font-semibold">Ask.</span> <span className="font-semibold">Share.</span>{" "}
+          Quandr3: <span className="font-semibold">Ask.</span>{" "}
+          <span className="font-semibold">Share.</span>{" "}
           <span className="font-semibold">Decide.</span>
         </div>
       </div>
