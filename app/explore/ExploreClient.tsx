@@ -92,9 +92,14 @@ export default function ExploreClient() {
   const [meState, setMeState] = useState("");
   const [meRegion, setMeRegion] = useState("");
 
+  // ✅ Following
+  const [followedIds, setFollowedIds] = useState<string[]>([]);
+
   // UI filters
   const [scope, setScope] = useState<"global" | "local">("global");
-  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed" | "resolved">("all");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "open" | "closed" | "resolved" | "following" | "mine"
+  >("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState("");
@@ -141,13 +146,18 @@ export default function ExploreClient() {
   }
 
   // load auth + profile
-  async function loadMe() {
+  async function loadMe(): Promise<string> {
     try {
       const { data } = await supabase.auth.getUser();
       const uid = data?.user?.id ? String(data.user.id) : "";
       setMeId(uid);
 
-      if (!uid) return;
+      if (!uid) {
+        setMeCity("");
+        setMeState("");
+        setMeRegion("");
+        return "";
+      }
 
       const { data: prof } = await supabase
         .from("profiles")
@@ -164,8 +174,38 @@ export default function ExploreClient() {
       setMeCity(city);
       setMeState(state);
       setMeRegion(region);
+
+      return uid;
     } catch {
-      // ok
+      setMeId("");
+      setMeCity("");
+      setMeState("");
+      setMeRegion("");
+      return "";
+    }
+  }
+
+  async function loadFollows(uid: string) {
+    if (!uid) {
+      setFollowedIds([]);
+      return;
+    }
+    try {
+      const { data, error } = await supabase
+        .from("dilemma_follows")
+        .select("quandr3_id")
+        .eq("user_id", uid);
+
+      if (error) throw error;
+
+      const ids = (data || [])
+        .map((r: any) => safeStr(r?.quandr3_id).trim())
+        .filter(Boolean);
+
+      setFollowedIds(ids);
+    } catch (e) {
+      console.warn("[explore] could not load follows", e);
+      setFollowedIds([]);
     }
   }
 
@@ -174,7 +214,7 @@ export default function ExploreClient() {
     setErr("");
 
     try {
-      await loadMe();
+      const uid = await loadMe();
 
       // ✅ QUEUE QUERY: show only released posts (published_at <= now) OR legacy rows (published_at is null)
       const nowIso = new Date().toISOString();
@@ -190,6 +230,9 @@ export default function ExploreClient() {
       if (error) throw error;
 
       setRows(data || []);
+
+      // ✅ Following list (used by Following tab)
+      await loadFollows(uid);
     } catch (e: any) {
       setErr(e?.message || "Failed to load Explore.");
     } finally {
@@ -268,8 +311,22 @@ export default function ExploreClient() {
     return ["all", ...cats.sort((a: string, b: string) => a.localeCompare(b))];
   }, [rows]);
 
+  const followedSet = useMemo(() => new Set((followedIds || []).filter(Boolean)), [followedIds]);
+
   const filtered = useMemo(() => {
     let out = [...(rows || [])];
+
+    // ✅ Following tab (requires login)
+    if (statusFilter === "following") {
+      if (!meId) return [];
+      out = out.filter((r) => followedSet.has(safeStr(r?.id)));
+    }
+
+    // ✅ Mine tab (requires login)
+    if (statusFilter === "mine") {
+      if (!meId) return [];
+      out = out.filter((r) => safeStr(r?.author_id) === safeStr(meId));
+    }
 
     // ✅ Local/Global: City-first, County/Region fallback
     if (scope === "local") {
@@ -292,8 +349,8 @@ export default function ExploreClient() {
       }
     }
 
-    // ✅ Status filter (time-aware)
-    if (statusFilter !== "all") {
+    // ✅ Status filter (time-aware) — only when using the status buckets
+    if (statusFilter === "open" || statusFilter === "closed" || statusFilter === "resolved") {
       out = out.filter((r) => normStatusForFilter(r) === statusFilter);
     }
 
@@ -324,7 +381,18 @@ export default function ExploreClient() {
     }
 
     return out;
-  }, [rows, scope, statusFilter, categoryFilter, searchQ, meCity, meRegion, meState]);
+  }, [
+    rows,
+    scope,
+    statusFilter,
+    categoryFilter,
+    searchQ,
+    meCity,
+    meRegion,
+    meState,
+    meId,
+    followedSet,
+  ]);
 
   return (
     <div>

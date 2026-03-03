@@ -1,131 +1,154 @@
+// /app/login/LoginClient.tsx
 "use client";
 // @ts-nocheck
 
-export const dynamic = "force-dynamic";
-
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/utils/supabase/browser";
 
-const NAVY = "#0b2343";
-const BLUE = "#1e63f3";
-const TEAL = "#00a9a5";
-const CORAL = "#ff6b6b";
-const SOFT_BG = "#f5f7fc";
+function safeStr(v: any) {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v.trim();
+  return String(v);
+}
+
+function isUuid(s?: string) {
+  const v = safeStr(s);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    v
+  );
+}
 
 export default function LoginClient() {
-  const router = useRouter();
   const sp = useSearchParams();
 
-  const nextPath = useMemo(() => sp?.get("next") || "/explore", [sp]);
-
   const [email, setEmail] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
 
-  async function handleSendLink(e: any) {
-    e.preventDefault();
-    setMsg(null);
+  // ✅ capture ?ref=... and store for callback to apply to profiles.referred_by
+  useEffect(() => {
+    const ref = safeStr(sp.get("ref"));
+    if (isUuid(ref)) {
+      localStorage.setItem("q_referrer", ref);
+      sessionStorage.setItem("q_referrer", ref);
+    }
+  }, [sp]);
 
-    const clean = (email || "").trim();
-    if (!clean) {
-      setMsg("Enter your email first.");
+  const next = useMemo(() => safeStr(sp.get("next")) || "/explore", [sp]);
+
+  async function sendLink() {
+    setNote("");
+    const e = safeStr(email).toLowerCase();
+    if (!e.includes("@")) {
+      setNote("Enter a valid email.");
       return;
     }
 
-    setSending(true);
+    setBusy(true);
     try {
-      // OTP / Magic Link
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+
+      // ✅ Pull referrer from storage (captured above) and include it in callback URL
+      const storedRef =
+        (typeof window !== "undefined" &&
+          (localStorage.getItem("q_referrer") ||
+            sessionStorage.getItem("q_referrer"))) ||
+        "";
+
+      // ✅ IMPORTANT: redirect into /auth/callback so we exchange the code for session
+      const emailRedirectTo =
+        `${origin}/auth/callback?next=${encodeURIComponent(next)}` +
+        (isUuid(storedRef) ? `&ref=${encodeURIComponent(storedRef)}` : "");
+
       const { error } = await supabase.auth.signInWithOtp({
-        email: clean,
-        options: {
-          emailRedirectTo:
-            typeof window !== "undefined"
-              ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`
-              : undefined,
-        },
+        email: e,
+        options: { emailRedirectTo },
       });
 
-      if (error) {
-        setMsg(error.message || "Could not send link.");
-        setSending(false);
-        return;
-      }
+      if (error) throw error;
 
-      setSent(true);
-      setMsg("✅ Magic link sent. Check your inbox (and spam).");
+      setNote("Magic link sent. Check your inbox (and spam).");
     } catch (err: any) {
-      setMsg(err?.message || "Something went wrong.");
+      setNote(err?.message || "Could not send magic link.");
     } finally {
-      setSending(false);
+      setBusy(false);
     }
   }
 
   return (
-    <main className="min-h-screen" style={{ background: `linear-gradient(180deg, ${SOFT_BG}, #fff)` }}>
-      <div className="mx-auto max-w-xl px-4 py-12">
-        <div className="rounded-[28px] border bg-white p-7 shadow-sm" style={{ borderColor: "rgba(15,23,42,0.12)" }}>
-          <div className="mb-2 text-xs font-semibold tracking-widest text-slate-500">QUANDR3</div>
-          <h1 className="text-3xl font-extrabold" style={{ color: NAVY }}>
-            Log in
-          </h1>
-          <p className="mt-2 text-sm text-slate-600">
-            We’ll email you a secure magic link. No password needed.
-          </p>
-
-          <form onSubmit={handleSendLink} className="mt-6 space-y-4">
-            <div>
-              <label className="text-sm font-semibold text-slate-700">Email</label>
-              <input
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@email.com"
-                className="mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none"
-                style={{ borderColor: "rgba(15,23,42,0.12)" }}
-              />
-            </div>
-
-            {msg ? (
-              <div
-                className="rounded-2xl border px-4 py-3 text-sm"
-                style={{
-                  borderColor: sent ? "rgba(0,169,165,0.35)" : "rgba(255,107,107,0.35)",
-                  background: sent ? "rgba(0,169,165,0.08)" : "rgba(255,107,107,0.08)",
-                  color: sent ? TEAL : "#b91c1c",
-                }}
-              >
-                {msg}
-              </div>
-            ) : null}
-
-            <button
-              type="submit"
-              disabled={sending}
-              className="w-full rounded-2xl px-4 py-3 text-sm font-extrabold text-white shadow-sm disabled:opacity-60"
-              style={{
-                background: `linear-gradient(90deg, ${BLUE} 0%, ${TEAL} 55%, ${CORAL} 100%)`,
-              }}
-            >
-              {sending ? "Sending…" : "Send magic link"}
-            </button>
-
-            <div className="flex items-center justify-between text-sm">
-              <Link href="/explore" className="font-semibold" style={{ color: BLUE }}>
-                ← Back to Explore
-              </Link>
-              <Link href="/signup" className="font-semibold" style={{ color: NAVY }}>
-                Need an account? Sign up
-              </Link>
-            </div>
-
-            <div className="pt-2 text-xs text-slate-500">
-              After clicking the link, you’ll return to: <span className="font-mono">{nextPath}</span>
-            </div>
-          </form>
-        </div>
+    <div style={{ maxWidth: 520, margin: "0 auto", padding: 24 }}>
+      <h1 style={{ fontSize: 34, fontWeight: 1000, marginBottom: 8 }}>
+        Log in
+      </h1>
+      <div style={{ color: "#5f7896", fontWeight: 800, marginBottom: 16 }}>
+        We’ll email you a secure magic link. No password needed.
       </div>
-    </main>
+
+      <div style={{ fontWeight: 900, marginBottom: 8 }}>Email</div>
+      <input
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="you@email.com"
+        style={{
+          width: "100%",
+          padding: "14px 14px",
+          borderRadius: 14,
+          border: "2px solid #e5ecfb",
+          outline: "none",
+          fontWeight: 900,
+          marginBottom: 12,
+        }}
+      />
+
+      {note ? (
+        <div
+          style={{
+            padding: 12,
+            borderRadius: 14,
+            background: note.includes("sent") ? "#ecfff7" : "#fff1f1",
+            border: note.includes("sent")
+              ? "1px solid #b7f1d7"
+              : "1px solid #ffd0d0",
+            color: note.includes("sent") ? "#0a6b4f" : "#8b1e1e",
+            fontWeight: 900,
+            marginBottom: 12,
+          }}
+        >
+          {note}
+        </div>
+      ) : null}
+
+      <button
+        onClick={sendLink}
+        disabled={busy}
+        style={{
+          width: "100%",
+          padding: "14px 16px",
+          borderRadius: 16,
+          border: "2px solid #0c223c",
+          background: busy ? "#e5ecfb" : "#1e63f3",
+          color: busy ? "#0b2343" : "white",
+          fontWeight: 1000,
+          cursor: busy ? "not-allowed" : "pointer",
+        }}
+      >
+        {busy ? "Sending…" : "Send magic link"}
+      </button>
+
+      <div style={{ marginTop: 16 }}>
+        <Link
+          href="/explore"
+          style={{ fontWeight: 900, textDecoration: "none" }}
+        >
+          ← Back to Explore
+        </Link>
+      </div>
+
+      <div style={{ marginTop: 10, color: "#5f7896", fontWeight: 800 }}>
+        After clicking the link, you’ll return to: <b>{next}</b>
+      </div>
+    </div>
   );
 }
