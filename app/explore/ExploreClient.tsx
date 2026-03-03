@@ -5,7 +5,6 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { supabase } from "@/utils/supabase/browser";
 import ExploreInner from "./_ExploreInner";
 
@@ -124,7 +123,8 @@ export default function ExploreClient() {
       setInstallReady(true);
     }
     window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    return () => window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    return () =>
+      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
   }, []);
 
   async function handleInstall() {
@@ -138,7 +138,7 @@ export default function ExploreClient() {
       } catch {}
     }
     alert(
-      "Install Quandr3:\n\n" +
+      "Add Quandr3 to your Home Screen:\n\n" +
         "• iPhone/iPad (Safari): Share → Add to Home Screen\n" +
         "• Android (Chrome): ⋮ → Install app / Add to Home screen\n" +
         "• Desktop (Chrome/Edge): Install in address bar or browser menu"
@@ -221,7 +221,9 @@ export default function ExploreClient() {
 
       const { data, error } = await supabase
         .from("quandr3s")
-        .select("id,title,prompt,category,status,created_at,closes_at,city,region,state,author_id,published_at")
+        .select(
+          "id,title,prompt,category,status,created_at,closes_at,city,region,state,author_id,published_at"
+        )
         .or(`published_at.is.null,published_at.lte.${nowIso}`)
         .order("published_at", { ascending: false })
         .order("created_at", { ascending: false })
@@ -292,10 +294,14 @@ export default function ExploreClient() {
   useEffect(() => {
     const channel = supabase
       .channel("quandr3s-explore-inserts")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "quandr3s" }, () => {
-        if (!shouldReloadNow()) return;
-        load("realtime-insert");
-      })
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "quandr3s" },
+        () => {
+          if (!shouldReloadNow()) return;
+          load("realtime-insert");
+        }
+      )
       .subscribe();
 
     return () => {
@@ -307,11 +313,16 @@ export default function ExploreClient() {
   }, []);
 
   const categories = useMemo(() => {
-    const cats = uniq((rows || []).map((r) => safeStr(r?.category).trim()).filter(Boolean));
+    const cats = uniq(
+      (rows || []).map((r) => safeStr(r?.category).trim()).filter(Boolean)
+    );
     return ["all", ...cats.sort((a: string, b: string) => a.localeCompare(b))];
   }, [rows]);
 
-  const followedSet = useMemo(() => new Set((followedIds || []).filter(Boolean)), [followedIds]);
+  const followedSet = useMemo(
+    () => new Set((followedIds || []).filter(Boolean)),
+    [followedIds]
+  );
 
   const filtered = useMemo(() => {
     let out = [...(rows || [])];
@@ -350,7 +361,11 @@ export default function ExploreClient() {
     }
 
     // ✅ Status filter (time-aware) — only when using the status buckets
-    if (statusFilter === "open" || statusFilter === "closed" || statusFilter === "resolved") {
+    if (
+      statusFilter === "open" ||
+      statusFilter === "closed" ||
+      statusFilter === "resolved"
+    ) {
       out = out.filter((r) => normStatusForFilter(r) === statusFilter);
     }
 
@@ -396,7 +411,7 @@ export default function ExploreClient() {
 
   return (
     <div>
-      {/* Utility bar */}
+      {/* ✅ Clean utility bar (minimal, matches MVP look) */}
       <div className="mx-auto max-w-6xl px-4 pt-4">
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button
@@ -404,25 +419,19 @@ export default function ExploreClient() {
             onClick={() => load("manual")}
             className="rounded-full border bg-white px-4 py-2 text-xs font-extrabold hover:bg-slate-50"
             style={{ color: NAVY }}
-            title="Refresh Explore"
+            title="Refresh"
           >
             Refresh
           </button>
-
-          <Link
-            href="/blog"
-            className="rounded-full border bg-white px-4 py-2 text-xs font-extrabold hover:bg-slate-50"
-            style={{ color: NAVY }}
-          >
-            Blog
-          </Link>
 
           <button
             type="button"
             onClick={handleInstall}
             className="rounded-full px-4 py-2 text-xs font-extrabold text-white hover:opacity-95"
             style={{ background: installReady ? BLUE : NAVY }}
-            title={installReady ? "Install Quandr3" : "Add Quandr3 to your home screen"}
+            title={
+              installReady ? "Install Quandr3" : "Add Quandr3 to your home screen"
+            }
           >
             {installReady ? "Install App" : "Add to Home Screen"}
           </button>

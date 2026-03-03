@@ -2,7 +2,6 @@
 "use client";
 // @ts-nocheck
 
-import Link from "next/link";
 import { useMemo, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -36,16 +35,15 @@ function hoursLeft(closesAt?: string) {
 function effectiveStatus(row: any) {
   const raw = (row?.status || "").toLowerCase();
 
-  // already closed/resolved by backend state
   if (raw === "awaiting_user") return "closed";
   if (raw === "resolved") return "resolved";
 
   if (raw === "open") {
     const ca = row?.closes_at;
-    if (!ca) return "open"; // if you allow open with no closes_at, keep as open
+    if (!ca) return "open";
     const end = new Date(ca).getTime();
     if (!isFinite(end)) return "open";
-    if (Date.now() >= end) return "closed"; // expired open becomes closed in UI
+    if (Date.now() >= end) return "closed";
     return "open";
   }
 
@@ -112,39 +110,6 @@ export default function ExploreInner(props: any) {
     setSearchQ,
   } = props;
 
-  // PWA install support
-  const [installPrompt, setInstallPrompt] = useState<any>(null);
-  const [installReady, setInstallReady] = useState(false);
-
-  useEffect(() => {
-    function onBeforeInstallPrompt(e: any) {
-      e.preventDefault();
-      setInstallPrompt(e);
-      setInstallReady(true);
-    }
-    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    return () => window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-  }, []);
-
-  async function handleInstall() {
-    if (installPrompt) {
-      try {
-        installPrompt.prompt();
-        await installPrompt.userChoice;
-        setInstallPrompt(null);
-        setInstallReady(false);
-        return;
-      } catch {}
-    }
-
-    alert(
-      "Install Quandr3:\n\n" +
-        "• iPhone/iPad (Safari): tap Share → Add to Home Screen\n" +
-        "• Android (Chrome): tap ⋮ menu → Install app / Add to Home screen\n" +
-        "• Desktop (Chrome/Edge): look for Install in the address bar or browser menu"
-    );
-  }
-
   const liveCounts = useMemo(() => {
     const all = rawRows || [];
     const open = all.filter((r: any) => effectiveStatus(r) === "open").length;
@@ -181,14 +146,12 @@ export default function ExploreInner(props: any) {
         const rb = rank(b);
         if (ra !== rb) return ra - rb;
 
-        // If both are open, close-soonest first
         if (ra === 0) {
           const ah = hoursLeft(a?.closes_at) ?? 999999;
           const bh = hoursLeft(b?.closes_at) ?? 999999;
           if (ah !== bh) return ah - bh;
         }
 
-        // Otherwise newest first
         return new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime();
       });
   }, [rows]);
@@ -208,10 +171,13 @@ export default function ExploreInner(props: any) {
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">EXPLORE</div>
+            {/* ✅ CHANGE: EXPLORE -> DILEMMAS */}
+            <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">DILEMMAS</div>
+
             <h1 className="mt-2 text-4xl font-extrabold leading-tight" style={{ color: NAVY }}>
               Help someone decide.
             </h1>
+
             <p className="mt-2 text-slate-700">
               Real people, real dilemmas. Pick A–D and (if you can) add a quick “why.”
             </p>
@@ -221,7 +187,8 @@ export default function ExploreInner(props: any) {
             <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">LIVE NOW</div>
             <div className="mt-1 font-extrabold" style={{ color: NAVY }}>
               <span className="text-lg">{liveCounts.open}</span> open{" "}
-              <span className="text-slate-400">•</span> <span className="text-lg">{liveCounts.total}</span> total
+              <span className="text-slate-400">•</span>{" "}
+              <span className="text-lg">{liveCounts.total}</span> total
             </div>
           </div>
         </div>
@@ -284,9 +251,12 @@ export default function ExploreInner(props: any) {
               </div>
             </div>
 
+            {/* ✅ CLEAN RIGHT SIDE: Category + Search + Create (no Blog/Install duplicates) */}
             <div className="flex flex-wrap items-center gap-2">
               <div className="rounded-full border bg-white px-3 py-2">
-                <label className="mr-2 text-xs font-extrabold tracking-[0.18em] text-slate-500">CATEGORY</label>
+                <label className="mr-2 text-xs font-extrabold tracking-[0.18em] text-slate-500">
+                  CATEGORY
+                </label>
                 <select
                   value={categoryFilter}
                   onChange={(e) => setCategoryFilter(e.target.value)}
@@ -312,32 +282,13 @@ export default function ExploreInner(props: any) {
                 🔎 Search
               </button>
 
-              <Link
-                href="/blog"
-                className="inline-flex items-center justify-center rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50"
-                style={{ color: NAVY }}
-                title="Blog"
-              >
-                📝 Blog
-              </Link>
-
-              <button
-                type="button"
-                onClick={handleInstall}
-                className="inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
-                style={{ background: installReady ? BLUE : NAVY }}
-                title={installReady ? "Install Quandr3" : "Add to Home Screen"}
-              >
-                ⬇️ {installReady ? "Install" : "Add"}
-              </button>
-
-              <Link
+              <a
                 href="/q/create"
                 className="rounded-full px-5 py-2 text-sm font-extrabold text-white shadow-sm hover:opacity-95"
                 style={{ background: BLUE }}
               >
                 Create a Quandr3
-              </Link>
+              </a>
             </div>
           </div>
 
@@ -377,7 +328,9 @@ export default function ExploreInner(props: any) {
                   <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                     Search Quandr3s
                   </div>
-                  <div className="mt-1 text-xs text-slate-500">Search title, prompt, category, city/state.</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    Search title, prompt, category, city/state.
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -450,7 +403,10 @@ export default function ExploreInner(props: any) {
                     tabIndex={0}
                   >
                     <div className="flex items-center gap-3">
-                      <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: badge.bg, color: badge.fg }}>
+                      <span
+                        className="rounded-full px-3 py-1 text-xs font-extrabold"
+                        style={{ background: badge.bg, color: badge.fg }}
+                      >
                         {badge.label}
                       </span>
                       <div className="text-sm font-extrabold" style={{ color: NAVY }}>
@@ -506,7 +462,10 @@ export default function ExploreInner(props: any) {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: badge.bg, color: badge.fg }}>
+                    <span
+                      className="rounded-full px-3 py-1 text-xs font-extrabold"
+                      style={{ background: badge.bg, color: badge.fg }}
+                    >
                       {badge.label}
                     </span>
 
@@ -526,7 +485,6 @@ export default function ExploreInner(props: any) {
                   </div>
                 </div>
 
-                {/* ✅ prompt */}
                 {r?.prompt ? <p className="mt-3 text-slate-700">{tiny(r?.prompt, 170)}</p> : null}
 
                 <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-slate-600">
