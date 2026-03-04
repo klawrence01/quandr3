@@ -132,7 +132,6 @@ export default function HomePage() {
         console.error("[Home] load quandr3s error", error);
         setMessage(error.message);
       } else {
-        // extra safety (in case query behavior differs)
         const safe = (data || []).filter(isReleased);
         setItems(safe);
       }
@@ -150,7 +149,6 @@ export default function HomePage() {
   }, [items, activeCategory]);
 
   const liveItems = useMemo(() => {
-    // first 3 released items (already filtered by query)
     return (items || []).filter(isReleased).slice(0, 3);
   }, [items]);
 
@@ -201,33 +199,35 @@ export default function HomePage() {
               <br />
               Everyone learns.
             </h1>
+
+            {/* ✅ Updated educational copy to match 5-stage definition */}
             <p
               style={{
                 fontSize: 15,
                 lineHeight: 1.6,
                 color: "#475569",
-                maxWidth: 520,
-                marginBottom: 16,
+                maxWidth: 560,
+                marginBottom: 14,
               }}
             >
-              Real decisions deserve real perspective, real reasoning, and real
-              closure. Quandr3 closes the loop so you gain clarity — and the
-              community gains shared wisdom.
+              Quandr3 is built to complete the entire decision loop — not just collect opinions.
+              A completed Quandr3 has five parts: a real question, the context behind it,
+              the community’s votes, the reasons behind those votes, and the Curioso’s final
+              choice (plus why).
             </p>
+
             <p
               style={{
                 fontSize: 14,
                 lineHeight: 1.5,
                 color: "#64748b",
-                maxWidth: 520,
+                maxWidth: 560,
                 marginBottom: 20,
               }}
             >
-              Quandr3 is a{" "}
-              <span style={{ fontWeight: 700 }}>clarity engine</span> — a social
-              decision platform built around real human perspective. You ask a
-              question, real people share their reasoning, and you reveal what
-              you chose.
+              That last step is the difference: after the internet weighs in, the person who asked
+              comes back to close the loop — revealing what they chose and what they learned.
+              That creates clarity for them and shared wisdom for everyone else.
             </p>
 
             <div
@@ -278,11 +278,10 @@ export default function HomePage() {
             </div>
 
             <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>
-              No bots. No “hot takes.” Just real choices, real context, and real
-              outcomes.
+              No bots. No “hot takes.” Just real questions, real context, real reasons, and real closure.
             </p>
 
-            {/* The Quandr3 loop card */}
+            {/* ✅ Updated "5-stage" explainer card */}
             <div
               style={{
                 marginTop: 26,
@@ -303,23 +302,23 @@ export default function HomePage() {
                   marginBottom: 6,
                 }}
               >
-                THE QUANDR3 LOOP
+                THE 5 STAGES OF A COMPLETED QUANDR3
               </div>
+
               <div
                 style={{
                   fontSize: 13,
-                  fontWeight: 800,
-                  marginBottom: 4,
+                  fontWeight: 900,
+                  marginBottom: 8,
                   color: NAVY,
                 }}
               >
-                Ask → Perspectives → Reasoning → Decision → Outcome → Shared
-                wisdom.
+                1) Curiosity → 2) Context → 3) Answers → 4) Reasons → 5) Curioso’s Final Choice
               </div>
+
               <p style={{ fontSize: 12, color: "#6b7280", margin: 0 }}>
-                Most platforms stop at the advice. Quandr3 completes the loop so
-                helpers get closure and the community gains “unlived
-                experience.”
+                Most platforms stop at the poll. Quandr3 goes further: we capture the “why” behind votes,
+                then we let the Curioso come back and close the loop with the final decision and reasoning.
               </p>
             </div>
 

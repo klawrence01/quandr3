@@ -438,14 +438,12 @@ export default function DemoDilemmaRotator() {
         </button>
       </div>
 
-      {/* Stage 1: Curiosity (label the question explicitly) */}
+      {/* Stage 1: Curiosity */}
       <div style={{ marginBottom: 8 }}>
         <div style={{ fontSize: 11, fontWeight: 950, letterSpacing: 2, textTransform: "uppercase", color: "#64748b" }}>
           Stage 1 • Curiosity (The Question)
         </div>
-        <div style={{ fontSize: 18, fontWeight: 950, color: NAVY, lineHeight: 1.25, marginTop: 6 }}>
-          {item.title}
-        </div>
+        <div style={{ fontSize: 18, fontWeight: 950, color: NAVY, lineHeight: 1.25, marginTop: 6 }}>{item.title}</div>
 
         {!showContext ? (
           <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
@@ -477,7 +475,7 @@ export default function DemoDilemmaRotator() {
         </div>
       ) : null}
 
-      {/* Stage 3: Answers (Options) */}
+      {/* Stage 3: Answers */}
       {showAnswers ? (
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 11, fontWeight: 950, letterSpacing: 2, textTransform: "uppercase", color: "#64748b" }}>
@@ -526,25 +524,14 @@ export default function DemoDilemmaRotator() {
                       </div>
                       <div>
                         <div style={{ fontSize: 14, fontWeight: 900, color: NAVY }}>{op.text}</div>
-                        <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                          {item.perspectives} perspectives shared
-                        </div>
+                        <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{item.perspectives} perspectives shared</div>
                       </div>
                     </div>
 
-                    {/* reveal % only after click */}
                     {choice ? (
                       <div style={{ minWidth: 110, textAlign: "right" }}>
                         <div style={{ fontSize: 12, fontWeight: 900, color: NAVY }}>{pct}%</div>
-                        <div
-                          style={{
-                            height: 8,
-                            borderRadius: 999,
-                            background: "rgba(15,23,42,0.08)",
-                            overflow: "hidden",
-                            marginTop: 6,
-                          }}
-                        >
+                        <div style={{ height: 8, borderRadius: 999, background: "rgba(15,23,42,0.08)", overflow: "hidden", marginTop: 6 }}>
                           <div
                             style={{
                               height: "100%",
@@ -585,14 +572,30 @@ export default function DemoDilemmaRotator() {
             Stage 4 • Reasons (Why people chose what they chose)
           </div>
 
-          <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <div style={{ fontSize: 13, fontWeight: 950, color: NAVY }}>
-              You chose <span style={{ color: BLUE }}>{choice}</span>
-              {typeof chosenPct === "number" ? (
-                <>
-                  . <span style={{ color: "#0f172a" }}>{chosenPct}%</span> chose the same.
-                </>
-              ) : null}
+          <div
+            style={{
+              marginTop: 10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 950, color: NAVY }}>
+                You chose <span style={{ color: BLUE }}>{choice}</span>
+                {typeof chosenPct === "number" ? (
+                  <>
+                    . <span style={{ color: "#0f172a" }}>{chosenPct}%</span> chose the same.
+                  </>
+                ) : null}
+              </div>
+
+              {/* ✅ Reframing sentence (added) */}
+              <div style={{ marginTop: 6, fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
+                Quandr3 turns crowd opinion into structured perspective — so the Curioso can make a clearer decision.
+              </div>
             </div>
 
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -699,13 +702,10 @@ export default function DemoDilemmaRotator() {
                 color: NAVY,
               }}
             >
-              Final decision:{" "}
-              <span style={{ color: BLUE }}>{item.closure.final_choice_label}</span>
+              Final decision: <span style={{ color: BLUE }}>{item.closure.final_choice_label}</span>
             </span>
 
-            <span style={{ fontSize: 12, fontWeight: 900, color: TEAL }}>
-              The internet helped — but the Curioso still decides.
-            </span>
+            <span style={{ fontSize: 12, fontWeight: 900, color: TEAL }}>The internet helped — but the Curioso still decides.</span>
           </div>
 
           <div
@@ -868,7 +868,7 @@ export default function DemoDilemmaRotator() {
         ) : null}
       </div>
 
-      {/* Simple default behavior: once user sees the question, let them reveal context quickly */}
+      {/* Reveal context */}
       {!showContext ? (
         <div style={{ marginTop: 10, display: "flex", justifyContent: "center" }}>
           <button
@@ -894,7 +894,7 @@ export default function DemoDilemmaRotator() {
         </div>
       ) : null}
 
-      {/* If they’re on context, nudge to voting */}
+      {/* Vote nudge */}
       {showContext && !showAnswers ? (
         <div style={{ marginTop: 10, display: "flex", justifyContent: "center" }}>
           <button
