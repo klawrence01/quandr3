@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabase/browser";
 
 const NAVY = "#0b2343";
@@ -25,6 +26,8 @@ function fmt(ts?: any) {
 }
 
 export default function AdminPage() {
+  const router = useRouter();
+
   const [me, setMe] = useState<any>(null);
   const [role, setRole] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -45,6 +48,7 @@ export default function AdminPage() {
 
   const okId = useMemo(() => isUuid(qid), [qid]);
 
+  // ✅ Load auth + role
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -60,12 +64,18 @@ export default function AdminPage() {
         return;
       }
 
-      const { data: p, error } = await supabase.from("profiles").select("id,role,display_name").eq("id", user.id).single();
+      const { data: p, error } = await supabase
+        .from("profiles")
+        .select("id,role,display_name")
+        .eq("id", user.id)
+        .single();
+
       if (error) {
         setRole("");
       } else {
         setRole((p?.role || "").toString());
       }
+
       setLoading(false);
     })();
   }, []);
@@ -191,16 +201,47 @@ export default function AdminPage() {
 
   const adminOk = !loading && me && role === "admin";
 
+  // ✅ If user is not admin, show message but ALSO give a safe “Back home” link
+  // (No auto-redirect to avoid confusion while testing.)
   return (
     <main style={{ minHeight: "100vh", background: SOFT_BG }}>
       <div className="mx-auto max-w-5xl px-4 py-10">
-        <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-extrabold" style={{ color: NAVY }}>
-            Admin
-          </h1>
-          <Link href="/explore" className="text-sm font-bold hover:underline" style={{ color: BLUE }}>
-            ← Back to Explore
-          </Link>
+        {/* ✅ Cleaner header/nav row */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">ADMIN</div>
+            <h1 className="mt-1 text-3xl font-extrabold" style={{ color: NAVY }}>
+              Admin Panel
+            </h1>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href="/"
+              className="rounded-full border bg-white px-4 py-2 text-xs font-extrabold hover:bg-slate-50"
+              style={{ color: NAVY }}
+            >
+              Home
+            </Link>
+
+            <Link
+              href="/explore"
+              className="rounded-full border bg-white px-4 py-2 text-xs font-extrabold hover:bg-slate-50"
+              style={{ color: NAVY }}
+            >
+              Explore
+            </Link>
+
+            <button
+              type="button"
+              onClick={() => router.refresh()}
+              className="rounded-full border bg-white px-4 py-2 text-xs font-extrabold hover:bg-slate-50"
+              style={{ color: NAVY }}
+              title="Refresh"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 rounded-2xl border bg-white p-5">
@@ -433,6 +474,11 @@ export default function AdminPage() {
             {status}
           </div>
           {msg ? <div className="mt-1 text-sm text-red-600">{msg}</div> : null}
+        </div>
+
+        {/* ✅ Helpful footer hint */}
+        <div className="mt-8 text-center text-xs text-slate-500">
+          Admin URL: <span className="font-semibold">/admin</span>
         </div>
       </div>
     </main>
