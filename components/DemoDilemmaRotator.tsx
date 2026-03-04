@@ -19,16 +19,28 @@ type DemoOption = {
 type DemoDilemma = {
   id: string;
   category: string;
+
+  // Stage 1: Curiosity (question)
   title: string;
+
+  // Stage 2: Context (why)
   context: string;
-  closes_in_minutes: number; // used to render rounded time blocks
-  perspectives: number; // realistic number
+
+  closes_in_minutes: number;
+  perspectives: number;
   options: DemoOption[];
-  // pre-baked result for demo
+
+  // Stage 3/4: Answers + Reasons (demo results)
   result: {
     winner_label: "A" | "B" | "C" | "D";
-    percents: Record<string, number>; // {A: 60, B: 40}
-    reasons: Record<string, string[]>; // {A:[..], B:[..]}
+    percents: Record<string, number>;
+    reasons: Record<string, string[]>;
+  };
+
+  // Stage 5: Curioso’s final choice + why
+  closure: {
+    final_choice_label: "A" | "B" | "C" | "D";
+    note: string;
   };
 };
 
@@ -41,22 +53,48 @@ function formatTimeLeft(mins: number) {
   if (mins < 0) return "Closed";
   if (mins < 60) return `Closes in ${Math.max(1, Math.round(mins))}m`;
   const hrs = Math.floor(mins / 60);
-  const rem = mins % 60;
-  if (hrs < 24) return rem === 0 ? `Closes in ${hrs}h` : `Closes in ${hrs}h`;
+  if (hrs < 24) return `Closes in ${hrs}h`;
   const days = Math.floor(hrs / 24);
   return `Closes in ${days}d`;
 }
 
 function urgencyBadge(mins: number) {
   if (mins < 0) return null;
-  if (mins < 60) return { label: "Final Hour", bg: "#fff1f2", fg: "#be123c", border: "1px solid rgba(190,18,60,0.25)" };
-  if (mins <= 360) return { label: "Closing Soon", bg: "#fff7ed", fg: "#b45309", border: "1px solid rgba(180,83,9,0.22)" };
+  if (mins < 60)
+    return {
+      label: "Final Hour",
+      bg: "#fff1f2",
+      fg: "#be123c",
+      border: "1px solid rgba(190,18,60,0.25)",
+    };
+  if (mins <= 360)
+    return {
+      label: "Closing Soon",
+      bg: "#fff7ed",
+      fg: "#b45309",
+      border: "1px solid rgba(180,83,9,0.22)",
+    };
   return null;
 }
 
 function pctBar(p: number) {
   const w = clamp(p || 0, 0, 100);
   return `${w}%`;
+}
+
+function stagePill(label: string, active: boolean) {
+  return {
+    fontSize: 10,
+    fontWeight: 950,
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+    padding: "5px 10px",
+    borderRadius: 999,
+    border: active ? "none" : "1px solid rgba(15,23,42,0.10)",
+    background: active ? "rgba(30,99,243,0.10)" : "#ffffff",
+    color: active ? BLUE : "#64748b",
+    whiteSpace: "nowrap",
+  } as any;
 }
 
 const DEMOS: DemoDilemma[] = [
@@ -80,6 +118,11 @@ const DEMOS: DemoDilemma[] = [
         B: ["Stability buys optionality.", "A slower build can still win — without risking the floor."],
       },
     },
+    closure: {
+      final_choice_label: "B",
+      note:
+        "I’m choosing B for 90 days. The comments convinced me my biggest risk isn’t slow progress — it’s burning out or putting my family under pressure. I’m setting weekly revenue milestones, and if I hit them, I’ll revisit the leap with confidence.",
+    },
   },
   {
     id: "demo-money",
@@ -101,6 +144,11 @@ const DEMOS: DemoDilemma[] = [
         B: ["Debt freedom changes your whole life.", "Less pressure now makes better decisions later."],
       },
     },
+    closure: {
+      final_choice_label: "B",
+      note:
+        "I’m paying down debt first. The most repeated point was peace of mind: once the monthly pressure drops, I can invest consistently without second-guessing. I’ll invest the next bonus and start a smaller automatic contribution immediately.",
+    },
   },
   {
     id: "demo-relationships",
@@ -108,7 +156,7 @@ const DEMOS: DemoDilemma[] = [
     title: "Do I tell my friend a hard truth, even if it strains our relationship?",
     context:
       "They’re about to make a choice I think will backfire. I care about them, but I don’t want to come off judgmental or controlling.",
-    closes_in_minutes: 52, // final hour to show minutes behavior
+    closes_in_minutes: 52,
     perspectives: 301,
     options: [
       { label: "A", text: "Be honest — say it clearly" },
@@ -121,6 +169,11 @@ const DEMOS: DemoDilemma[] = [
         A: ["Real friends risk discomfort for your good.", "Say it with love — not ego."],
         B: ["Some lessons can’t be taught — only lived.", "Unasked advice can damage trust."],
       },
+    },
+    closure: {
+      final_choice_label: "A",
+      note:
+        "I’m going to speak up — but gently. People reminded me that honesty without care turns into ego. I’m going to ask permission first (“Can I share something hard?”) and keep it about impact, not judgment.",
     },
   },
   {
@@ -143,6 +196,11 @@ const DEMOS: DemoDilemma[] = [
         B: ["Opportunity compounds over time.", "You can build community anywhere — with intention."],
       },
     },
+    closure: {
+      final_choice_label: "A",
+      note:
+        "We’re choosing A. The strongest insight was that support isn’t just emotional — it’s practical, and it protects our marriage and parenting. We’ll research schools nearby and supplement, but we want our kids surrounded by family now.",
+    },
   },
   {
     id: "demo-everyday",
@@ -164,20 +222,30 @@ const DEMOS: DemoDilemma[] = [
         B: ["Waiting reduces regret.", "Data improves decisions — patience is power."],
       },
     },
+    closure: {
+      final_choice_label: "B",
+      note:
+        "I’m waiting — but with a plan. The best advice wasn’t “wait forever,” it was “set a rule.” I’m tracking prices weekly and will buy if I hit my target range or if inventory drops below my comfort level.",
+    },
   },
 ];
 
 export default function DemoDilemmaRotator() {
   const [idx, setIdx] = useState(0);
   const [choice, setChoice] = useState<string | null>(null);
+
+  // stage: 1 Curiosity, 2 Context, 3 Answers, 4 Reasons, 5 Curioso Closure
+  const [stage, setStage] = useState<1 | 2 | 3 | 4 | 5>(1);
+
   const [paused, setPaused] = useState(false);
   const lastInteractRef = useRef<number>(0);
 
   const item = useMemo(() => DEMOS[idx], [idx]);
 
-  // reset choice when rotating
+  // reset when rotating
   useEffect(() => {
     setChoice(null);
+    setStage(1);
   }, [idx]);
 
   // auto rotate
@@ -186,7 +254,6 @@ export default function DemoDilemmaRotator() {
 
     const t = setInterval(() => {
       const msSinceInteract = Date.now() - (lastInteractRef.current || 0);
-      // don’t rotate immediately after a click
       if (msSinceInteract < 5000) return;
       setIdx((n) => (n + 1) % DEMOS.length);
     }, 7000);
@@ -212,11 +279,16 @@ export default function DemoDilemmaRotator() {
     lastInteractRef.current = Date.now();
     setPaused(true);
     setChoice(label);
+    setStage(4); // jump to Reasons right after vote (that’s the differentiator)
   }
 
   const chosenPct = choice ? item.result.percents[choice] : null;
-
   const winner = item.result.winner_label;
+
+  const showContext = stage >= 2;
+  const showAnswers = stage >= 3;
+  const showReasons = stage >= 4 && !!choice;
+  const showClosure = stage >= 5;
 
   return (
     <section
@@ -241,7 +313,7 @@ export default function DemoDilemmaRotator() {
               color: "#64748b",
             }}
           >
-            DEMO DILEMMA • {item.category.toUpperCase()}
+            LIVE DEMO • {item.category.toUpperCase()}
           </span>
 
           <span style={{ fontSize: 12, color: "#64748b" }}>{formatTimeLeft(item.closes_in_minutes)}</span>
@@ -303,112 +375,217 @@ export default function DemoDilemmaRotator() {
         </div>
       </div>
 
-      {/* Title + context */}
-      <div style={{ fontSize: 18, fontWeight: 950, color: NAVY, lineHeight: 1.25, marginBottom: 8 }}>{item.title}</div>
+      {/* 5-stage strip */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+        <button
+          type="button"
+          onClick={() => {
+            lastInteractRef.current = Date.now();
+            setPaused(true);
+            setStage(1);
+          }}
+          style={stagePill("1) Curiosity", stage === 1)}
+        >
+          1) Curiosity
+        </button>
 
-      <div
-        style={{
-          fontSize: 13,
-          lineHeight: 1.55,
-          color: "#475569",
-          background: SOFT_BG,
-          border: "1px solid rgba(15,23,42,0.06)",
-          borderRadius: 16,
-          padding: 12,
-          marginBottom: 12,
-        }}
-      >
-        {item.context}
+        <button
+          type="button"
+          onClick={() => {
+            lastInteractRef.current = Date.now();
+            setPaused(true);
+            setStage(2);
+          }}
+          style={stagePill("2) Context", stage === 2)}
+        >
+          2) Context
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            lastInteractRef.current = Date.now();
+            setPaused(true);
+            setStage(3);
+          }}
+          style={stagePill("3) Answers", stage === 3)}
+        >
+          3) Answers
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            lastInteractRef.current = Date.now();
+            setPaused(true);
+            setStage(4);
+          }}
+          style={stagePill("4) Reasons", stage === 4)}
+        >
+          4) Reasons
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            lastInteractRef.current = Date.now();
+            setPaused(true);
+            setStage(5);
+          }}
+          style={stagePill("5) Curioso Closes Loop", stage === 5)}
+        >
+          5) Curioso Closes Loop
+        </button>
       </div>
 
-      {/* Options */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10, marginBottom: 12 }}>
-        {item.options.map((op) => {
-          const isChosen = choice === op.label;
-          const pct = item.result.percents[op.label] ?? 0;
+      {/* Stage 1: Curiosity (label the question explicitly) */}
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 950, letterSpacing: 2, textTransform: "uppercase", color: "#64748b" }}>
+          Stage 1 • Curiosity (The Question)
+        </div>
+        <div style={{ fontSize: 18, fontWeight: 950, color: NAVY, lineHeight: 1.25, marginTop: 6 }}>
+          {item.title}
+        </div>
 
-          return (
-            <button
-              key={op.label}
-              type="button"
-              onClick={() => pick(op.label)}
-              style={{
-                textAlign: "left",
-                borderRadius: 16,
-                border: isChosen ? `2px solid ${BLUE}` : "1px solid rgba(15,23,42,0.10)",
-                background: "#ffffff",
-                padding: "12px 12px",
-                cursor: "pointer",
-                boxShadow: isChosen ? "0 14px 34px rgba(30,99,243,0.18)" : "none",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <div
-                    style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 999,
-                      background: isChosen ? BLUE : "#eef2ff",
-                      color: isChosen ? "#fff" : NAVY,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: 950,
-                      fontSize: 12,
-                      flex: "0 0 auto",
-                      marginTop: 1,
-                    }}
-                  >
-                    {op.label}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 900, color: NAVY }}>{op.text}</div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{item.perspectives} perspectives shared</div>
-                  </div>
-                </div>
+        {!showContext ? (
+          <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
+            Next: the Curioso adds context so helpers understand the situation.
+          </div>
+        ) : null}
+      </div>
 
-                {/* reveal % only after click */}
-                {choice ? (
-                  <div style={{ minWidth: 110, textAlign: "right" }}>
-                    <div style={{ fontSize: 12, fontWeight: 900, color: NAVY }}>{pct}%</div>
-                    <div
-                      style={{
-                        height: 8,
-                        borderRadius: 999,
-                        background: "rgba(15,23,42,0.08)",
-                        overflow: "hidden",
-                        marginTop: 6,
-                      }}
-                    >
+      {/* Stage 2: Context */}
+      {showContext ? (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 950, letterSpacing: 2, textTransform: "uppercase", color: "#64748b" }}>
+            Stage 2 • Context (Why they’re asking)
+          </div>
+          <div
+            style={{
+              marginTop: 6,
+              fontSize: 13,
+              lineHeight: 1.55,
+              color: "#475569",
+              background: SOFT_BG,
+              border: "1px solid rgba(15,23,42,0.06)",
+              borderRadius: 16,
+              padding: 12,
+            }}
+          >
+            {item.context}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Stage 3: Answers (Options) */}
+      {showAnswers ? (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 950, letterSpacing: 2, textTransform: "uppercase", color: "#64748b" }}>
+            Stage 3 • Answers (Vote A–D)
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10, marginTop: 10 }}>
+            {item.options.map((op) => {
+              const isChosen = choice === op.label;
+              const pct = item.result.percents[op.label] ?? 0;
+
+              return (
+                <button
+                  key={op.label}
+                  type="button"
+                  onClick={() => pick(op.label)}
+                  style={{
+                    textAlign: "left",
+                    borderRadius: 16,
+                    border: isChosen ? `2px solid ${BLUE}` : "1px solid rgba(15,23,42,0.10)",
+                    background: "#ffffff",
+                    padding: "12px 12px",
+                    cursor: "pointer",
+                    boxShadow: isChosen ? "0 14px 34px rgba(30,99,243,0.18)" : "none",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ display: "flex", gap: 10 }}>
                       <div
                         style={{
-                          height: "100%",
-                          width: pctBar(pct),
-                          background: op.label === winner ? TEAL : "rgba(30,99,243,0.55)",
+                          width: 28,
+                          height: 28,
                           borderRadius: 999,
+                          background: isChosen ? BLUE : "#eef2ff",
+                          color: isChosen ? "#fff" : NAVY,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontWeight: 950,
+                          fontSize: 12,
+                          flex: "0 0 auto",
+                          marginTop: 1,
                         }}
-                      />
+                      >
+                        {op.label}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 900, color: NAVY }}>{op.text}</div>
+                        <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                          {item.perspectives} perspectives shared
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ) : null}
-              </div>
-            </button>
-          );
-        })}
-      </div>
 
-      {/* Results + reasons */}
-      {choice ? (
+                    {/* reveal % only after click */}
+                    {choice ? (
+                      <div style={{ minWidth: 110, textAlign: "right" }}>
+                        <div style={{ fontSize: 12, fontWeight: 900, color: NAVY }}>{pct}%</div>
+                        <div
+                          style={{
+                            height: 8,
+                            borderRadius: 999,
+                            background: "rgba(15,23,42,0.08)",
+                            overflow: "hidden",
+                            marginTop: 6,
+                          }}
+                        >
+                          <div
+                            style={{
+                              height: "100%",
+                              width: pctBar(pct),
+                              background: op.label === winner ? TEAL : "rgba(30,99,243,0.55)",
+                              borderRadius: 999,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {!choice ? (
+            <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>
+              Click an option to vote — then you’ll see the reasons behind choices (the Quandr3 difference).
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Stage 4: Reasons */}
+      {showReasons ? (
         <div
           style={{
             borderRadius: 18,
             border: "1px solid rgba(15,23,42,0.08)",
             background: "#f8fafc",
             padding: 14,
+            marginBottom: 12,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 11, fontWeight: 950, letterSpacing: 2, textTransform: "uppercase", color: "#64748b" }}>
+            Stage 4 • Reasons (Why people chose what they chose)
+          </div>
+
+          <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <div style={{ fontSize: 13, fontWeight: 950, color: NAVY }}>
               You chose <span style={{ color: BLUE }}>{choice}</span>
               {typeof chosenPct === "number" ? (
@@ -425,6 +602,7 @@ export default function DemoDilemmaRotator() {
                 onClick={() => {
                   lastInteractRef.current = Date.now();
                   setChoice(null);
+                  setStage(3);
                 }}
                 style={{
                   borderRadius: 999,
@@ -438,6 +616,28 @@ export default function DemoDilemmaRotator() {
                 }}
               >
                 Change vote
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  lastInteractRef.current = Date.now();
+                  setPaused(true);
+                  setStage(5);
+                }}
+                style={{
+                  borderRadius: 999,
+                  border: "none",
+                  background: "linear-gradient(135deg, #1e63f3, #00a9a5)",
+                  color: "#fff",
+                  padding: "6px 12px",
+                  fontSize: 12,
+                  fontWeight: 950,
+                  cursor: "pointer",
+                  boxShadow: "0 14px 34px rgba(15,23,42,0.18)",
+                }}
+              >
+                See Curioso’s final choice →
               </button>
             </div>
           </div>
@@ -467,13 +667,66 @@ export default function DemoDilemmaRotator() {
               );
             })}
           </div>
+        </div>
+      ) : null}
 
-          {/* Conversion nudge */}
-          <div style={{ marginTop: 12, fontSize: 13, fontWeight: 800, color: NAVY }}>
-            Help someone else decide. It only takes a moment.
+      {/* Stage 5: Curioso closes the loop */}
+      {showClosure ? (
+        <div
+          style={{
+            borderRadius: 18,
+            border: "1px solid rgba(15,23,42,0.10)",
+            background: "#ffffff",
+            padding: 14,
+            boxShadow: "0 16px 38px rgba(15,23,42,0.08)",
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 950, letterSpacing: 2, textTransform: "uppercase", color: "#64748b" }}>
+            Stage 5 • Curioso’s Final Choice (Closes the loop)
           </div>
 
-          {/* CTAs */}
+          <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 12,
+                fontWeight: 950,
+                padding: "6px 12px",
+                borderRadius: 999,
+                background: "#eef2ff",
+                color: NAVY,
+              }}
+            >
+              Final decision:{" "}
+              <span style={{ color: BLUE }}>{item.closure.final_choice_label}</span>
+            </span>
+
+            <span style={{ fontSize: 12, fontWeight: 900, color: TEAL }}>
+              The internet helped — but the Curioso still decides.
+            </span>
+          </div>
+
+          <div
+            style={{
+              marginTop: 10,
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: "#334155",
+              background: SOFT_BG,
+              border: "1px solid rgba(15,23,42,0.06)",
+              borderRadius: 16,
+              padding: 12,
+            }}
+          >
+            {item.closure.note}
+          </div>
+
+          <div style={{ marginTop: 12, fontSize: 13, fontWeight: 900, color: NAVY }}>
+            That’s the full Quandr3: question → context → votes → reasons → final choice.
+          </div>
+
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
             <Link href="/explore" style={{ textDecoration: "none" }}>
               <button
@@ -490,7 +743,7 @@ export default function DemoDilemmaRotator() {
                   boxShadow: "0 14px 34px rgba(15,23,42,0.25)",
                 }}
               >
-                See more dilemmas
+                Explore real Quandr3s
               </button>
             </Link>
 
@@ -508,7 +761,7 @@ export default function DemoDilemmaRotator() {
                   background: "#ffffff",
                 }}
               >
-                Create a Quandr3
+                Post a Quandr3
               </button>
             </Link>
 
@@ -526,14 +779,13 @@ export default function DemoDilemmaRotator() {
                 background: "#ffffff",
               }}
             >
-              Next dilemma →
+              Next demo →
             </button>
           </div>
         </div>
       ) : (
-        // Before vote hint
-        <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
-          Click an option to see how others chose — and why.
+        <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
+          Tip: Use the stage buttons above to see how a full Quandr3 works end-to-end.
         </div>
       )}
 
@@ -590,6 +842,84 @@ export default function DemoDilemmaRotator() {
           </button>
         ) : null}
       </div>
+
+      {/* On first view, nudge them forward automatically */}
+      <div style={{ marginTop: 6, textAlign: "center" }}>
+        {stage < 3 ? (
+          <button
+            type="button"
+            onClick={() => {
+              lastInteractRef.current = Date.now();
+              setPaused(true);
+              setStage((s) => (s < 3 ? ((s + 1) as any) : s));
+            }}
+            style={{
+              border: "none",
+              background: "transparent",
+              color: BLUE,
+              cursor: "pointer",
+              fontWeight: 950,
+              fontSize: 12,
+              textDecoration: "underline",
+            }}
+          >
+            Next stage →
+          </button>
+        ) : null}
+      </div>
+
+      {/* Simple default behavior: once user sees the question, let them reveal context quickly */}
+      {!showContext ? (
+        <div style={{ marginTop: 10, display: "flex", justifyContent: "center" }}>
+          <button
+            type="button"
+            onClick={() => {
+              lastInteractRef.current = Date.now();
+              setPaused(true);
+              setStage(2);
+            }}
+            style={{
+              borderRadius: 999,
+              border: "1px solid rgba(15,23,42,0.10)",
+              background: "#ffffff",
+              padding: "8px 14px",
+              fontSize: 12,
+              fontWeight: 950,
+              cursor: "pointer",
+              color: NAVY,
+            }}
+          >
+            Reveal context
+          </button>
+        </div>
+      ) : null}
+
+      {/* If they’re on context, nudge to voting */}
+      {showContext && !showAnswers ? (
+        <div style={{ marginTop: 10, display: "flex", justifyContent: "center" }}>
+          <button
+            type="button"
+            onClick={() => {
+              lastInteractRef.current = Date.now();
+              setPaused(true);
+              setStage(3);
+            }}
+            style={{
+              borderRadius: 999,
+              border: "none",
+              background: "linear-gradient(135deg, #1e63f3, #00a9a5, #ff6b6b)",
+              color: "#fff",
+              padding: "9px 16px",
+              fontSize: 12,
+              fontWeight: 950,
+              cursor: "pointer",
+              boxShadow: "0 14px 34px rgba(15,23,42,0.18)",
+            }}
+          >
+            Vote (A–D)
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
