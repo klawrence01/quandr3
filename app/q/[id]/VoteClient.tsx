@@ -53,8 +53,10 @@ function cleanLabel(x?: any) {
   return ALLOWED.includes(s) ? s : "";
 }
 
+// ✅ FIX: Prefer human-readable option text; fall back to value
 function optText(o: any) {
-  // ✅ your options table uses "value"
+  const t = (o?.text ?? "").toString().trim();
+  if (t) return t;
   return (o?.value ?? "").toString().trim();
 }
 
@@ -292,7 +294,8 @@ export default function VoteClient() {
 
         const { data: oRows, error: oErr } = await supabase
           .from("quandr3_options")
-          .select("id,quandr3_id,label,value,order,created_at,image_url")
+          // ✅ FIX: include text so UI can render real option sentences
+          .select("id,quandr3_id,label,value,text,order,created_at,image_url")
           .eq("quandr3_id", id)
           .order("order", { ascending: true, nullsFirst: false })
           .order("created_at", { ascending: true });
@@ -651,7 +654,10 @@ export default function VoteClient() {
             <>
               <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">
                 {requiredCategoryMissing ? (
-                  <span className="rounded-full border px-3 py-1" style={{ borderColor: "#fecaca", color: "#b91c1c", background: "#fef2f2" }}>
+                  <span
+                    className="rounded-full border px-3 py-1"
+                    style={{ borderColor: "#fecaca", color: "#b91c1c", background: "#fef2f2" }}
+                  >
                     CATEGORY REQUIRED
                   </span>
                 ) : (
@@ -666,7 +672,10 @@ export default function VoteClient() {
               {(q.prompt || q.context) ? <p className="mt-3 text-base text-slate-700">{q.prompt || q.context}</p> : null}
 
               {requiredCategoryMissing ? (
-                <div className="mt-4 rounded-2xl border p-4 text-sm font-semibold" style={{ borderColor: "#fecaca", background: "#fef2f2", color: "#991b1b" }}>
+                <div
+                  className="mt-4 rounded-2xl border p-4 text-sm font-semibold"
+                  style={{ borderColor: "#fecaca", background: "#fef2f2", color: "#991b1b" }}
+                >
                   This Quandr3 is missing a category. Category is mandatory for resolved posts.
                 </div>
               ) : null}
@@ -752,7 +761,11 @@ export default function VoteClient() {
               </div>
 
               <div className="mt-6 flex flex-wrap items-center gap-3">
-                <Link href={curiosoHref} className="rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50" style={{ color: NAVY }}>
+                <Link
+                  href={curiosoHref}
+                  className="rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50"
+                  style={{ color: NAVY }}
+                >
                   View Curioso
                 </Link>
 
@@ -852,7 +865,8 @@ export default function VoteClient() {
                   <div className="mt-3 text-slate-600">
                     No options found on this Quandr3.
                     <div className="mt-2 text-xs text-slate-500">
-                      (This page reads from <span className="font-mono">quandr3_options.value</span>.)
+                      (This page reads from <span className="font-mono">quandr3_options.text</span> first, then falls back to{" "}
+                      <span className="font-mono">quandr3_options.value</span>.)
                     </div>
                   </div>
                 ) : (
@@ -883,7 +897,10 @@ export default function VoteClient() {
                             <div className="flex items-center gap-2">
                               <div className="text-xs font-extrabold tracking-[0.18em] text-slate-500">{label}</div>
                               {isWinner ? (
-                                <span className="rounded-full px-2 py-0.5 text-[11px] font-extrabold" style={{ background: "#ffe4e6", color: "#be123c" }}>
+                                <span
+                                  className="rounded-full px-2 py-0.5 text-[11px] font-extrabold"
+                                  style={{ background: "#ffe4e6", color: "#be123c" }}
+                                >
                                   WINNER
                                 </span>
                               ) : null}
@@ -939,7 +956,10 @@ export default function VoteClient() {
                               Why people chose {L}
                             </div>
                             {isWinner ? (
-                              <span className="rounded-full px-2 py-0.5 text-[11px] font-extrabold" style={{ background: "#ffe4e6", color: "#be123c" }}>
+                              <span
+                                className="rounded-full px-2 py-0.5 text-[11px] font-extrabold"
+                                style={{ background: "#ffe4e6", color: "#be123c" }}
+                              >
                                 WINNER
                               </span>
                             ) : null}
