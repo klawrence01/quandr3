@@ -5,7 +5,7 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/utils/supabase/browser";
 
@@ -17,6 +17,9 @@ const BLUE = "#1e63f3";
 const TEAL = "#00a9a5";
 const CORAL = "#ff6b6b";
 const SOFT_BG = "#f5f7fc";
+
+const CORAL_BG = "#fff7f7";
+const CORAL_RING = "0 0 0 2px rgba(255,107,107,0.18) inset";
 
 const ALLOWED = ["A", "B", "C", "D"];
 
@@ -73,7 +76,6 @@ async function shareOrCopy(url: string) {
 
 export default function ResolveQuandr3Page() {
   const params = useParams();
-  const router = useRouter();
   const id = (params || {})?.id ? String((params as any).id) : "";
 
   const [loading, setLoading] = useState(true);
@@ -87,11 +89,9 @@ export default function ResolveQuandr3Page() {
   const [finalChoice, setFinalChoice] = useState("");
   const [finalNote, setFinalNote] = useState("");
 
-  // ✅ Category is mandatory (and editable here to fix older posts)
   const [category, setCategory] = useState("");
   const categoryClean = useMemo(() => safeStr(category).trim(), [category]);
 
-  // share UX
   const [shareMsg, setShareMsg] = useState("");
 
   const totalVotes = useMemo(() => ALLOWED.reduce((sum, L) => sum + Number(counts?.[L] || 0), 0), [counts]);
@@ -104,7 +104,7 @@ export default function ResolveQuandr3Page() {
     const L = cleanLabel(label);
     if (!L) return "";
     const row = (options || []).find((o) => cleanLabel(o?.label) === L);
-    return safeStr(row?.value).trim();
+    return safeStr(row?.text || row?.value).trim();
   }
 
   function isCrowdWinner(label: string) {
@@ -118,20 +118,36 @@ export default function ResolveQuandr3Page() {
   }
 
   function winnerStyles(label: string) {
-    if (isCuriosoWinner(label)) {
+    const crowd = isCrowdWinner(label);
+    const curioso = isCuriosoWinner(label);
+
+    if (curioso && crowd) {
       return {
-        border: `2px solid ${BLUE}`,
-        bg: "#f2f7ff",
-        badgeBg: BLUE,
+        border: `2px solid ${CORAL}`,
+        bg: CORAL_BG,
+        ring: CORAL_RING,
+        badgeBg: CORAL,
+        badgeFg: "white",
+        badgeText: "INTERNET + CURIOUSO",
+      };
+    }
+
+    if (curioso) {
+      return {
+        border: `2px solid ${CORAL}`,
+        bg: CORAL_BG,
+        ring: CORAL_RING,
+        badgeBg: CORAL,
         badgeFg: "white",
         badgeText: "CURIOUSO VERDICT",
       };
     }
 
-    if (isCrowdWinner(label)) {
+    if (crowd) {
       return {
         border: `2px solid ${CORAL}`,
-        bg: "#fff5f5",
+        bg: CORAL_BG,
+        ring: CORAL_RING,
         badgeBg: CORAL,
         badgeFg: "white",
         badgeText: internet.isTie ? "CROWD TIED" : "INTERNET DECIDED",
@@ -141,6 +157,7 @@ export default function ResolveQuandr3Page() {
     return {
       border: "1px solid #e5e7eb",
       bg: "white",
+      ring: "none",
       badgeBg: "#eef2ff",
       badgeFg: NAVY,
       badgeText: "",
@@ -165,7 +182,7 @@ export default function ResolveQuandr3Page() {
 
       const { data: oRows } = await supabase
         .from("quandr3_options")
-        .select("id,label,value,order")
+        .select("id,label,text,value,order")
         .eq("quandr3_id", id)
         .order("order", { ascending: true });
 
@@ -187,6 +204,7 @@ export default function ResolveQuandr3Page() {
         .map((o: any) => ({
           id: o?.id,
           label: cleanLabel(o?.label),
+          text: safeStr(o?.text),
           value: safeStr(o?.value),
           order: o?.order,
         }))
@@ -197,12 +215,10 @@ export default function ResolveQuandr3Page() {
       setCounts(nextCounts);
       setReasonsByLabel(nextReasons);
 
-      // Prefill editors
       const existingChoice = cleanLabel(qRow?.resolved_choice_label);
       if (existingChoice) setFinalChoice(existingChoice);
       if (typeof qRow?.resolution_note === "string") setFinalNote(qRow.resolution_note);
 
-      // ✅ Category editor
       setCategory(safeStr(qRow?.category || "").trim());
     } catch (e: any) {
       setErr(e?.message || "Failed to load resolve page.");
@@ -213,7 +229,6 @@ export default function ResolveQuandr3Page() {
 
   useEffect(() => {
     if (id) load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   async function submitResolution() {
@@ -232,18 +247,17 @@ export default function ResolveQuandr3Page() {
     try {
       const nowIso = new Date().toISOString();
 
-const { error } = await supabase
-  .from("quandr3s")
-  .update({
-    category: categoryClean, // ✅ mandatory
-    status: "resolved",
-    resolved_choice_label: chosen,
-    resolved_at: nowIso,
-    resolution_note: finalNote,
-    published_at: nowIso, // ✅ NEW: makes it immediately "released" unless queue schedules it later
-  })
-  .eq("id", id);
-
+      const { error } = await supabase
+        .from("quandr3s")
+        .update({
+          category: categoryClean,
+          status: "resolved",
+          resolved_choice_label: chosen,
+          resolved_at: nowIso,
+          resolution_note: finalNote,
+          published_at: nowIso,
+        })
+        .eq("id", id);
 
       if (error) throw error;
 
@@ -251,9 +265,7 @@ const { error } = await supabase
         localStorage.setItem("quandr3_explore_refresh", String(Date.now()));
       } catch {}
 
-      // keep it on this page (so you immediately see highlight), but refresh
       await load();
-      // optional: router.push(`/q/${id}`);
       alert("Resolution saved.");
     } catch (e: any) {
       alert(e?.message || "Failed to resolve.");
@@ -261,15 +273,10 @@ const { error } = await supabase
   }
 
   async function handleShare() {
-    const url =
-      typeof window !== "undefined" ? `${window.location.origin}/q/${id}` : `/q/${id}`;
+    const url = typeof window !== "undefined" ? `${window.location.origin}/q/${id}` : `/q/${id}`;
     const res = await shareOrCopy(url);
     setShareMsg(
-      res.ok
-        ? res.mode === "share"
-          ? "Shared."
-          : "Link copied."
-        : "Could not share/copy on this device."
+      res.ok ? (res.mode === "share" ? "Shared." : "Link copied.") : "Could not share/copy on this device."
     );
   }
 
@@ -287,7 +294,7 @@ const { error } = await supabase
 
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href={`/q/${id}`}
+              href={`/q/${id}/results`}
               className="rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50"
               style={{ color: NAVY }}
             >
@@ -310,22 +317,19 @@ const { error } = await supabase
           {loading ? (
             <div>Loading…</div>
           ) : err ? (
-            <div className="text-red-600 font-semibold">{err}</div>
+            <div className="font-semibold text-red-600">{err}</div>
           ) : !q ? (
             <div>Not found.</div>
           ) : (
             <>
-              {/* ✅ Category REQUIRED editor */}
               <div className="mb-4 rounded-2xl border p-4" style={{ background: "#f8fafc" }}>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">CATEGORY (REQUIRED)</div>
-                    <div className="mt-1 text-xs text-slate-600">
-                      This must be set before publishing the Curioso Verdict.
-                    </div>
+                    <div className="mt-1 text-xs text-slate-600">This must be set before publishing the Curioso Verdict.</div>
                   </div>
 
-                  {(q?.city || q?.state) ? (
+                  {q?.city || q?.state ? (
                     <div className="text-xs font-bold text-slate-600">
                       {q?.city ? q.city : ""}
                       {q?.city && q?.state ? ", " : ""}
@@ -341,11 +345,7 @@ const { error } = await supabase
                   className="mt-3 w-full rounded-2xl border p-3 text-sm outline-none"
                 />
 
-                {!categoryClean ? (
-                  <div className="mt-2 text-xs font-semibold text-red-600">
-                    Category is required.
-                  </div>
-                ) : null}
+                {!categoryClean ? <div className="mt-2 text-xs font-semibold text-red-600">Category is required.</div> : null}
               </div>
 
               <h1 className="text-3xl font-extrabold" style={{ color: NAVY }}>
@@ -354,7 +354,6 @@ const { error } = await supabase
 
               <p className="mt-2 text-slate-700">{q?.prompt || q?.context}</p>
 
-              {/* ✅ Curioso link + context (your “mini profile” = context) */}
               <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-slate-600">
                 <span className="rounded-full border px-3 py-1 font-bold" style={{ color: NAVY }}>
                   status: {q?.status || "—"}
@@ -366,11 +365,7 @@ const { error } = await supabase
                 {q?.author_id ? (
                   <>
                     <span className="text-slate-400">•</span>
-                    <Link
-                      href={`/u/${q.author_id}`}
-                      className="font-extrabold underline"
-                      style={{ color: NAVY }}
-                    >
+                    <Link href={`/u/${q.author_id}`} className="font-extrabold underline" style={{ color: NAVY }}>
                       View Curioso
                     </Link>
                   </>
@@ -383,9 +378,13 @@ const { error } = await supabase
                 </div>
               ) : null}
 
-              {/* INTERNET DECIDED */}
-              <div className="mt-6 rounded-2xl border bg-slate-50 p-4">
-                <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">INTERNET DECIDED</div>
+              <div className="mt-6 rounded-2xl border p-4" style={{ borderColor: CORAL, background: CORAL_BG, boxShadow: CORAL_RING }}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">INTERNET DECIDED</div>
+                  <span className="rounded-full px-3 py-1 text-[11px] font-extrabold" style={{ background: CORAL, color: "white" }}>
+                    {internet.isTie ? "CROWD TIED" : "WINNER"}
+                  </span>
+                </div>
 
                 {totalVotes === 0 ? (
                   <div className="mt-1 text-sm font-bold" style={{ color: NAVY }}>
@@ -393,15 +392,14 @@ const { error } = await supabase
                   </div>
                 ) : internet.isTie ? (
                   <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
-                    Crowd tie: {internet.tied.join(" / ")}{" "}
-                    <span className="text-slate-500 font-semibold">({totalVotes} total votes)</span>
+                    Crowd tie: <span style={{ color: CORAL }}>{internet.tied.join(" / ")}</span>{" "}
+                    <span className="font-semibold text-slate-500">({totalVotes} total votes)</span>
                   </div>
                 ) : (
                   <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
                     Top voted: <span style={{ color: CORAL }}>{internet.label}</span>{" "}
-                    <span className="text-slate-500 font-semibold">
-                      ({Number(counts?.[internet.label] || 0)} votes • {pct(counts, totalVotes, internet.label)}% •{" "}
-                      {totalVotes} total)
+                    <span className="font-semibold text-slate-500">
+                      ({Number(counts?.[internet.label] || 0)} votes • {pct(counts, totalVotes, internet.label)}% • {totalVotes} total)
                     </span>
                   </div>
                 )}
@@ -411,8 +409,14 @@ const { error } = await supabase
                 </div>
               </div>
 
-              {/* CURIOUSO VERDICT */}
-              <div className="mt-4 rounded-2xl border p-4" style={{ borderColor: curiosoFinal ? BLUE : "#e5e7eb" }}>
+              <div
+                className="mt-4 rounded-2xl border p-4"
+                style={{
+                  borderColor: curiosoFinal ? CORAL : "#e5e7eb",
+                  background: curiosoFinal ? CORAL_BG : "white",
+                  boxShadow: curiosoFinal ? CORAL_RING : "none",
+                }}
+              >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">CURIOUSO VERDICT</div>
                   {q?.resolved_at ? (
@@ -425,8 +429,13 @@ const { error } = await supabase
                 {curiosoFinal ? (
                   <>
                     <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
-                      Final decision: <span style={{ color: BLUE }}>{curiosoFinal}</span>
+                      Final decision: <span style={{ color: CORAL }}>{curiosoFinal}</span>
                     </div>
+
+                    <div className="mt-2 text-sm font-semibold" style={{ color: NAVY }}>
+                      {optionText(curiosoFinal) ? optionText(curiosoFinal) : ""}
+                    </div>
+
                     {q?.resolution_note ? (
                       <div className="mt-2 text-sm text-slate-700">{q.resolution_note}</div>
                     ) : (
@@ -438,7 +447,6 @@ const { error } = await supabase
                 )}
               </div>
 
-              {/* OPTIONS + REASONS */}
               <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
                 {ALLOWED.map((L) => {
                   const styles = winnerStyles(L);
@@ -449,7 +457,11 @@ const { error } = await supabase
                     <div
                       key={L}
                       className="rounded-2xl p-4"
-                      style={{ border: styles.border, background: styles.bg }}
+                      style={{
+                        border: styles.border,
+                        background: styles.bg,
+                        boxShadow: styles.ring === "none" ? "none" : styles.ring,
+                      }}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
@@ -478,14 +490,12 @@ const { error } = await supabase
                         Votes: <b>{votes}</b> ({percent}%)
                       </div>
 
-                      <div className="mt-3 text-xs font-extrabold tracking-[0.18em] text-slate-500">
-                        WHY PEOPLE CHOSE {L}
-                      </div>
+                      <div className="mt-3 text-xs font-extrabold tracking-[0.18em] text-slate-500">WHY PEOPLE CHOSE {L}</div>
 
                       {(reasonsByLabel?.[L] || []).length === 0 ? (
                         <div className="mt-2 text-xs text-slate-500">No reasons yet.</div>
                       ) : (
-                        <ul className="mt-2 list-disc pl-5 text-xs text-slate-600 space-y-1">
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-600">
                           {(reasonsByLabel?.[L] || []).slice(0, 8).map((t: any, i: number) => (
                             <li key={i}>{t}</li>
                           ))}
@@ -493,13 +503,7 @@ const { error } = await supabase
                       )}
 
                       <label className="mt-3 flex items-center gap-2 text-sm font-bold">
-                        <input
-                          type="radio"
-                          name="final"
-                          value={L}
-                          checked={finalChoice === L}
-                          onChange={() => setFinalChoice(L)}
-                        />
+                        <input type="radio" name="final" value={L} checked={finalChoice === L} onChange={() => setFinalChoice(L)} />
                         Set Curioso verdict to {L}
                       </label>
                     </div>
@@ -507,7 +511,6 @@ const { error } = await supabase
                 })}
               </div>
 
-              {/* Verdict note */}
               <div className="mt-6">
                 <label className="text-sm font-extrabold" style={{ color: NAVY }}>
                   Curioso note (optional)
@@ -526,17 +529,19 @@ const { error } = await supabase
                 onClick={submitResolution}
                 disabled={!canPublish}
                 className="mt-6 rounded-full px-6 py-3 text-sm font-extrabold text-white hover:opacity-95 disabled:opacity-50"
-                style={{ background: BLUE }}
+                style={{ background: CORAL }}
                 title={!categoryClean ? "Category required" : !cleanLabel(finalChoice) ? "Pick final choice" : "Publish"}
               >
                 Publish Curioso Verdict
               </button>
 
               {!categoryClean ? (
-                <div className="mt-2 text-xs font-semibold text-red-600">
-                  Category is mandatory — add it above before publishing.
-                </div>
+                <div className="mt-2 text-xs font-semibold text-red-600">Category is mandatory — add it above before publishing.</div>
               ) : null}
+
+              <div className="mt-4 text-xs text-slate-500">
+                Visual rule: <b style={{ color: CORAL }}>coral</b> highlights both the <b>Internet Winner</b> and the <b>Curioso Verdict</b>.
+              </div>
             </>
           )}
         </section>

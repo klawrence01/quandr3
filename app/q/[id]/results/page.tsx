@@ -101,13 +101,11 @@ export default function ResultsPage() {
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // ✅ reasons grouped by choice_index (1-based)
   const [reasonsByChoiceIndex, setReasonsByChoiceIndex] = useState<Record<number, string[]>>({});
   const [showAllReasons, setShowAllReasons] = useState(false);
 
   const totalVotes = votes.length;
 
-  // Detect whether DB votes are 0-based (0,1,2...) or 1-based (1,2,3...)
   const zeroBasedVotes = useMemo(() => {
     if (!votes?.length) return false;
     const mins = Math.min(...votes.map((v: any) => Number(v.choice_index ?? 9999)));
@@ -117,15 +115,13 @@ export default function ResultsPage() {
   function normChoiceIndex(vChoice: any) {
     const n = Number(vChoice);
     if (Number.isNaN(n)) return null;
-    return zeroBasedVotes ? n + 1 : n; // normalize to 1-based for display/matching
+    return zeroBasedVotes ? n + 1 : n;
   }
 
   async function refreshAll(qid: string) {
-    // 1) Core question
     const { data: qRow } = await supabase.from("quandr3s").select("*").eq("id", qid).single();
     setQ(qRow ?? null);
 
-    // 2) Creator profile
     const creatorId = getCreatorId(qRow);
     if (creatorId) {
       const { data: p } = await supabase
@@ -138,10 +134,9 @@ export default function ResultsPage() {
       setProfile(null);
     }
 
-    // 3) Options
     const { data: optRows, error: optErr } = await supabase
       .from("quandr3_options")
-      .select("id,quandr3_id,label,value,order,created_at,image_url")
+      .select("id,quandr3_id,label,value,text,order,created_at,image_url")
       .eq("quandr3_id", qid)
       .order("order", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
@@ -149,12 +144,9 @@ export default function ResultsPage() {
     if (optErr) setOptions([]);
     else setOptions(optRows ?? []);
 
-    // 4) Votes
     const { data: vRows } = await supabase.from("quandr3_votes").select("*").eq("quandr3_id", qid);
     setVotes(vRows ?? []);
 
-    // 5) ✅ Reasons (THIS is the fix)
-    // Your screenshot shows vote_reasons has quandr3_id (not vote_id), so fetch by qid and group by choice_index
     const { data: rr, error: rrErr } = await supabase
       .from("vote_reasons")
       .select("*")
@@ -176,7 +168,6 @@ export default function ResultsPage() {
       setReasonsByChoiceIndex(grouped);
     }
 
-    // 6) Resolution (optional)
     const { data: r } = await supabase
       .from("quandr3_resolutions")
       .select("*")
@@ -192,7 +183,6 @@ export default function ResultsPage() {
       await refreshAll(id);
       setLoading(false);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const votingExpired = useMemo(() => {
@@ -222,7 +212,6 @@ export default function ResultsPage() {
 
   const orderedOptions = useMemo(() => {
     const arr = [...(options ?? [])];
-    // stable 1-based ord regardless of db order column weirdness
     return arr.map((o: any, i: number) => ({ ...o, _ord: i + 1 }));
   }, [options]);
 
@@ -474,8 +463,12 @@ export default function ResultsPage() {
                 </span>
 
                 {crowdWinnerOpt ? (
-                  <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "rgba(0,169,165,0.12)", color: TEAL }}>
-                    Crowd winner: {LETTER[(crowdWinnerOpt._ord || 1) - 1] ?? "?"} — {safeStr(crowdWinnerOpt.label || crowdWinnerOpt.value || "—")}
+                  <span
+                    className="rounded-full px-3 py-1 text-xs font-extrabold"
+                    style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
+                  >
+                    Crowd winner: {LETTER[(crowdWinnerOpt._ord || 1) - 1] ?? "?"} —{" "}
+                    {safeStr(crowdWinnerOpt.text || crowdWinnerOpt.value || crowdWinnerOpt.label || "—")}
                   </span>
                 ) : (
                   <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
@@ -484,13 +477,20 @@ export default function ResultsPage() {
                 )}
 
                 {status === "resolved" && curiosoChoiceOpt ? (
-                  <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "rgba(30,99,243,0.12)", color: BLUE }}>
-                    Curioso chose: {LETTER[(curiosoChoiceOpt._ord || 1) - 1] ?? "?"} — {safeStr(curiosoChoiceOpt.label || curiosoChoiceOpt.value || "—")}
+                  <span
+                    className="rounded-full px-3 py-1 text-xs font-extrabold"
+                    style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
+                  >
+                    Curioso chose: {LETTER[(curiosoChoiceOpt._ord || 1) - 1] ?? "?"} —{" "}
+                    {safeStr(curiosoChoiceOpt.text || curiosoChoiceOpt.value || curiosoChoiceOpt.label || "—")}
                   </span>
                 ) : null}
 
                 {resolution?.note ? (
-                  <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: "rgba(30,99,243,0.12)", color: BLUE }}>
+                  <span
+                    className="rounded-full px-3 py-1 text-xs font-extrabold"
+                    style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
+                  >
                     Curioso note included
                   </span>
                 ) : null}
@@ -533,24 +533,24 @@ export default function ResultsPage() {
 
                 const isCrowdWinner = crowdWinnerOrd === ord;
                 const isCuriosoChoice = !!resolution?.option_id && resolution.option_id === opt.id;
+                const isHighlighted = isCrowdWinner || isCuriosoChoice;
+                const isBoth = isCrowdWinner && isCuriosoChoice;
 
                 const reasons = reasonsByChoiceIndex[ord] ?? [];
                 const reasonsToShow = showAllReasons ? reasons.slice(0, 20) : reasons.slice(0, 5);
 
                 const label =
-                  safeStr(opt.label || opt.value || opt.option_text || opt.text) ||
+                  safeStr(opt.text || opt.value || opt.label || opt.option_text) ||
                   `Option ${LETTER[ord - 1] ?? ord}`;
 
                 return (
                   <div
                     key={opt.id ?? `${i}-${label}`}
-                    className="rounded-[26px] border bg-white p-5 shadow-sm"
+                    className="rounded-[26px] border p-5 shadow-sm"
                     style={{
-                      borderColor: isCuriosoChoice
-                        ? "rgba(30,99,243,0.55)"
-                        : isCrowdWinner
-                        ? "rgba(0,169,165,0.55)"
-                        : "rgba(15,23,42,0.12)",
+                      background: isHighlighted ? "#fff5f5" : "white",
+                      borderColor: isHighlighted ? "rgba(255,107,107,0.55)" : "rgba(15,23,42,0.12)",
+                      boxShadow: isBoth ? "0 0 0 2px rgba(255,107,107,0.14) inset" : undefined,
                     }}
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -558,7 +558,7 @@ export default function ResultsPage() {
                         <div className="flex items-center gap-2">
                           <span
                             className="flex h-9 w-9 items-center justify-center rounded-2xl text-sm font-extrabold text-white"
-                            style={{ background: isCrowdWinner ? TEAL : NAVY }}
+                            style={{ background: isHighlighted ? CORAL : NAVY }}
                           >
                             {LETTER[ord - 1] ?? ord}
                           </span>
@@ -573,16 +573,29 @@ export default function ResultsPage() {
 
                         <div className="mt-2 flex flex-wrap gap-2">
                           {isCrowdWinner ? (
-                            <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-extrabold text-teal-700">
+                            <span
+                              className="rounded-full px-3 py-1 text-xs font-extrabold"
+                              style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
+                            >
                               Crowd winner
                             </span>
                           ) : null}
+
                           {isCuriosoChoice ? (
                             <span
                               className="rounded-full px-3 py-1 text-xs font-extrabold"
-                              style={{ background: "rgba(30,99,243,0.10)", color: BLUE }}
+                              style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
                             >
                               Curioso chose
+                            </span>
+                          ) : null}
+
+                          {isBoth ? (
+                            <span
+                              className="rounded-full px-3 py-1 text-xs font-extrabold"
+                              style={{ background: NAVY, color: "white" }}
+                            >
+                              Match
                             </span>
                           ) : null}
                         </div>
@@ -592,12 +605,23 @@ export default function ResultsPage() {
                     <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-100">
                       <div
                         className="h-full rounded-full"
-                        style={{ width: `${pct}%`, background: isCrowdWinner ? TEAL : BLUE }}
+                        style={{ width: `${pct}%`, background: isHighlighted ? CORAL : BLUE }}
                       />
                     </div>
 
-                    <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
-                      <div className="text-xs font-semibold tracking-widest text-slate-600">WHY PEOPLE CHOSE THIS</div>
+                    <div
+                      className="mt-4 rounded-2xl border p-4"
+                      style={{
+                        background: isHighlighted ? "#fff0f0" : "#f8fafc",
+                        borderColor: isHighlighted ? "rgba(255,107,107,0.18)" : "rgba(15,23,42,0.08)",
+                      }}
+                    >
+                      <div
+                        className="text-xs font-semibold tracking-widest"
+                        style={{ color: isHighlighted ? CORAL : "#475569" }}
+                      >
+                        WHY PEOPLE CHOSE THIS
+                      </div>
 
                       {reasonsToShow.length === 0 ? (
                         <div className="mt-2 text-sm text-slate-600">No reasons submitted yet.</div>
@@ -625,13 +649,39 @@ export default function ResultsPage() {
         </section>
 
         {resolution ? (
-          <section className="mt-7 rounded-[28px] border bg-white p-6 shadow-sm">
-            <div className="text-xs font-semibold tracking-widest text-slate-600">CURIOSO NOTE</div>
+          <section
+            className="mt-7 rounded-[28px] border p-6 shadow-sm"
+            style={{
+              background: "#fff5f5",
+              borderColor: "rgba(255,107,107,0.35)",
+            }}
+          >
+            <div className="text-xs font-semibold tracking-widest" style={{ color: CORAL }}>
+              CURIOSO NOTE
+            </div>
             <div className="mt-1 text-xl font-extrabold" style={{ color: NAVY }}>
               Final word from the Curioso
             </div>
 
-            <div className="mt-4 rounded-2xl border bg-slate-50 p-5">
+            {curiosoChoiceOpt ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span
+                  className="rounded-full px-3 py-1 text-xs font-extrabold"
+                  style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
+                >
+                  Final choice: {LETTER[(curiosoChoiceOpt._ord || 1) - 1] ?? "?"} —{" "}
+                  {safeStr(curiosoChoiceOpt.text || curiosoChoiceOpt.value || curiosoChoiceOpt.label || "—")}
+                </span>
+              </div>
+            ) : null}
+
+            <div
+              className="mt-4 rounded-2xl border p-5"
+              style={{
+                background: "#fff0f0",
+                borderColor: "rgba(255,107,107,0.18)",
+              }}
+            >
               <div className="whitespace-pre-wrap text-sm text-slate-800">
                 {resolution.note ? resolution.note : "No note was left for this resolution."}
               </div>

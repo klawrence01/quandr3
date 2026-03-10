@@ -16,8 +16,6 @@ const CORAL = "#ff6b6b";
 const SOFT_BG = "#f5f7fc";
 
 const ALLOWED = ["A", "B", "C", "D"];
-
-// ✅ FOLLOW TABLE NAME (Phase 1)
 const FOLLOWS_TABLE = "dilemma_follows";
 
 function fmt(ts?: string) {
@@ -25,12 +23,23 @@ function fmt(ts?: string) {
   try {
     return new Date(ts).toLocaleString();
   } catch {
-    return ts;
+    return ts || "";
   }
 }
 
 function safeStr(x: any) {
   return (x ?? "").toString();
+}
+
+function cleanLabel(x?: any) {
+  const s = safeStr(x).trim().toUpperCase();
+  return ALLOWED.includes(s) ? s : "";
+}
+
+function optText(o: any) {
+  const t = safeStr(o?.text).trim();
+  if (t) return t;
+  return safeStr(o?.value).trim();
 }
 
 function hoursLeftFromClosesAt(closesAt?: string) {
@@ -40,67 +49,32 @@ function hoursLeftFromClosesAt(closesAt?: string) {
   return Math.max(0, Math.ceil(diff / 3600000));
 }
 
-function statusBadge(status?: string) {
-  const s = (status || "").toLowerCase();
-  if (s === "open") return { bg: "#e8f3ff", fg: BLUE, label: "open" };
-  if (s === "awaiting_user") return { bg: "#fff4e6", fg: "#b45309", label: "internet decided" };
-  if (s === "resolved") return { bg: "#ecfdf5", fg: "#059669", label: "resolved" };
-  return { bg: "#f1f5f9", fg: "#334155", label: status || "unknown" };
-}
-
-function cleanLabel(x?: any) {
-  const s = (x || "").toString().trim().toUpperCase();
-  return ALLOWED.includes(s) ? s : "";
-}
-
-// ✅ FIX: Prefer human-readable option text; fall back to value
-function optText(o: any) {
-  const t = (o?.text ?? "").toString().trim();
-  if (t) return t;
-  return (o?.value ?? "").toString().trim();
-}
-
 function scrollToId(id: string) {
   try {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch {}
 }
 
+function statusBadge(status?: string) {
+  const s = safeStr(status).toLowerCase();
+  if (s === "open") return { bg: "#e8f3ff", fg: BLUE, label: "open" };
+  if (s === "awaiting_user") return { bg: "#fff4e6", fg: "#b45309", label: "internet decided" };
+  if (s === "resolved") return { bg: "#ecfdf5", fg: "#059669", label: "resolved" };
+  return { bg: "#f1f5f9", fg: "#334155", label: s || "unknown" };
+}
+
 export default function VoteClient() {
   const params = useParams();
-  const id = (params as any)?.id as string;
+  const id = safeStr((params as any)?.id);
 
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState<any>(null);
   const [opts, setOpts] = useState<any[]>([]);
-  const [err, setErr] = useState<string>("");
-
-  // ✅ Curioso (author) info
   const [author, setAuthor] = useState<any>(null);
-
-  // auth (for author-only toggle)
   const [meId, setMeId] = useState("");
+  const [err, setErr] = useState("");
 
-  // voting
   const [voteCounts, setVoteCounts] = useState<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0 });
-  const [myVote, setMyVote] = useState<string>("");
-  const [myVoteRowId, setMyVoteRowId] = useState<string>("");
-  const [casting, setCasting] = useState(false);
-
-  // leader + tie (for “internet decided” box)
-  const [leaderLabel, setLeaderLabel] = useState<string>("");
-  const [leaderCount, setLeaderCount] = useState<number>(0);
-  const [isTie, setIsTie] = useState<boolean>(false);
-
-  // why
-  const [whyText, setWhyText] = useState("");
-  const [whySaving, setWhySaving] = useState(false);
-
-  // messages
-  const [votingMsg, setVotingMsg] = useState<string>("");
-  const [votingErr, setVotingErr] = useState<string>("");
-
-  // reasons shown on page
   const [reasonsByLabel, setReasonsByLabel] = useState<Record<string, string[]>>({
     A: [],
     B: [],
@@ -108,64 +82,58 @@ export default function VoteClient() {
     D: [],
   });
 
-  // discussion toggle UX
+  const [myVote, setMyVote] = useState("");
+  const [myVoteRowId, setMyVoteRowId] = useState("");
+  const [casting, setCasting] = useState(false);
+  const [whyText, setWhyText] = useState("");
+  const [whySaving, setWhySaving] = useState(false);
+
+  const [leaderLabel, setLeaderLabel] = useState("");
+  const [leaderCount, setLeaderCount] = useState(0);
+  const [isTie, setIsTie] = useState(false);
+
+  const [votingMsg, setVotingMsg] = useState("");
+  const [votingErr, setVotingErr] = useState("");
+  const [notifyOnResolve, setNotifyOnResolve] = useState(false);
+  const [notifyMsg, setNotifyMsg] = useState("");
+  const [shareMsg, setShareMsg] = useState("");
+
   const [discSaving, setDiscSaving] = useState(false);
   const [discErr, setDiscErr] = useState("");
 
-  // Phase-1 “Get informed” (localStorage)
-  const [notifyOnResolve, setNotifyOnResolve] = useState(false);
-  const [notifyMsg, setNotifyMsg] = useState("");
-
-  // Share UX
-  const [shareMsg, setShareMsg] = useState("");
-
   const badge = useMemo(() => statusBadge(q?.status), [q?.status]);
+
   const hrsLeft = useMemo(() => hoursLeftFromClosesAt(q?.closes_at), [q?.closes_at]);
 
-  const voteKey = useMemo(() => (id ? `q_vote_${id}` : ""), [id]);
-  const voteRowKey = useMemo(() => (id ? `q_vote_row_${id}` : ""), [id]);
-  const notifyKey = useMemo(() => (id ? `q_notify_resolve_${id}` : ""), [id]);
-
-  // ✅ PATCH: Open is only "open" if status=open AND time is not up
   const isOpen = useMemo(() => {
-    const st = (q?.status || "").toLowerCase();
+    const st = safeStr(q?.status).toLowerCase();
     if (st !== "open") return false;
-
     const h = hoursLeftFromClosesAt(q?.closes_at);
     if (h !== null && h <= 0) return false;
-
     return true;
   }, [q?.status, q?.closes_at]);
 
-  const isResolved = useMemo(() => (q?.status || "").toLowerCase() === "resolved", [q?.status]);
-  const isAwaiting = useMemo(() => (q?.status || "").toLowerCase() === "awaiting_user", [q?.status]);
+  const isAwaiting = useMemo(() => safeStr(q?.status).toLowerCase() === "awaiting_user", [q?.status]);
+  const isResolved = useMemo(() => safeStr(q?.status).toLowerCase() === "resolved", [q?.status]);
+  const isAuthor = useMemo(() => !!meId && !!q?.author_id && String(meId) === String(q.author_id), [meId, q?.author_id]);
 
-  const isAuthor = useMemo(() => {
-    if (!meId || !q?.author_id) return false;
-    return String(meId) === String(q.author_id);
-  }, [meId, q?.author_id]);
-
-  // ✅ Open should behave like open (guardrail if options missing)
-  const openButNoOptions = useMemo(() => isOpen && (opts || []).length === 0, [isOpen, opts]);
-
-  // totals for tiny vote bars
   const totalVotes = useMemo(() => {
-    return ALLOWED.reduce((sum, L) => sum + (voteCounts?.[L] || 0), 0);
+    return ALLOWED.reduce((sum, L) => sum + Number(voteCounts?.[L] || 0), 0);
   }, [voteCounts]);
 
-  function pct(label: string) {
-    const v = voteCounts?.[label] || 0;
-    if (!totalVotes) return 0;
-    return Math.round((v / totalVotes) * 100);
-  }
-
-  const winnerLabel = useMemo(() => {
-    if (!leaderLabel || !leaderCount) return "";
-    if (isTie) return "";
+  const leadingLabel = useMemo(() => {
+    if (!leaderLabel || !leaderCount || isTie || !isOpen) return "";
     return leaderLabel;
-  }, [leaderLabel, leaderCount, isTie]);
+  }, [leaderLabel, leaderCount, isTie, isOpen]);
+
+  const closedWinnerLabel = useMemo(() => {
+    if (!leaderLabel || !leaderCount || isTie || isOpen) return "";
+    return leaderLabel;
+  }, [leaderLabel, leaderCount, isTie, isOpen]);
 
   const requiredCategoryMissing = useMemo(() => !safeStr(q?.category).trim(), [q?.category]);
+
+  const openButNoOptions = useMemo(() => isOpen && opts.length === 0, [isOpen, opts]);
 
   const curiosoName = useMemo(() => {
     const dn = safeStr(author?.display_name).trim();
@@ -179,98 +147,151 @@ export default function VoteClient() {
 
   const curiosoHref = useMemo(() => (q?.author_id ? `/u/${q.author_id}` : "#"), [q?.author_id]);
 
-  // restore local vote + notify prefs
-  useEffect(() => {
-    if (!voteKey) return;
-    try {
-      const v = cleanLabel(localStorage.getItem(voteKey) || "");
-      if (v) setMyVote(v);
-      const rid = (localStorage.getItem(voteRowKey) || "").trim();
-      if (rid) setMyVoteRowId(rid);
-    } catch {}
+  const notifyKey = useMemo(() => (id ? `q_notify_resolve_${id}` : ""), [id]);
 
-    if (!notifyKey) return;
-    try {
-      const n = localStorage.getItem(notifyKey) === "1";
-      setNotifyOnResolve(n);
-    } catch {}
-  }, [voteKey, voteRowKey, notifyKey]);
-
-  async function loadMe() {
-    try {
-      const { data } = await supabase.auth.getUser();
-      setMeId(data?.user?.id ? String(data.user.id) : "");
-    } catch {
-      setMeId("");
-    }
+  function pct(label: string) {
+    const v = Number(voteCounts?.[label] || 0);
+    if (!totalVotes) return 0;
+    return Math.round((v / totalVotes) * 100);
   }
 
-  async function loadCounts(qid: string) {
+  function clearMessages() {
+    setVotingErr("");
+    setVotingMsg("");
+    setNotifyMsg("");
+    setShareMsg("");
+  }
+
+  async function loadMe() {
+    const { data } = await supabase.auth.getUser();
+    return data?.user?.id ? String(data.user.id) : "";
+  }
+
+  async function loadQuestion(qid: string) {
+    const { data, error } = await supabase
+      .from("quandr3s")
+      .select(
+        "id,title,prompt,context,category,status,created_at,closes_at,author_id,city,state,discussion_open,resolved_at,resolved_choice_label,resolution_note"
+      )
+      .eq("id", qid)
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  async function loadOptions(qid: string) {
+    const { data, error } = await supabase
+      .from("quandr3_options")
+      .select("id,quandr3_id,label,value,text,order,created_at,image_url")
+      .eq("quandr3_id", qid)
+      .order("order", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.warn("Options load warning:", error);
+      return [];
+    }
+
+    return (data || [])
+      .filter((r: any) => optText(r).length > 0)
+      .filter((r: any) => !!cleanLabel(r?.label));
+  }
+
+  async function loadAuthorProfile(authorId?: string) {
+    if (!authorId) return null;
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id,display_name,username,avatar_url,role,city,state,location")
+      .eq("id", authorId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("author profile warning:", error);
+      return null;
+    }
+
+    return data || null;
+  }
+
+  async function loadVoteCounts(qid: string) {
     const { data, error } = await supabase.from("quandr3_choices").select("label").eq("quandr3_id", qid);
     if (error) {
       console.warn("counts warning:", error);
-      return;
+      return { counts: { A: 0, B: 0, C: 0, D: 0 }, leader: "", leaderCount: 0, tie: false };
     }
 
     const counts: any = { A: 0, B: 0, C: 0, D: 0 };
     (data || []).forEach((r: any) => {
       const lab = cleanLabel(r?.label);
-      if (lab) counts[lab] = (counts[lab] || 0) + 1;
+      if (lab) counts[lab] = Number(counts[lab] || 0) + 1;
     });
-    setVoteCounts(counts);
 
-    const entries = Object.entries(counts) as any[];
-    const sorted = entries.sort((a, b) => (b[1] || 0) - (a[1] || 0));
-    const top = sorted[0];
-    const second = sorted[1];
+    const entries = Object.entries(counts).sort((a: any, b: any) => Number(b[1]) - Number(a[1]));
+    const top = entries[0];
+    const second = entries[1];
 
-    const topLabel = top?.[0] || "";
-    const topCount = top?.[1] || 0;
-    const secondCount = second?.[1] || 0;
+    const topLabel = safeStr(top?.[0]);
+    const topCount = Number(top?.[1] || 0);
+    const secondCount = Number(second?.[1] || 0);
 
-    if (!topCount) {
-      setLeaderLabel("");
-      setLeaderCount(0);
-      setIsTie(false);
-    } else {
-      setLeaderLabel(topLabel);
-      setLeaderCount(topCount);
-      setIsTie(topCount === secondCount);
-    }
+    return {
+      counts,
+      leader: topCount ? topLabel : "",
+      leaderCount: topCount,
+      tie: topCount > 0 && topCount === secondCount,
+    };
   }
 
   async function loadReasons(qid: string) {
     const { data, error } = await supabase.from("quandr3_choices").select("label,text").eq("quandr3_id", qid);
     if (error) {
       console.warn("reasons warning:", error);
-      return;
+      return { A: [], B: [], C: [], D: [] };
     }
+
     const grouped: any = { A: [], B: [], C: [], D: [] };
     (data || []).forEach((r: any) => {
       const lab = cleanLabel(r?.label);
-      const t = (r?.text || "").toString().trim();
+      const t = safeStr(r?.text).trim();
       if (lab && t) grouped[lab].push(t);
     });
-    setReasonsByLabel(grouped);
+
+    return grouped;
   }
 
-  async function loadAuthorProfile(authorId?: string) {
-    if (!authorId) return;
+  async function loadMyVote(qid: string, userId: string) {
+    if (!userId) return { label: "", rowId: "" };
+
+    const { data, error } = await supabase
+      .from("quandr3_choices")
+      .select("id,label")
+      .eq("quandr3_id", qid)
+      .eq("voter_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("loadMyVote warning:", error);
+      return { label: "", rowId: "" };
+    }
+
+    return {
+      label: cleanLabel(data?.label),
+      rowId: data?.id ? String(data.id) : "",
+    };
+  }
+
+  useEffect(() => {
+    if (!notifyKey) return;
     try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id,display_name,username,avatar_url,role,city,state,location")
-        .eq("id", authorId)
-        .maybeSingle();
-
-      if (!error) setAuthor(data || null);
+      setNotifyOnResolve(localStorage.getItem(notifyKey) === "1");
     } catch {}
-  }
+  }, [notifyKey]);
 
   useEffect(() => {
     let alive = true;
 
-    async function load() {
+    async function loadAll() {
       setLoading(true);
       setErr("");
       setVotingErr("");
@@ -280,40 +301,31 @@ export default function VoteClient() {
       setShareMsg("");
 
       try {
-        await loadMe();
-
-        const { data: qRow, error: qErr } = await supabase
-          .from("quandr3s")
-          .select(
-            "id,title,prompt,context,category,status,created_at,closes_at,author_id,city,state,discussion_open,resolved_at,resolved_choice_label,resolution_note"
-          )
-          .eq("id", id)
-          .single();
-
-        if (qErr) throw qErr;
-
-        const { data: oRows, error: oErr } = await supabase
-          .from("quandr3_options")
-          // ✅ FIX: include text so UI can render real option sentences
-          .select("id,quandr3_id,label,value,text,order,created_at,image_url")
-          .eq("quandr3_id", id)
-          .order("order", { ascending: true, nullsFirst: false })
-          .order("created_at", { ascending: true });
-
-        if (oErr) console.warn("Options load warning:", oErr);
+        const uid = await loadMe();
+        const qRow = await loadQuestion(id);
+        const [optRows, profileRow, countsRes, reasonsRes, myVoteRes] = await Promise.all([
+          loadOptions(id),
+          loadAuthorProfile(qRow?.author_id),
+          loadVoteCounts(id),
+          loadReasons(id),
+          loadMyVote(id, uid),
+        ]);
 
         if (!alive) return;
 
-        const cleaned = (oRows || [])
-          .filter((r: any) => optText(r).length > 0)
-          .filter((r: any) => !!cleanLabel(r?.label));
-
+        setMeId(uid);
         setQ(qRow);
-        setOpts(cleaned);
+        setOpts(optRows);
+        setAuthor(profileRow);
 
-        await loadAuthorProfile(qRow?.author_id);
-        await loadCounts(id);
-        await loadReasons(id);
+        setVoteCounts(countsRes.counts);
+        setLeaderLabel(countsRes.leader);
+        setLeaderCount(countsRes.leaderCount);
+        setIsTie(countsRes.tie);
+
+        setReasonsByLabel(reasonsRes);
+        setMyVote(myVoteRes.label);
+        setMyVoteRowId(myVoteRes.rowId);
       } catch (e: any) {
         console.error(e);
         if (!alive) return;
@@ -323,56 +335,46 @@ export default function VoteClient() {
       }
     }
 
-    if (id) load();
+    if (id) loadAll();
 
     return () => {
       alive = false;
     };
   }, [id]);
 
-  /* =========================
-     ✅ AUTO-FOLLOW ON VOTE
-     - follows the DILEMMA (quandr3) for Phase 1
-     - non-blocking: vote must never fail due to follow
-  ========================= */
+  async function refreshCountsAndReasons() {
+    const [countsRes, reasonsRes] = await Promise.all([loadVoteCounts(id), loadReasons(id)]);
+    setVoteCounts(countsRes.counts);
+    setLeaderLabel(countsRes.leader);
+    setLeaderCount(countsRes.leaderCount);
+    setIsTie(countsRes.tie);
+    setReasonsByLabel(reasonsRes);
+  }
+
   async function followThisDilemmaIfLoggedIn(quandr3Id: string) {
     try {
       let uid = meId;
+      if (!uid) uid = await loadMe();
+      if (!uid) return;
 
-      if (!uid) {
-        const { data } = await supabase.auth.getUser();
-        uid = data?.user?.id ? String(data.user.id) : "";
-      }
+      const { error } = await supabase
+        .from(FOLLOWS_TABLE)
+        .upsert({ user_id: uid, quandr3_id: quandr3Id }, { onConflict: "user_id,quandr3_id" });
 
-      if (!uid) return; // not logged in → skip silently
-
-      const { error } = await supabase.from(FOLLOWS_TABLE).upsert(
-        { user_id: uid, quandr3_id: quandr3Id },
-        { onConflict: "user_id,quandr3_id" }
-      );
-
-      if (error) {
-        console.warn(
-          `[follow] upsert failed on ${FOLLOWS_TABLE}. If table/policy doesn't exist yet, run the SQL I sent.`,
-          error
-        );
-      }
+      if (error) console.warn("[follow] upsert failed:", error);
     } catch (e) {
       console.warn("[follow] could not follow dilemma", e);
     }
   }
 
   async function castVote(label: string) {
-    setVotingErr("");
-    setVotingMsg("");
-    setNotifyMsg("");
-    setShareMsg("");
+    clearMessages();
 
     const L = cleanLabel(label);
     if (!L) return;
 
-    if (myVote) {
-      setVotingErr(`You already voted (${myVote}) on this device.`);
+    if (isAuthor) {
+      setVotingErr("You cannot vote on your own Quandr3.");
       return;
     }
 
@@ -388,10 +390,25 @@ export default function VoteClient() {
 
     setCasting(true);
     try {
+      const uid = await loadMe();
+      if (!uid) {
+        setVotingErr("You must be signed in to vote.");
+        return;
+      }
+
+      const existing = await loadMyVote(id, uid);
+      if (existing.rowId) {
+        setMyVote(existing.label);
+        setMyVoteRowId(existing.rowId);
+        setVotingErr(`You already voted${existing.label ? ` (${existing.label})` : ""}.`);
+        return;
+      }
+
       const { data, error } = await supabase
         .from("quandr3_choices")
         .insert({
           quandr3_id: id,
+          voter_id: uid,
           label: L,
           text: "",
         })
@@ -401,21 +418,12 @@ export default function VoteClient() {
       if (error) throw error;
 
       const newRowId = data?.id ? String(data.id) : "";
-
-      try {
-        localStorage.setItem(voteKey, L);
-        if (newRowId) localStorage.setItem(voteRowKey, newRowId);
-      } catch {}
-
       setMyVote(L);
       setMyVoteRowId(newRowId);
       setVotingMsg(`Vote recorded: ${L}`);
 
-      // ✅ AUTO-FOLLOW (non-blocking)
-      followThisDilemmaIfLoggedIn(id);
-
-      await loadCounts(id);
-      await loadReasons(id);
+      await followThisDilemmaIfLoggedIn(id);
+      await refreshCountsAndReasons();
 
       setTimeout(() => scrollToId("whybox"), 150);
     } catch (e: any) {
@@ -427,21 +435,14 @@ export default function VoteClient() {
   }
 
   async function saveWhy() {
-    setVotingErr("");
-    setVotingMsg("");
-    setNotifyMsg("");
-    setShareMsg("");
+    clearMessages();
 
     if (!myVote) {
       setVotingErr("Vote first, then add your reason.");
       return;
     }
-    if (!myVoteRowId) {
-      setVotingErr("Could not find your vote row id on this device. Re-vote on a fresh Quandr3, then save your reason.");
-      return;
-    }
 
-    const txt = (whyText || "").toString().trim();
+    const txt = safeStr(whyText).trim();
     if (!txt) {
       setVotingErr("Type 1–2 sentences for your reason, then save.");
       return;
@@ -449,13 +450,23 @@ export default function VoteClient() {
 
     setWhySaving(true);
     try {
-      const { error } = await supabase.from("quandr3_choices").update({ text: txt }).eq("id", myVoteRowId);
+      const uid = await loadMe();
+      if (!uid) {
+        setVotingErr("You must be signed in.");
+        return;
+      }
+
+      const { error } = await supabase
+        .from("quandr3_choices")
+        .update({ text: txt })
+        .eq("quandr3_id", id)
+        .eq("voter_id", uid);
+
       if (error) throw error;
 
       setVotingMsg("Reason saved. Thank you — the “why” is what creates clarity.");
       setWhyText("");
-      await loadReasons(id);
-      await loadCounts(id);
+      await refreshCountsAndReasons();
     } catch (e: any) {
       console.error(e);
       setVotingErr(e?.message || "Failed to save reason.");
@@ -525,8 +536,20 @@ export default function VoteClient() {
     }
   }
 
-  // Banner content (the “gentle hand”)
   const banner = useMemo(() => {
+    if (isAuthor && isOpen) {
+      return {
+        bg: "#fff5e8",
+        border: "#fde6c8",
+        title: "Thank you for posting your Quandr3.",
+        body:
+          "Your Quandr3 is now live. Check back after voting closes to see how the internet decides. You’ll then return to post your final resolution so others can learn from the full decision.",
+        ctaId: "results",
+        ctaText: "View Results",
+        showNotify: false,
+      };
+    }
+
     if (isOpen) {
       return {
         bg: "#eaf6ff",
@@ -550,10 +573,12 @@ export default function VoteClient() {
       return {
         bg: "#fff5e8",
         border: "#fde6c8",
-        title: "Votes are no longer accepted — this Quandr3 is closed.",
-        body: `${decidedLine} Waiting for the Curioso to decide. Check below for details and the “why” behind each choice.`,
+        title: isAuthor ? "Voting is complete. Your Quandr3 is ready to resolve." : "Votes are no longer accepted — this Quandr3 is closed.",
+        body: isAuthor
+          ? `${decidedLine} Review the results, then return to post your final Curioso verdict so others can learn from the full decision.`
+          : `${decidedLine} Waiting for the Curioso to decide. Check below for details and the “why” behind each choice.`,
         ctaId: "results",
-        ctaText: "See results & reasons",
+        ctaText: isAuthor ? "Review Results" : "See results & reasons",
         showNotify: false,
       };
     }
@@ -579,10 +604,10 @@ export default function VoteClient() {
       ctaText: "See results",
       showNotify: true,
     };
-  }, [isOpen, isAwaiting, isResolved, leaderLabel, leaderCount, isTie]);
+  }, [isAuthor, isOpen, isAwaiting, isResolved, leaderLabel, leaderCount, isTie]);
 
   function VoteBar({ label, emphasize }: { label: string; emphasize?: boolean }) {
-    const v = voteCounts?.[label] || 0;
+    const v = Number(voteCounts?.[label] || 0);
     const p = pct(label);
     const filled = totalVotes ? `${Math.min(100, Math.max(0, p))}%` : "0%";
 
@@ -625,29 +650,49 @@ export default function VoteClient() {
             <div className="text-xs font-bold text-slate-500">
               {id ? (
                 <>
-                  <span className="font-extrabold" style={{ color: NAVY }}>
-                    /q/
-                  </span>
+                  <span className="font-extrabold" style={{ color: NAVY }}>/q/</span>
                   {String(id).slice(0, 6)}…{String(id).slice(-4)}
                 </>
               ) : null}
             </div>
           </div>
 
-          <Link
-            href="/q/create"
-            className="rounded-full px-5 py-2 text-sm font-extrabold text-white shadow-sm hover:opacity-95"
-            style={{ background: BLUE }}
-          >
-            Create a Quandr3
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            {(isAwaiting || isResolved) && id ? (
+              <Link
+                href={`/q/${id}/results`}
+                className="rounded-full px-4 py-2 text-sm font-extrabold text-white shadow-sm hover:opacity-95"
+                style={{ background: CORAL }}
+              >
+                View Results
+              </Link>
+            ) : null}
+
+            {isAuthor && isAwaiting && id ? (
+              <Link
+                href={`/q/${id}/resolve`}
+                className="rounded-full px-4 py-2 text-sm font-extrabold text-white shadow-sm hover:opacity-95"
+                style={{ background: NAVY }}
+              >
+                Resolve Quandr3
+              </Link>
+            ) : null}
+
+            <Link
+              href="/q/create"
+              className="rounded-full px-5 py-2 text-sm font-extrabold text-white shadow-sm hover:opacity-95"
+              style={{ background: BLUE }}
+            >
+              Create a Quandr3
+            </Link>
+          </div>
         </div>
 
         <section className="mt-6 rounded-[28px] border bg-white p-6 shadow-sm md:p-8">
           {loading ? (
             <div className="text-slate-600">Loading…</div>
           ) : err ? (
-            <div className="text-red-600 font-semibold">{err}</div>
+            <div className="font-semibold text-red-600">{err}</div>
           ) : !q ? (
             <div className="text-slate-600">Not found.</div>
           ) : (
@@ -668,6 +713,8 @@ export default function VoteClient() {
               <h1 className="mt-3 text-3xl font-extrabold leading-tight md:text-4xl" style={{ color: NAVY }}>
                 {q.title}
               </h1>
+
+              <div className="mt-3 rounded-xl bg-red-600 p-3 font-extrabold text-white">DEBUG VERSION LIVE</div>
 
               {(q.prompt || q.context) ? <p className="mt-3 text-base text-slate-700">{q.prompt || q.context}</p> : null}
 
@@ -696,6 +743,16 @@ export default function VoteClient() {
                     {banner.ctaText}
                   </button>
 
+                  {isAuthor && isAwaiting && id ? (
+                    <Link
+                      href={`/q/${id}/resolve`}
+                      className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
+                      style={{ background: CORAL }}
+                    >
+                      Post Final Resolution
+                    </Link>
+                  ) : null}
+
                   {banner.showNotify ? (
                     <button
                       type="button"
@@ -708,7 +765,17 @@ export default function VoteClient() {
                     </button>
                   ) : null}
 
-                  {(isResolved || isAwaiting) ? (
+                  {(isResolved || isAwaiting) && id ? (
+                    <Link
+                      href={`/q/${id}/results`}
+                      className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
+                      style={{ background: CORAL }}
+                    >
+                      View Results
+                    </Link>
+                  ) : null}
+
+                  {isResolved || isAwaiting ? (
                     <button
                       type="button"
                       onClick={handleShare}
@@ -721,8 +788,17 @@ export default function VoteClient() {
                   ) : null}
                 </div>
 
-                {notifyMsg ? <div className="mt-2 text-xs font-semibold" style={{ color: TEAL }}>{notifyMsg}</div> : null}
-                {shareMsg ? <div className="mt-2 text-xs font-semibold" style={{ color: TEAL }}>{shareMsg}</div> : null}
+                {notifyMsg ? (
+                  <div className="mt-2 text-xs font-semibold" style={{ color: TEAL }}>
+                    {notifyMsg}
+                  </div>
+                ) : null}
+
+                {shareMsg ? (
+                  <div className="mt-2 text-xs font-semibold" style={{ color: TEAL }}>
+                    {shareMsg}
+                  </div>
+                ) : null}
               </div>
 
               <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-slate-600">
@@ -731,6 +807,7 @@ export default function VoteClient() {
                 </span>
 
                 <span className="text-slate-400">•</span>
+
                 <span>
                   <span className="font-semibold">Posted:</span> {fmt(q.created_at)}
                 </span>
@@ -748,7 +825,7 @@ export default function VoteClient() {
                   </>
                 ) : null}
 
-                {(q.city || q.state) ? (
+                {q.city || q.state ? (
                   <>
                     <span className="text-slate-400">•</span>
                     <span>
@@ -770,18 +847,27 @@ export default function VoteClient() {
                 </Link>
 
                 <div className="text-sm text-slate-600">
-                  Curioso: <span className="font-extrabold" style={{ color: NAVY }}>{curiosoName}</span>
+                  Curioso:{" "}
+                  <span className="font-extrabold" style={{ color: NAVY }}>
+                    {curiosoName}
+                  </span>
                 </div>
 
                 <div className="text-sm text-slate-600">
-                  ID:{" "}
-                  <span className="font-mono text-slate-800">
-                    {String(q.author_id || "").slice(0, 6)}…{String(q.author_id || "").slice(-4)}
-                  </span>
+                  Author ID:{" "}
+                  <span className="font-mono text-slate-800">{String(q?.author_id || "")}</span>
+                </div>
+
+                <div className="text-sm text-slate-600">
+                  My ID:{" "}
+                  <span className="font-mono text-slate-800">{String(meId || "")}</span>
+                </div>
+
+                <div className="text-sm text-slate-600">
+                  isAuthor: <span className="font-mono text-slate-800">{String(isAuthor)}</span>
                 </div>
               </div>
 
-              {/* Voting */}
               <div id="vote" className="mt-8 rounded-2xl border p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-extrabold" style={{ color: NAVY }}>
@@ -790,10 +876,17 @@ export default function VoteClient() {
                   <div className="text-xs text-slate-500">{isOpen ? "Tap an option to vote." : "Votes are closed."}</div>
                 </div>
 
-                {!isOpen ? <div className="mt-2 text-sm text-slate-700 font-semibold">Votes are no longer accepted for this Quandr3.</div> : null}
+                {!isOpen ? <div className="mt-2 text-sm font-semibold text-slate-700">Votes are no longer accepted for this Quandr3.</div> : null}
+
+                {isAuthor && isOpen ? (
+                  <div className="mt-3 rounded-2xl border bg-amber-50 p-4 text-sm text-amber-800">
+                    You posted this Quandr3. Voting is open, so you can watch responses come in, but you cannot vote on your own post.
+                    Resolve it after voting closes.
+                  </div>
+                ) : null}
 
                 {openButNoOptions ? (
-                  <div className="mt-3 rounded-2xl border p-4 text-sm text-amber-700 bg-amber-50">
+                  <div className="mt-3 rounded-2xl border bg-amber-50 p-4 text-sm text-amber-700">
                     This Quandr3 is marked open, but the options haven’t been added yet.
                     <div className="mt-1 text-xs text-slate-600">(Setup issue — not your fault.)</div>
                   </div>
@@ -805,7 +898,7 @@ export default function VoteClient() {
                   </div>
                 ) : null}
 
-                {myVote && isOpen ? (
+                {myVote && isOpen && !isAuthor ? (
                   <div id="whybox" className="mt-4 rounded-2xl border p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div className="text-sm font-extrabold" style={{ color: NAVY }}>
@@ -837,11 +930,40 @@ export default function VoteClient() {
                   </div>
                 ) : null}
 
-                {votingMsg ? <div className="mt-3 text-sm font-semibold" style={{ color: TEAL }}>{votingMsg}</div> : null}
+                {votingMsg ? (
+                  <div className="mt-3 text-sm font-semibold" style={{ color: TEAL }}>
+                    {votingMsg}
+                  </div>
+                ) : null}
+
                 {votingErr ? <div className="mt-3 text-sm font-semibold text-red-600">{votingErr}</div> : null}
+
+                {isAuthor ? (
+                  <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-extrabold" style={{ color: NAVY }}>
+                          Author controls
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600">Open or close discussion for this Quandr3.</div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={toggleDiscussion}
+                        disabled={discSaving}
+                        className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95 disabled:opacity-60"
+                        style={{ background: q?.discussion_open ? CORAL : BLUE }}
+                      >
+                        {discSaving ? "Saving…" : q?.discussion_open ? "Close Discussion" : "Open Discussion"}
+                      </button>
+                    </div>
+
+                    {discErr ? <div className="mt-2 text-sm font-semibold text-red-600">{discErr}</div> : null}
+                  </div>
+                ) : null}
               </div>
 
-              {/* Options */}
               <div className="mt-10">
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">OPTIONS (A–D)</div>
@@ -857,7 +979,7 @@ export default function VoteClient() {
                 </div>
 
                 {openButNoOptions ? (
-                  <div className="mt-3 rounded-2xl border p-4 text-sm text-amber-700 bg-amber-50">
+                  <div className="mt-3 rounded-2xl border bg-amber-50 p-4 text-sm text-amber-700">
                     This Quandr3 is open, but the options haven’t been added yet.
                     <div className="mt-1 text-xs text-slate-600">(Setup issue — not your fault.)</div>
                   </div>
@@ -875,10 +997,12 @@ export default function VoteClient() {
                       const label = cleanLabel(o.label);
                       const value = optText(o);
                       const orderNum = typeof o.order === "number" ? o.order : idx + 1;
-                      const votes = voteCounts[label] || 0;
+                      const votes = Number(voteCounts[label] || 0);
 
-                      const disabled = casting || !!myVote || !isOpen || openButNoOptions;
-                      const isWinner = !!winnerLabel && label === winnerLabel;
+                      const disabled = casting || !!myVote || !isOpen || openButNoOptions || isAuthor;
+                      const isLeader = !!leadingLabel && label === leadingLabel;
+                      const isWinner = !!closedWinnerLabel && label === closedWinnerLabel;
+                      const emphasize = isLeader || isWinner;
 
                       return (
                         <button
@@ -888,14 +1012,24 @@ export default function VoteClient() {
                           onClick={() => castVote(label)}
                           className="w-full rounded-2xl border p-4 text-left hover:bg-slate-50 disabled:opacity-60"
                           style={{
-                            borderColor: isWinner ? CORAL : undefined,
-                            boxShadow: isWinner ? "0 0 0 2px rgba(255,107,107,0.18) inset" : undefined,
-                            background: isWinner ? "#fff7f7" : undefined,
+                            borderColor: emphasize ? CORAL : undefined,
+                            boxShadow: emphasize ? "0 0 0 2px rgba(255,107,107,0.18) inset" : undefined,
+                            background: emphasize ? "#fff7f7" : undefined,
                           }}
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex items-center gap-2">
                               <div className="text-xs font-extrabold tracking-[0.18em] text-slate-500">{label}</div>
+
+                              {isLeader ? (
+                                <span
+                                  className="rounded-full px-2 py-0.5 text-[11px] font-extrabold"
+                                  style={{ background: "#ffe4e6", color: "#be123c" }}
+                                >
+                                  LEADING
+                                </span>
+                              ) : null}
+
                               {isWinner ? (
                                 <span
                                   className="rounded-full px-2 py-0.5 text-[11px] font-extrabold"
@@ -905,12 +1039,12 @@ export default function VoteClient() {
                                 </span>
                               ) : null}
                             </div>
+
                             <div className="text-xs font-bold text-slate-400">#{orderNum}</div>
                           </div>
 
                           <div className="mt-2 text-base font-semibold text-slate-900">{value}</div>
-
-                          <VoteBar label={label} emphasize={isWinner} />
+                          <VoteBar label={label} emphasize={emphasize} />
 
                           <div className="mt-2 text-xs text-slate-500">
                             Votes: <span className="font-semibold">{votes}</span>
@@ -923,31 +1057,37 @@ export default function VoteClient() {
                 )}
               </div>
 
-              {/* Reasons */}
               <div id="results" className="mt-10">
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">WHY PEOPLE CHOSE…</div>
-                  {winnerLabel ? (
+
+                  {closedWinnerLabel ? (
                     <div className="text-xs font-bold" style={{ color: CORAL }}>
-                      Winner: {winnerLabel}
+                      Winner: {closedWinnerLabel}
+                    </div>
+                  ) : leadingLabel ? (
+                    <div className="text-xs font-bold" style={{ color: CORAL }}>
+                      Leading: {leadingLabel}
                     </div>
                   ) : isTie ? (
-                    <div className="text-xs font-bold text-slate-500">Tie</div>
+                    <div className="text-xs font-bold text-slate-500">{isOpen ? "Currently tied" : "Tie"}</div>
                   ) : null}
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                   {ALLOWED.map((L) => {
                     const list = reasonsByLabel[L] || [];
-                    const isWinner = !!winnerLabel && L === winnerLabel;
+                    const isLeader = !!leadingLabel && L === leadingLabel;
+                    const isWinner = !!closedWinnerLabel && L === closedWinnerLabel;
+                    const emphasize = isLeader || isWinner;
 
                     return (
                       <div
                         key={L}
                         className="rounded-2xl border p-4"
                         style={{
-                          borderColor: isWinner ? CORAL : undefined,
-                          background: isWinner ? "#fff7f7" : undefined,
+                          borderColor: emphasize ? CORAL : undefined,
+                          background: emphasize ? "#fff7f7" : undefined,
                         }}
                       >
                         <div className="flex items-center justify-between gap-3">
@@ -955,6 +1095,16 @@ export default function VoteClient() {
                             <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                               Why people chose {L}
                             </div>
+
+                            {isLeader ? (
+                              <span
+                                className="rounded-full px-2 py-0.5 text-[11px] font-extrabold"
+                                style={{ background: "#ffe4e6", color: "#be123c" }}
+                              >
+                                LEADING
+                              </span>
+                            ) : null}
+
                             {isWinner ? (
                               <span
                                 className="rounded-full px-2 py-0.5 text-[11px] font-extrabold"
@@ -969,12 +1119,12 @@ export default function VoteClient() {
                         </div>
 
                         <div className="mt-2">
-                          <div className="h-2 w-full rounded-full border bg-white" style={{ borderColor: isWinner ? CORAL : "#e2e8f0" }}>
+                          <div className="h-2 w-full rounded-full border bg-white" style={{ borderColor: emphasize ? CORAL : "#e2e8f0" }}>
                             <div
                               className="h-2 rounded-full"
                               style={{
                                 width: totalVotes ? `${pct(L)}%` : "0%",
-                                background: isWinner ? CORAL : NAVY,
+                                background: emphasize ? CORAL : NAVY,
                                 opacity: totalVotes ? 0.7 : 0.2,
                               }}
                             />
@@ -1000,6 +1150,48 @@ export default function VoteClient() {
                   <span className="font-mono">quandr3_choices</span>.
                 </div>
               </div>
+
+              {isResolved ? (
+                <div id="final" className="mt-10 rounded-2xl border p-5" style={{ borderColor: CORAL, background: "#fff7f7" }}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-sm font-extrabold" style={{ color: NAVY }}>
+                      Final resolution
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className="rounded-full px-3 py-1 text-[11px] font-extrabold"
+                        style={{ background: CORAL, color: "white" }}
+                      >
+                        CURIOUSO VERDICT
+                      </span>
+
+                      {id ? (
+                        <Link
+                          href={`/q/${id}/results`}
+                          className="rounded-full px-3 py-1 text-[11px] font-extrabold text-white hover:opacity-95"
+                          style={{ background: NAVY }}
+                        >
+                          Open Results Page
+                        </Link>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 text-sm text-slate-700">
+                    {q?.resolved_choice_label ? (
+                      <>
+                        Final choice: <span className="font-extrabold" style={{ color: CORAL }}>{q.resolved_choice_label}</span>
+                      </>
+                    ) : (
+                      "A final choice has been posted."
+                    )}
+                  </div>
+
+                  {q?.resolution_note ? <div className="mt-2 text-sm text-slate-700">{q.resolution_note}</div> : null}
+                  {q?.resolved_at ? <div className="mt-2 text-xs text-slate-500">Resolved: {fmt(q.resolved_at)}</div> : null}
+                </div>
+              ) : null}
             </>
           )}
         </section>

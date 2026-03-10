@@ -115,28 +115,40 @@ export default function CreateQuandr3Page() {
     setIsSaving(true);
 
     try {
-      const { data: userRes, error: userErr } = await supabase.auth.getUser();
+      const {
+        data: { user },
+        error: userErr,
+      } = await supabase.auth.getUser();
+
       if (userErr) throw userErr;
 
-      const uid = userRes?.user?.id;
-      if (!uid) {
+      if (!user?.id) {
         setError("You must be signed in to publish.");
-        setIsSaving(false);
         return;
       }
 
+      // Ensure a matching profile row exists before inserting into quandr3s.
+      // author_id on quandr3s references profiles.id.
+      const { error: profileErr } = await supabase
+        .from("profiles")
+        .upsert({ id: user.id }, { onConflict: "id" });
+
+      if (profileErr) throw profileErr;
+
       const payload = {
         title: title.trim(),
-        prompt: prompt.trim(),
+        context: prompt.trim(),
         category,
         slug: slugify(title.trim()),
         status: "open",
-        author_id: uid,
+        author_id: user.id,
       };
+
+      console.log("CREATE QUANDR3 PAYLOAD:", payload);
 
       const { data: q, error: qErr } = await supabase
         .from("quandr3s")
-        .insert(payload)
+        .insert([payload])
         .select("id, created_at")
         .single();
 
@@ -154,13 +166,13 @@ export default function CreateQuandr3Page() {
         options.map((o) => ({
           quandr3_id: q.id,
           label: o.label,
-          value: o.text, // REQUIRED (NOT NULL)
-          text: o.text, // safe if exists
+          value: o.text,
+          text: o.text,
         }))
       );
+
       if (optErr) throw optErr;
 
-      // ✅ SIGNAL: tell Explore to refresh (same-tab safe)
       try {
         localStorage.setItem("quandr3_explore_refresh", String(Date.now()));
       } catch {}
@@ -173,11 +185,13 @@ export default function CreateQuandr3Page() {
       }, 650);
     } catch (e: any) {
       console.error("Create failed:", e);
+
       const msg = e?.message || "Failed to create Quandr3";
-      if (String(msg).toLowerCase().includes("row-level security")) {
-        setError(
-          "Blocked by security policy (RLS). Make sure you're signed in, and that your INSERT policy allows auth.uid() = author_id (and options insert is allowed)."
-        );
+
+      if (String(msg).toLowerCase().includes("foreign key")) {
+        setError("Profile link failed. The signed-in user could not be matched to a profile record.");
+      } else if (String(msg).toLowerCase().includes("row-level security")) {
+        setError("Blocked by security policy. Make sure you are signed in and allowed to create Quandr3s.");
       } else {
         setError(msg);
       }
@@ -193,21 +207,21 @@ export default function CreateQuandr3Page() {
   if (previewMode) {
     return (
       <main className="min-h-screen p-6" style={{ background: SOFT_BG }}>
-        <div className="max-w-2xl mx-auto bg-white rounded-xl p-6 shadow">
-          <h1 className="text-2xl font-bold mb-2">{title || "Untitled Quandr3"}</h1>
-          <p className="text-gray-700 mb-4">{prompt || "No prompt yet..."}</p>
+        <div className="mx-auto max-w-2xl rounded-xl bg-white p-6 shadow">
+          <h1 className="mb-2 text-2xl font-bold">{title || "Untitled Quandr3"}</h1>
+          <p className="mb-4 text-gray-700">{prompt || "No prompt yet..."}</p>
 
           <div className="space-y-2">
-            {optA && <div className="border p-3 rounded">A. {optA}</div>}
-            {optB && <div className="border p-3 rounded">B. {optB}</div>}
-            {optC && <div className="border p-3 rounded">C. {optC}</div>}
-            {optD && <div className="border p-3 rounded">D. {optD}</div>}
+            {optA && <div className="rounded border p-3">A. {optA}</div>}
+            {optB && <div className="rounded border p-3">B. {optB}</div>}
+            {optC && <div className="rounded border p-3">C. {optC}</div>}
+            {optD && <div className="rounded border p-3">D. {optD}</div>}
           </div>
 
-          {error && <div className="text-red-600 mt-4 text-sm">{error}</div>}
+          {error && <div className="mt-4 text-sm text-red-600">{error}</div>}
 
           {publishedId && (
-            <div className="mt-4 text-sm rounded-lg p-3" style={{ background: "#e9fff7", border: `1px solid ${TEAL}` }}>
+            <div className="mt-4 rounded-lg p-3 text-sm" style={{ background: "#e9fff7", border: `1px solid ${TEAL}` }}>
               <div className="font-bold" style={{ color: NAVY }}>
                 Published ✅
               </div>
@@ -218,7 +232,6 @@ export default function CreateQuandr3Page() {
                 </span>
               </div>
 
-              {/* ✅ Share tools (Phase 1) */}
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
@@ -245,15 +258,15 @@ export default function CreateQuandr3Page() {
             </div>
           )}
 
-          <div className="flex gap-3 mt-6">
-            <button onClick={() => setPreviewMode(false)} className="px-4 py-2 rounded bg-gray-200">
+          <div className="mt-6 flex gap-3">
+            <button onClick={() => setPreviewMode(false)} className="rounded bg-gray-200 px-4 py-2">
               Back to Edit
             </button>
 
             <button
               disabled={isSaving}
               onClick={handleCreate}
-              className="px-4 py-2 rounded text-white"
+              className="rounded px-4 py-2 text-white"
               style={{ background: BLUE, opacity: isSaving ? 0.7 : 1 }}
             >
               {isSaving ? "Publishing..." : "Publish"}
@@ -274,11 +287,11 @@ export default function CreateQuandr3Page() {
 
   return (
     <main className="min-h-screen p-6" style={{ background: SOFT_BG }}>
-      <div className="max-w-2xl mx-auto bg-white rounded-xl p-6 shadow">
-        <h1 className="text-2xl font-bold mb-4">Create a Quandr3</h1>
+      <div className="mx-auto max-w-2xl rounded-xl bg-white p-6 shadow">
+        <h1 className="mb-4 text-2xl font-bold">Create a Quandr3</h1>
 
         {publishedId && (
-          <div className="mb-4 text-sm rounded-lg p-3" style={{ background: "#e9fff7", border: `1px solid ${TEAL}` }}>
+          <div className="mb-4 rounded-lg p-3 text-sm" style={{ background: "#e9fff7", border: `1px solid ${TEAL}` }}>
             <div className="font-bold" style={{ color: NAVY }}>
               Published ✅
             </div>
@@ -286,7 +299,6 @@ export default function CreateQuandr3Page() {
               Your Quandr3 is live.
             </div>
 
-            {/* ✅ Share tools (Phase 1) */}
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -313,17 +325,17 @@ export default function CreateQuandr3Page() {
           </div>
         )}
 
-        <input className="w-full border p-2 rounded mb-3" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <input className="mb-3 w-full rounded border p-2" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
 
         <textarea
-          className="w-full border p-2 rounded mb-3"
+          className="mb-3 w-full rounded border p-2"
           placeholder="Describe the dilemma..."
           rows={4}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
         />
 
-        <select className="w-full border p-2 rounded mb-3" value={category} onChange={(e) => setCategory(e.target.value)}>
+        <select className="mb-3 w-full rounded border p-2" value={category} onChange={(e) => setCategory(e.target.value)}>
           {CATEGORIES.map((c) => (
             <option key={c} value={c}>
               {c}
@@ -331,22 +343,22 @@ export default function CreateQuandr3Page() {
           ))}
         </select>
 
-        <input className="w-full border p-2 rounded mb-2" placeholder="Option A" value={optA} onChange={(e) => setOptA(e.target.value)} />
-        <input className="w-full border p-2 rounded mb-2" placeholder="Option B" value={optB} onChange={(e) => setOptB(e.target.value)} />
-        <input className="w-full border p-2 rounded mb-2" placeholder="Option C (optional)" value={optC} onChange={(e) => setOptC(e.target.value)} />
-        <input className="w-full border p-2 rounded mb-4" placeholder="Option D (optional)" value={optD} onChange={(e) => setOptD(e.target.value)} />
+        <input className="mb-2 w-full rounded border p-2" placeholder="Option A" value={optA} onChange={(e) => setOptA(e.target.value)} />
+        <input className="mb-2 w-full rounded border p-2" placeholder="Option B" value={optB} onChange={(e) => setOptB(e.target.value)} />
+        <input className="mb-2 w-full rounded border p-2" placeholder="Option C (optional)" value={optC} onChange={(e) => setOptC(e.target.value)} />
+        <input className="mb-4 w-full rounded border p-2" placeholder="Option D (optional)" value={optD} onChange={(e) => setOptD(e.target.value)} />
 
-        {error && <div className="text-red-600 mb-3 text-sm">{error}</div>}
+        {error && <div className="mb-3 text-sm text-red-600">{error}</div>}
 
         <div className="flex gap-3">
-          <button onClick={() => setPreviewMode(true)} className="px-4 py-2 rounded bg-gray-200">
+          <button onClick={() => setPreviewMode(true)} className="rounded bg-gray-200 px-4 py-2">
             Preview
           </button>
 
           <button
             disabled={isSaving}
             onClick={handleCreate}
-            className="px-4 py-2 rounded text-white"
+            className="rounded px-4 py-2 text-white"
             style={{ background: BLUE, opacity: isSaving ? 0.7 : 1 }}
           >
             {isSaving ? "Creating..." : "Create"}
@@ -360,7 +372,7 @@ export default function CreateQuandr3Page() {
         )}
 
         <div className="mt-3 text-xs" style={{ color: NAVY, opacity: 0.65 }}>
-          Note: Publishing requires you to be signed in (RLS protection).
+          Note: Publishing requires you to be signed in.
         </div>
       </div>
     </main>
