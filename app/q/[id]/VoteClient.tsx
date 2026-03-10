@@ -1,7 +1,6 @@
 // /app/q/[id]/VoteClient.tsx
 "use client";
 // @ts-nocheck
-// test change for git
 
 export const dynamic = "force-dynamic";
 
@@ -117,8 +116,13 @@ export default function VoteClient() {
   const isAwaiting = useMemo(() => safeStr(q?.status).toLowerCase() === "awaiting_user", [q?.status]);
   const isResolved = useMemo(() => safeStr(q?.status).toLowerCase() === "resolved", [q?.status]);
 
-  // FIXED
-  const isAuthor = !!meId && !!q?.author_id && String(meId) === String(q.author_id);
+  const authorIdForCompare = useMemo(() => {
+    return String(q?.author_id || q?.user_id || author?.id || "").trim();
+  }, [q?.author_id, q?.user_id, author?.id]);
+
+  const isAuthor = useMemo(() => {
+    return !!meId && !!authorIdForCompare && String(meId).trim() === authorIdForCompare;
+  }, [meId, authorIdForCompare]);
 
   const totalVotes = useMemo(() => {
     return ALLOWED.reduce((sum, L) => sum + Number(voteCounts?.[L] || 0), 0);
@@ -143,12 +147,15 @@ export default function VoteClient() {
     const un = safeStr(author?.username).trim();
     if (dn) return dn;
     if (un) return un;
-    const aid = safeStr(q?.author_id);
+    const aid = safeStr(q?.author_id || q?.user_id);
     if (!aid) return "Curioso";
     return `${aid.slice(0, 6)}…${aid.slice(-4)}`;
-  }, [author?.display_name, author?.username, q?.author_id]);
+  }, [author?.display_name, author?.username, q?.author_id, q?.user_id]);
 
-  const curiosoHref = useMemo(() => (q?.author_id ? `/u/${q.author_id}` : "#"), [q?.author_id]);
+  const curiosoHref = useMemo(() => {
+    const aid = q?.author_id || q?.user_id;
+    return aid ? `/u/${aid}` : "#";
+  }, [q?.author_id, q?.user_id]);
 
   const notifyKey = useMemo(() => (id ? `q_notify_resolve_${id}` : ""), [id]);
 
@@ -174,7 +181,7 @@ export default function VoteClient() {
     const { data, error } = await supabase
       .from("quandr3s")
       .select(
-        "id,title,prompt,context,category,status,created_at,closes_at,author_id,city,state,discussion_open,resolved_at,resolved_choice_label,resolution_note"
+        "id,title,prompt,context,category,status,created_at,closes_at,author_id,user_id,city,state,discussion_open,resolved_at,resolved_choice_label,resolution_note"
       )
       .eq("id", qid)
       .single();
@@ -306,9 +313,10 @@ export default function VoteClient() {
       try {
         const uid = await loadMe();
         const qRow = await loadQuestion(id);
+        const authorId = qRow?.author_id || qRow?.user_id || "";
         const [optRows, profileRow, countsRes, reasonsRes, myVoteRes] = await Promise.all([
           loadOptions(id),
-          loadAuthorProfile(qRow?.author_id),
+          loadAuthorProfile(authorId),
           loadVoteCounts(id),
           loadReasons(id),
           loadMyVote(id, uid),
@@ -544,16 +552,16 @@ export default function VoteClient() {
       return {
         bg: "#fff5e8",
         border: "#fde6c8",
-        title: "Thank you for posting your Quandr3.",
+        title: "Your Quandr3 is gathering input.",
         body:
-          "Your Quandr3 is now live. Check back after voting closes to see how the internet decides. You’ll then return to post your final resolution so others can learn from the full decision.",
+          "Voting is open right now. Let the community weigh in. When voting ends, come back to review the results and post your final resolution.",
         ctaId: "results",
-        ctaText: "View Results",
+        ctaText: "View voting progress",
         showNotify: false,
       };
     }
 
-    if (isOpen) {
+    if (!isAuthor && isOpen) {
       return {
         bg: "#eaf6ff",
         border: "#cfe8ff",
@@ -576,12 +584,14 @@ export default function VoteClient() {
       return {
         bg: "#fff5e8",
         border: "#fde6c8",
-        title: isAuthor ? "Voting is complete. Your Quandr3 is ready to resolve." : "Votes are no longer accepted — this Quandr3 is closed.",
+        title: isAuthor
+          ? "Voting has ended. It’s your turn to close the loop."
+          : "Votes are no longer accepted — this Quandr3 is closed.",
         body: isAuthor
-          ? `${decidedLine} Review the results, then return to post your final Curioso verdict so others can learn from the full decision.`
+          ? `${decidedLine} Review the results, consider the reasons, and post your final resolution.`
           : `${decidedLine} Waiting for the Curioso to decide. Check below for details and the “why” behind each choice.`,
         ctaId: "results",
-        ctaText: isAuthor ? "Review Results" : "See results & reasons",
+        ctaText: isAuthor ? "Review results" : "See results & reasons",
         showNotify: false,
       };
     }
@@ -716,8 +726,6 @@ export default function VoteClient() {
               <h1 className="mt-3 text-3xl font-extrabold leading-tight md:text-4xl" style={{ color: NAVY }}>
                 {q.title}
               </h1>
-
-              <div className="mt-3 rounded-xl bg-red-600 p-3 font-extrabold text-white">DEBUG VERSION LIVE</div>
 
               {(q.prompt || q.context) ? <p className="mt-3 text-base text-slate-700">{q.prompt || q.context}</p> : null}
 
@@ -855,20 +863,6 @@ export default function VoteClient() {
                     {curiosoName}
                   </span>
                 </div>
-
-                <div className="text-sm text-slate-600">
-                  Author ID:{" "}
-                  <span className="font-mono text-slate-800">{String(q?.author_id || "")}</span>
-                </div>
-
-                <div className="text-sm text-slate-600">
-                  My ID:{" "}
-                  <span className="font-mono text-slate-800">{String(meId || "")}</span>
-                </div>
-
-                <div className="text-sm text-slate-600">
-                  isAuthor: <span className="font-mono text-slate-800">{String(isAuthor)}</span>
-                </div>
               </div>
 
               <div id="vote" className="mt-8 rounded-2xl border p-4">
@@ -876,7 +870,13 @@ export default function VoteClient() {
                   <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                     Voting (A–D)
                   </div>
-                  <div className="text-xs text-slate-500">{isOpen ? "Tap an option to vote." : "Votes are closed."}</div>
+                  <div className="text-xs text-slate-500">
+                    {isAuthor && isOpen
+                      ? "Your Quandr3 is live. Voting is in progress."
+                      : isOpen
+                      ? "Tap an option to vote."
+                      : "Votes are closed."}
+                  </div>
                 </div>
 
                 {!isOpen ? <div className="mt-2 text-sm font-semibold text-slate-700">Votes are no longer accepted for this Quandr3.</div> : null}
@@ -884,7 +884,7 @@ export default function VoteClient() {
                 {isAuthor && isOpen ? (
                   <div className="mt-3 rounded-2xl border bg-amber-50 p-4 text-sm text-amber-800">
                     You posted this Quandr3. Voting is open, so you can watch responses come in, but you cannot vote on your own post.
-                    Resolve it after voting closes.
+                    Return after voting closes to post your resolution.
                   </div>
                 ) : null}
 
