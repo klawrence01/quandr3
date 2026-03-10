@@ -115,7 +115,9 @@ export default function VoteClient() {
 
   const isAwaiting = useMemo(() => safeStr(q?.status).toLowerCase() === "awaiting_user", [q?.status]);
   const isResolved = useMemo(() => safeStr(q?.status).toLowerCase() === "resolved", [q?.status]);
-  const isAuthor = useMemo(() => !!meId && !!q?.author_id && String(meId) === String(q.author_id), [meId, q?.author_id]);
+  const isAuthor = useMemo(() =>
+  !!meId && !!q?.author_id && String(meId) === String(q.author_id),
+[meId, q?.author_id]);
 
   const totalVotes = useMemo(() => {
     return ALLOWED.reduce((sum, L) => sum + Number(voteCounts?.[L] || 0), 0);
