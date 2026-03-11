@@ -137,7 +137,6 @@ export default function ExploreInner(props: any) {
     setSearchQ,
   } = props;
 
-  // PWA install support
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   const [installReady, setInstallReady] = useState(false);
 
@@ -603,7 +602,7 @@ export default function ExploreInner(props: any) {
                       <span className="inline-flex items-center gap-2">
                         ⏳ <span className="font-semibold">{h ?? 0}</span> hour(s) left
                       </span>
-                    </span>
+                    </>
                   ) : null}
                 </div>
               </div>
