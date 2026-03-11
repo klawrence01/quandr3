@@ -926,7 +926,7 @@ export default function VoteClient() {
   className="mt-6 rounded-2xl border p-5"
   style={{ background: banner.bg, borderColor: banner.border }}
 >
-              >
+              
                 <div
                   className="mb-4 rounded-2xl border p-3 text-xs"
                   style={{
