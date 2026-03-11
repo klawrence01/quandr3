@@ -118,9 +118,7 @@ export default function VoteClient() {
     return closesAt <= Date.now();
   }, [q?.closes_at]);
 
-  const viewerId = useMemo(() => {
-    return safeStr(meId).trim().toLowerCase();
-  }, [meId]);
+  const viewerId = useMemo(() => safeStr(meId).trim().toLowerCase(), [meId]);
 
   const ownerId = useMemo(() => {
     return safeStr(q?.author_id || q?.user_id || author?.id).trim().toLowerCase();
@@ -212,15 +210,32 @@ export default function VoteClient() {
   }
 
   async function loadMe() {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const sessionUserId = sessionData?.session?.user?.id
-      ? String(sessionData.session.user.id)
-      : "";
+    // FIX: use getUser() first so we get the actual authenticated auth.users.id
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      const directUserId = userData?.user?.id ? String(userData.user.id) : "";
+      if (directUserId) return directUserId;
+      if (userError) {
+        console.warn("loadMe getUser warning:", userError);
+      }
+    } catch (e) {
+      console.warn("loadMe getUser failed:", e);
+    }
 
-    if (sessionUserId) return sessionUserId;
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      const sessionUserId = sessionData?.session?.user?.id
+        ? String(sessionData.session.user.id)
+        : "";
+      if (sessionUserId) return sessionUserId;
+      if (sessionError) {
+        console.warn("loadMe getSession warning:", sessionError);
+      }
+    } catch (e) {
+      console.warn("loadMe getSession failed:", e);
+    }
 
-    const { data: userData } = await supabase.auth.getUser();
-    return userData?.user?.id ? String(userData.user.id) : "";
+    return "";
   }
 
   async function loadQuestion(qid: string) {
@@ -430,10 +445,8 @@ export default function VoteClient() {
         retryTimer = setTimeout(async () => {
           const retryUid = await hydrateViewer();
           if (!alive) return;
-          if (retryUid) {
-            setMeId(retryUid);
-          }
-        }, 900);
+          if (retryUid) setMeId(retryUid);
+        }, 500);
       } catch (e: any) {
         console.error(e);
         if (!alive) return;
@@ -456,8 +469,8 @@ export default function VoteClient() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      syncSession();
+    } = supabase.auth.onAuthStateChange(async () => {
+      await syncSession();
     });
 
     return () => {
@@ -902,51 +915,29 @@ export default function VoteClient() {
                 </div>
               ) : null}
 
-              
-                <div
-  className="mb-4 rounded-2xl border p-3 text-xs"
-  style={{
-    borderColor: "#fecaca",
-    background: "#fff7f7",
-    color: NAVY,
-  }}
->
-  <div className="font-extrabold">DEBUG</div>
-  <div>viewerId: {viewerId || "null"}</div>
-  <div>ownerId: {ownerId || "null"}</div>
-  <div>isAuthor: {String(isAuthor)}</div>
-  <div>votingExpired: {String(votingExpired)}</div>
-  <div>hasResolution: {String(hasResolution)}</div>
-  <div>uiState: {uiState}</div>
-  <div>status: {q?.status || "null"}</div>
-  <div>closes_at: {q?.closes_at || "null"}</div>
-</div>
+              <div
+                className="mb-4 mt-4 rounded-2xl border p-3 text-xs"
+                style={{
+                  borderColor: "#fecaca",
+                  background: "#fff7f7",
+                  color: NAVY,
+                }}
+              >
+                <div className="font-extrabold">DEBUG</div>
+                <div>viewerId: {viewerId || "null"}</div>
+                <div>ownerId: {ownerId || "null"}</div>
+                <div>isAuthor: {String(isAuthor)}</div>
+                <div>votingExpired: {String(votingExpired)}</div>
+                <div>hasResolution: {String(hasResolution)}</div>
+                <div>uiState: {uiState}</div>
+                <div>status: {q?.status || "null"}</div>
+                <div>closes_at: {q?.closes_at || "null"}</div>
+              </div>
 
-<div
-  className="mt-6 rounded-2xl border p-5"
-  style={{ background: banner.bg, borderColor: banner.border }}
->
-              
-                <div
-                  className="mb-4 rounded-2xl border p-3 text-xs"
-                  style={{
-                    borderColor: "#fecaca",
-                 
-   background: "#fff7f7",
-                    color: NAVY,
-                  }}
-                >
-                  <div className="font-extrabold">DEBUG</div>
-                  <div>viewerId: {viewerId || "null"}</div>
-                  <div>ownerId: {ownerId || "null"}</div>
-                  <div>isAuthor: {String(isAuthor)}</div>
-                  <div>votingExpired: {String(votingExpired)}</div>
-                  <div>hasResolution: {String(hasResolution)}</div>
-                  <div>uiState: {uiState}</div>
-                  <div>status: {q?.status || "null"}</div>
-                  <div>closes_at: {q?.closes_at || "null"}</div>
-                </div>
-
+              <div
+                className="mt-6 rounded-2xl border p-5"
+                style={{ background: banner.bg, borderColor: banner.border }}
+              >
                 <div
                   className="text-sm font-extrabold"
                   style={{ color: isAuthor && isAwaitingLike ? ACTION_TEXT : NAVY }}
