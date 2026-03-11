@@ -375,7 +375,7 @@ export default function VoteClient() {
 
     async function hydrateViewer() {
       const uid = await loadMe();
-      if (!alive) return;
+      if (!alive) return "";
       setMeId(uid);
       return uid;
     }
@@ -436,7 +436,7 @@ export default function VoteClient() {
         retryTimer = setTimeout(async () => {
           const retryUid = await hydrateViewer();
           if (!alive) return;
-          if (retryUid && !uid) {
+          if (retryUid) {
             setMeId(retryUid);
           }
         }, 900);
