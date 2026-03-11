@@ -55,11 +55,13 @@ function scrollToId(id: string) {
   } catch {}
 }
 
-function statusBadge(status?: string) {
+function statusBadge(status?: string, votingExpired?: boolean) {
   const s = safeStr(status).toLowerCase();
-  if (s === "open") return { bg: "#e8f3ff", fg: BLUE, label: "open" };
-  if (s === "awaiting_user") return { bg: "#fff4e6", fg: "#b45309", label: "internet decided" };
   if (s === "resolved") return { bg: "#ecfdf5", fg: "#059669", label: "resolved" };
+  if (s === "awaiting_user" || (s === "open" && votingExpired)) {
+    return { bg: "#fff4e6", fg: "#b45309", label: "internet decided" };
+  }
+  if (s === "open") return { bg: "#e8f3ff", fg: BLUE, label: "open" };
   return { bg: "#f1f5f9", fg: "#334155", label: s || "unknown" };
 }
 
@@ -101,20 +103,32 @@ export default function VoteClient() {
   const [discSaving, setDiscSaving] = useState(false);
   const [discErr, setDiscErr] = useState("");
 
-  const badge = useMemo(() => statusBadge(q?.status), [q?.status]);
-
   const hrsLeft = useMemo(() => hoursLeftFromClosesAt(q?.closes_at), [q?.closes_at]);
+
+  const votingExpired = useMemo(() => {
+    if (!q?.closes_at) return false;
+    const closesAt = new Date(q.closes_at).getTime();
+    if (Number.isNaN(closesAt)) return false;
+    return closesAt <= Date.now();
+  }, [q?.closes_at]);
 
   const isOpen = useMemo(() => {
     const st = safeStr(q?.status).toLowerCase();
     if (st !== "open") return false;
-    const h = hoursLeftFromClosesAt(q?.closes_at);
-    if (h !== null && h <= 0) return false;
+    if (votingExpired) return false;
     return true;
-  }, [q?.status, q?.closes_at]);
+  }, [q?.status, votingExpired]);
 
   const isAwaiting = useMemo(() => safeStr(q?.status).toLowerCase() === "awaiting_user", [q?.status]);
+
+  const isAwaitingLike = useMemo(() => {
+    const st = safeStr(q?.status).toLowerCase();
+    return st === "awaiting_user" || (st === "open" && votingExpired);
+  }, [q?.status, votingExpired]);
+
   const isResolved = useMemo(() => safeStr(q?.status).toLowerCase() === "resolved", [q?.status]);
+
+  const badge = useMemo(() => statusBadge(q?.status, votingExpired), [q?.status, votingExpired]);
 
   const authorIdForCompare = useMemo(() => {
     return String(q?.author_id || q?.user_id || author?.id || "").trim();
@@ -134,9 +148,9 @@ export default function VoteClient() {
   }, [leaderLabel, leaderCount, isTie, isOpen]);
 
   const closedWinnerLabel = useMemo(() => {
-    if (!leaderLabel || !leaderCount || isTie || isOpen) return "";
+    if (!leaderLabel || !leaderCount || isTie || !isAwaitingLike) return "";
     return leaderLabel;
-  }, [leaderLabel, leaderCount, isTie, isOpen]);
+  }, [leaderLabel, leaderCount, isTie, isAwaitingLike]);
 
   const requiredCategoryMissing = useMemo(() => !safeStr(q?.category).trim(), [q?.category]);
 
@@ -573,7 +587,7 @@ export default function VoteClient() {
       };
     }
 
-    if (isAwaiting) {
+    if (isAwaitingLike) {
       const decidedLine =
         leaderLabel && !isTie
           ? `Winner: ${leaderLabel}. The internet has decided (${leaderCount} vote${leaderCount === 1 ? "" : "s"}).`
@@ -617,7 +631,7 @@ export default function VoteClient() {
       ctaText: "See results",
       showNotify: true,
     };
-  }, [isAuthor, isOpen, isAwaiting, isResolved, leaderLabel, leaderCount, isTie]);
+  }, [isAuthor, isOpen, isAwaitingLike, isResolved, leaderLabel, leaderCount, isTie]);
 
   function VoteBar({ label, emphasize }: { label: string; emphasize?: boolean }) {
     const v = Number(voteCounts?.[label] || 0);
@@ -671,7 +685,7 @@ export default function VoteClient() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {(isAwaiting || isResolved) && id ? (
+            {(isAwaitingLike || isResolved) && id ? (
               <Link
                 href={`/q/${id}/results`}
                 className="rounded-full px-4 py-2 text-sm font-extrabold text-white shadow-sm hover:opacity-95"
@@ -681,7 +695,7 @@ export default function VoteClient() {
               </Link>
             ) : null}
 
-            {isAuthor && isAwaiting && id ? (
+            {isAuthor && isAwaitingLike && id ? (
               <Link
                 href={`/q/${id}/resolve`}
                 className="rounded-full px-4 py-2 text-sm font-extrabold text-white shadow-sm hover:opacity-95"
@@ -754,7 +768,7 @@ export default function VoteClient() {
                     {banner.ctaText}
                   </button>
 
-                  {isAuthor && isAwaiting && id ? (
+                  {isAuthor && isAwaitingLike && id ? (
                     <Link
                       href={`/q/${id}/resolve`}
                       className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
@@ -776,7 +790,7 @@ export default function VoteClient() {
                     </button>
                   ) : null}
 
-                  {(isResolved || isAwaiting) && id ? (
+                  {(isResolved || isAwaitingLike) && id ? (
                     <Link
                       href={`/q/${id}/results`}
                       className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
@@ -786,7 +800,7 @@ export default function VoteClient() {
                     </Link>
                   ) : null}
 
-                  {isResolved || isAwaiting ? (
+                  {(isResolved || isAwaitingLike) ? (
                     <button
                       type="button"
                       onClick={handleShare}
@@ -885,6 +899,12 @@ export default function VoteClient() {
                   <div className="mt-3 rounded-2xl border bg-amber-50 p-4 text-sm text-amber-800">
                     You posted this Quandr3. Voting is open, so you can watch responses come in, but you cannot vote on your own post.
                     Return after voting closes to post your resolution.
+                  </div>
+                ) : null}
+
+                {isAuthor && isAwaitingLike ? (
+                  <div className="mt-3 rounded-2xl border bg-amber-50 p-4 text-sm text-amber-800">
+                    Voting has ended on your Quandr3. Review the results and post your final resolution to close the loop.
                   </div>
                 ) : null}
 
