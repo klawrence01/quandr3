@@ -21,6 +21,10 @@ function fmt(ts?: string) {
   }
 }
 
+function safeStr(x: any) {
+  return (x ?? "").toString();
+}
+
 function hoursLeft(closesAt?: string) {
   if (!closesAt) return null;
   const end = new Date(closesAt).getTime();
@@ -29,12 +33,16 @@ function hoursLeft(closesAt?: string) {
 }
 
 /**
- * ✅ A) Effective status for Explore UI
+ * Effective status for Explore UI
+ * - open
+ * - awaiting_user (includes expired "open" rows)
+ * - resolved
+ * - other
  */
 function effectiveStatus(row: any) {
-  const raw = (row?.status || "").toLowerCase();
+  const raw = safeStr(row?.status).toLowerCase();
 
-  if (raw === "awaiting_user") return "closed";
+  if (raw === "awaiting_user") return "awaiting_user";
   if (raw === "resolved") return "resolved";
 
   if (raw === "open") {
@@ -42,19 +50,38 @@ function effectiveStatus(row: any) {
     if (!ca) return "open";
     const end = new Date(ca).getTime();
     if (!isFinite(end)) return "open";
-    if (Date.now() >= end) return "closed";
+    if (Date.now() >= end) return "awaiting_user";
     return "open";
   }
 
   return "other";
 }
 
-function statusBadge(status?: string) {
-  const s = (status || "").toLowerCase();
-  if (s === "open") return { bg: "#e8f3ff", fg: BLUE, label: "open" };
-  if (s === "closed") return { bg: "#fff4e6", fg: "#b45309", label: "closed" };
-  if (s === "resolved") return { bg: "#ecfdf5", fg: "#059669", label: "resolved" };
-  return { bg: "#f1f5f9", fg: "#334155", label: status || "unknown" };
+function isAuthorRow(row: any, meId?: string) {
+  const mine = safeStr(meId).trim();
+  const authorId = safeStr(row?.author_id || row?.user_id).trim();
+  return !!mine && !!authorId && mine === authorId;
+}
+
+function statusBadgeForRow(row: any, meId?: string) {
+  const s = effectiveStatus(row);
+  const mine = isAuthorRow(row, meId);
+
+  if (s === "open") {
+    return { bg: "#e8f3ff", fg: BLUE, label: "open" };
+  }
+
+  if (s === "awaiting_user") {
+    return mine
+      ? { bg: "#fff4e6", fg: "#b45309", label: "awaiting your resolution" }
+      : { bg: "#fff4e6", fg: "#b45309", label: "awaiting Curioso resolution" };
+  }
+
+  if (s === "resolved") {
+    return { bg: "#ecfdf5", fg: "#059669", label: "resolved" };
+  }
+
+  return { bg: "#f1f5f9", fg: "#334155", label: "unknown" };
 }
 
 function tiny(s?: string, n = 52) {
@@ -94,6 +121,7 @@ export default function ExploreInner(props: any) {
     error,
     rows,
     rawRows,
+    meId,
     meCity,
     meState,
     scope,
@@ -167,7 +195,7 @@ export default function ExploreInner(props: any) {
     const rank = (row: any) => {
       const s = effectiveStatus(row);
       if (s === "open") return 0;
-      if (s === "closed") return 1;
+      if (s === "awaiting_user") return 1;
       if (s === "resolved") return 2;
       return 3;
     };
@@ -192,10 +220,6 @@ export default function ExploreInner(props: any) {
       });
   }, [rows]);
 
-  function goToQuandr3(id: string) {
-    router.push(`/q/${id}`);
-  }
-
   function buildShareLink(id: string) {
     const origin = getOrigin();
     return origin ? `${origin}/q/${id}` : `/q/${id}`;
@@ -204,7 +228,6 @@ export default function ExploreInner(props: any) {
   return (
     <main style={{ minHeight: "100vh", background: SOFT_BG }}>
       <div className="mx-auto max-w-5xl px-4 py-10">
-        {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">
@@ -233,7 +256,6 @@ export default function ExploreInner(props: any) {
           </div>
         </div>
 
-        {/* Control bar */}
         <div className="mt-6 rounded-[24px] border bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-wrap items-center gap-2">
@@ -259,9 +281,7 @@ export default function ExploreInner(props: any) {
                   }}
                   title={
                     scope === "local"
-                      ? `Local: ${meCity || "—"}${meCity && meState ? ", " : ""}${
-                          meState || "—"
-                        }`
+                      ? `Local: ${meCity || "—"}${meCity && meState ? ", " : ""}${meState || "—"}`
                       : ""
                   }
                 >
@@ -379,7 +399,6 @@ export default function ExploreInner(props: any) {
           </div>
         </div>
 
-        {/* Search modal */}
         {searchOpen ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
             <div className="w-full max-w-lg rounded-[24px] border bg-white p-5 shadow-xl">
@@ -432,7 +451,6 @@ export default function ExploreInner(props: any) {
           </div>
         ) : null}
 
-        {/* Open right now list */}
         <section className="mt-8 rounded-[28px] border bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div className="text-base font-extrabold" style={{ color: NAVY }}>
@@ -450,7 +468,7 @@ export default function ExploreInner(props: any) {
           ) : (
             <div className="mt-4 grid grid-cols-1 gap-3">
               {openNow.map((r: any) => {
-                const badge = statusBadge(effectiveStatus(r));
+                const badge = statusBadgeForRow(r, meId);
                 const h = hoursLeft(r?.closes_at);
                 const url = buildShareLink(r.id);
 
@@ -499,12 +517,13 @@ export default function ExploreInner(props: any) {
           )}
         </section>
 
-        {/* Feed */}
         <section className="mt-8 grid grid-cols-1 gap-5">
           {feed.map((r: any) => {
-            const badge = statusBadge(effectiveStatus(r));
+            const badge = statusBadgeForRow(r, meId);
             const h = hoursLeft(r?.closes_at);
             const url = buildShareLink(r.id);
+            const mine = isAuthorRow(r, meId);
+            const eff = effectiveStatus(r);
 
             return (
               <div
@@ -549,6 +568,14 @@ export default function ExploreInner(props: any) {
 
                 {r?.prompt ? <p className="mt-3 text-slate-700">{tiny(r?.prompt, 170)}</p> : null}
 
+                {eff === "awaiting_user" ? (
+                  <div className="mt-3 text-sm font-semibold" style={{ color: mine ? "#b45309" : "#475569" }}>
+                    {mine
+                      ? "Voting has ended. This Quandr3 is awaiting your resolution."
+                      : "Voting has ended. This Quandr3 is awaiting the Curioso’s resolution."}
+                  </div>
+                ) : null}
+
                 <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-slate-600">
                   {r.city || r.state ? (
                     <span
@@ -576,7 +603,7 @@ export default function ExploreInner(props: any) {
                       <span className="inline-flex items-center gap-2">
                         ⏳ <span className="font-semibold">{h ?? 0}</span> hour(s) left
                       </span>
-                    </>
+                    </span>
                   ) : null}
                 </div>
               </div>
