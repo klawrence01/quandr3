@@ -15,6 +15,13 @@ const TEAL = "#00a9a5";
 const CORAL = "#ff6b6b";
 const SOFT_BG = "#f5f7fc";
 
+// Curioso / action-state colors
+const ACTION_BG = "#f3e8ff";
+const ACTION_BORDER = "#c084fc";
+const ACTION_TEXT = "#581c87";
+const ACTION_BUTTON = "#7c3aed";
+const ACTION_BUTTON_ALT = "#f59e0b";
+
 const ALLOWED = ["A", "B", "C", "D"];
 const FOLLOWS_TABLE = "dilemma_follows";
 
@@ -364,6 +371,14 @@ export default function VoteClient() {
 
   useEffect(() => {
     let alive = true;
+    let retryTimer: any = null;
+
+    async function hydrateViewer() {
+      const uid = await loadMe();
+      if (!alive) return;
+      setMeId(uid);
+      return uid;
+    }
 
     async function loadAll() {
       setLoading(true);
@@ -375,7 +390,7 @@ export default function VoteClient() {
       setShareMsg("");
 
       try {
-        const uid = await loadMe();
+        const uid = await hydrateViewer();
         const qRow = await loadQuestion(id);
 
         if (
@@ -402,24 +417,29 @@ export default function VoteClient() {
           loadAuthorProfile(authorId),
           loadVoteCounts(id),
           loadReasons(id),
-          loadMyVote(id, uid),
+          loadMyVote(id, uid || ""),
         ]);
 
         if (!alive) return;
 
-        setMeId(uid);
         setQ(qRow);
         setOpts(optRows);
         setAuthor(profileRow);
-
         setVoteCounts(countsRes.counts);
         setLeaderLabel(countsRes.leader);
         setLeaderCount(countsRes.leaderCount);
         setIsTie(countsRes.tie);
-
         setReasonsByLabel(reasonsRes);
         setMyVote(myVoteRes.label);
         setMyVoteRowId(myVoteRes.rowId);
+
+        retryTimer = setTimeout(async () => {
+          const retryUid = await hydrateViewer();
+          if (!alive) return;
+          if (retryUid && !uid) {
+            setMeId(retryUid);
+          }
+        }, 900);
       } catch (e: any) {
         console.error(e);
         if (!alive) return;
@@ -448,6 +468,7 @@ export default function VoteClient() {
 
     return () => {
       alive = false;
+      if (retryTimer) clearTimeout(retryTimer);
       subscription?.unsubscribe?.();
     };
   }, [id]);
@@ -667,6 +688,7 @@ export default function VoteClient() {
           "Voting is open right now. Let the community weigh in. When voting ends, come back to review the results and post your final resolution.",
         ctaId: "results",
         ctaText: "View voting progress",
+        ctaBg: NAVY,
         showNotify: false,
       };
     }
@@ -679,11 +701,32 @@ export default function VoteClient() {
         body: "Pick A–D. If you can, add a quick reason — that’s where the clarity comes from.",
         ctaId: "vote",
         ctaText: "Jump to voting",
+        ctaBg: NAVY,
         showNotify: false,
       };
     }
 
-    if (isAwaitingLike) {
+    if (isAuthor && isAwaitingLike) {
+      const decidedLine =
+        leaderLabel && !isTie
+          ? `Winner: ${leaderLabel}. The internet has decided (${leaderCount} vote${leaderCount === 1 ? "" : "s"}).`
+          : leaderLabel && isTie
+          ? "It’s a tie — the internet is split right now."
+          : "Voting is closed.";
+
+      return {
+        bg: ACTION_BG,
+        border: ACTION_BORDER,
+        title: "⚡ Your Quandr3 is waiting on you.",
+        body: `${decidedLine} This is your moment to close the loop. Review the results, then post your final resolution so everyone can learn what you decided.`,
+        ctaId: "results",
+        ctaText: "Review results now",
+        ctaBg: ACTION_BUTTON,
+        showNotify: false,
+      };
+    }
+
+    if (!isAuthor && isAwaitingLike) {
       const decidedLine =
         leaderLabel && !isTie
           ? `Winner: ${leaderLabel}. The internet has decided (${leaderCount} vote${leaderCount === 1 ? "" : "s"}).`
@@ -694,14 +737,11 @@ export default function VoteClient() {
       return {
         bg: "#fff5e8",
         border: "#fde6c8",
-        title: isAuthor
-          ? "Voting has ended. It’s your turn to close the loop."
-          : "Votes are no longer accepted — this Quandr3 is closed.",
-        body: isAuthor
-          ? `${decidedLine} Review the results, consider the reasons, and post your final resolution.`
-          : `${decidedLine} Waiting for the Curioso to decide. Check below for details and the “why” behind each choice.`,
+        title: "Votes are no longer accepted — this Quandr3 is closed.",
+        body: `${decidedLine} Waiting for the Curioso to decide. Check below for details and the “why” behind each choice.`,
         ctaId: "results",
-        ctaText: isAuthor ? "Review results" : "See results & reasons",
+        ctaText: "See results & reasons",
+        ctaBg: NAVY,
         showNotify: false,
       };
     }
@@ -714,6 +754,7 @@ export default function VoteClient() {
         body: "Scroll down to see what the Curioso decided — plus the reasons behind the internet’s choice.",
         ctaId: "final",
         ctaText: "View final resolution",
+        ctaBg: NAVY,
         showNotify: false,
       };
     }
@@ -725,6 +766,7 @@ export default function VoteClient() {
       body: "Scroll down to see results and reasoning.",
       ctaId: "results",
       ctaText: "See results",
+      ctaBg: NAVY,
       showNotify: true,
     };
   }, [isAuthor, isOpen, isAwaitingLike, isResolved, leaderLabel, leaderCount, isTie]);
@@ -798,7 +840,7 @@ export default function VoteClient() {
               <Link
                 href={`/q/${id}/resolve`}
                 className="rounded-full px-4 py-2 text-sm font-extrabold text-white shadow-sm hover:opacity-95"
-                style={{ background: NAVY }}
+                style={{ background: ACTION_BUTTON }}
               >
                 Resolve Quandr3
               </Link>
@@ -868,17 +910,26 @@ export default function VoteClient() {
                 className="mt-6 rounded-2xl border p-5"
                 style={{ background: banner.bg, borderColor: banner.border }}
               >
-                <div className="text-sm font-extrabold" style={{ color: NAVY }}>
+                <div
+                  className="text-sm font-extrabold"
+                  style={{ color: isAuthor && isAwaitingLike ? ACTION_TEXT : NAVY }}
+                >
                   {banner.title}
                 </div>
-                <div className="mt-1 text-sm text-slate-700">{banner.body}</div>
+
+                <div
+                  className="mt-1 text-sm"
+                  style={{ color: isAuthor && isAwaitingLike ? ACTION_TEXT : "#334155" }}
+                >
+                  {banner.body}
+                </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => scrollToId(banner.ctaId)}
                     className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
-                    style={{ background: NAVY }}
+                    style={{ background: banner.ctaBg }}
                   >
                     {banner.ctaText}
                   </button>
@@ -886,8 +937,8 @@ export default function VoteClient() {
                   {isAuthor && isAwaitingLike && id ? (
                     <Link
                       href={`/q/${id}/resolve`}
-                      className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
-                      style={{ background: CORAL }}
+                      className="rounded-full px-4 py-2 text-sm font-extrabold text-slate-900 hover:opacity-95"
+                      style={{ background: ACTION_BUTTON_ALT }}
                     >
                       Post Final Resolution
                     </Link>
@@ -905,7 +956,7 @@ export default function VoteClient() {
                     </button>
                   ) : null}
 
-                  {(isResolved || isAwaitingLike) && id ? (
+                  {(isResolved || (!isAuthor && isAwaitingLike)) && id ? (
                     <Link
                       href={`/q/${id}/results`}
                       className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
@@ -915,7 +966,7 @@ export default function VoteClient() {
                     </Link>
                   ) : null}
 
-                  {isResolved || isAwaitingLike ? (
+                  {(isResolved || isAwaitingLike) ? (
                     <button
                       type="button"
                       onClick={handleShare}
@@ -1025,8 +1076,15 @@ export default function VoteClient() {
                 ) : null}
 
                 {isAuthor && isAwaitingLike ? (
-                  <div className="mt-3 rounded-2xl border bg-amber-50 p-4 text-sm text-amber-800">
-                    Voting has ended on your Quandr3. Review the results and post your final resolution to close the loop.
+                  <div
+                    className="mt-3 rounded-2xl border p-4 text-sm font-semibold"
+                    style={{
+                      background: ACTION_BG,
+                      borderColor: ACTION_BORDER,
+                      color: ACTION_TEXT,
+                    }}
+                  >
+                    Voting has ended on your Quandr3. This is now waiting on you. Review the results and post your final resolution to close the loop.
                   </div>
                 ) : null}
 
