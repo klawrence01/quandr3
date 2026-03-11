@@ -76,7 +76,13 @@ export default function VoteClient() {
   const [meId, setMeId] = useState("");
   const [err, setErr] = useState("");
 
-  const [voteCounts, setVoteCounts] = useState<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0 });
+  const [voteCounts, setVoteCounts] = useState<Record<string, number>>({
+    A: 0,
+    B: 0,
+    C: 0,
+    D: 0,
+  });
+
   const [reasonsByLabel, setReasonsByLabel] = useState<Record<string, string[]>>({
     A: [],
     B: [],
@@ -119,16 +125,25 @@ export default function VoteClient() {
     return true;
   }, [q?.status, votingExpired]);
 
-  const isAwaiting = useMemo(() => safeStr(q?.status).toLowerCase() === "awaiting_user", [q?.status]);
+  const isAwaiting = useMemo(
+    () => safeStr(q?.status).toLowerCase() === "awaiting_user",
+    [q?.status]
+  );
 
   const isAwaitingLike = useMemo(() => {
     const st = safeStr(q?.status).toLowerCase();
     return st === "awaiting_user" || (st === "open" && votingExpired);
   }, [q?.status, votingExpired]);
 
-  const isResolved = useMemo(() => safeStr(q?.status).toLowerCase() === "resolved", [q?.status]);
+  const isResolved = useMemo(
+    () => safeStr(q?.status).toLowerCase() === "resolved",
+    [q?.status]
+  );
 
-  const badge = useMemo(() => statusBadge(q?.status, votingExpired), [q?.status, votingExpired]);
+  const badge = useMemo(
+    () => statusBadge(q?.status, votingExpired),
+    [q?.status, votingExpired]
+  );
 
   const authorIdForCompare = useMemo(() => {
     return String(q?.author_id || q?.user_id || author?.id || "").trim();
@@ -152,7 +167,10 @@ export default function VoteClient() {
     return leaderLabel;
   }, [leaderLabel, leaderCount, isTie, isAwaitingLike]);
 
-  const requiredCategoryMissing = useMemo(() => !safeStr(q?.category).trim(), [q?.category]);
+  const requiredCategoryMissing = useMemo(
+    () => !safeStr(q?.category).trim(),
+    [q?.category]
+  );
 
   const openButNoOptions = useMemo(() => isOpen && opts.length === 0, [isOpen, opts]);
 
@@ -239,10 +257,19 @@ export default function VoteClient() {
   }
 
   async function loadVoteCounts(qid: string) {
-    const { data, error } = await supabase.from("quandr3_choices").select("label").eq("quandr3_id", qid);
+    const { data, error } = await supabase
+      .from("quandr3_choices")
+      .select("label")
+      .eq("quandr3_id", qid);
+
     if (error) {
       console.warn("counts warning:", error);
-      return { counts: { A: 0, B: 0, C: 0, D: 0 }, leader: "", leaderCount: 0, tie: false };
+      return {
+        counts: { A: 0, B: 0, C: 0, D: 0 },
+        leader: "",
+        leaderCount: 0,
+        tie: false,
+      };
     }
 
     const counts: any = { A: 0, B: 0, C: 0, D: 0 };
@@ -251,7 +278,10 @@ export default function VoteClient() {
       if (lab) counts[lab] = Number(counts[lab] || 0) + 1;
     });
 
-    const entries = Object.entries(counts).sort((a: any, b: any) => Number(b[1]) - Number(a[1]));
+    const entries = Object.entries(counts).sort(
+      (a: any, b: any) => Number(b[1]) - Number(a[1])
+    );
+
     const top = entries[0];
     const second = entries[1];
 
@@ -268,7 +298,11 @@ export default function VoteClient() {
   }
 
   async function loadReasons(qid: string) {
-    const { data, error } = await supabase.from("quandr3_choices").select("label,text").eq("quandr3_id", qid);
+    const { data, error } = await supabase
+      .from("quandr3_choices")
+      .select("label,text")
+      .eq("quandr3_id", qid);
+
     if (error) {
       console.warn("reasons warning:", error);
       return { A: [], B: [], C: [], D: [] };
@@ -328,6 +362,7 @@ export default function VoteClient() {
         const uid = await loadMe();
         const qRow = await loadQuestion(id);
         const authorId = qRow?.author_id || qRow?.user_id || "";
+
         const [optRows, profileRow, countsRes, reasonsRes, myVoteRes] = await Promise.all([
           loadOptions(id),
           loadAuthorProfile(authorId),
@@ -368,7 +403,11 @@ export default function VoteClient() {
   }, [id]);
 
   async function refreshCountsAndReasons() {
-    const [countsRes, reasonsRes] = await Promise.all([loadVoteCounts(id), loadReasons(id)]);
+    const [countsRes, reasonsRes] = await Promise.all([
+      loadVoteCounts(id),
+      loadReasons(id),
+    ]);
+
     setVoteCounts(countsRes.counts);
     setLeaderLabel(countsRes.leader);
     setLeaderCount(countsRes.leaderCount);
@@ -510,7 +549,11 @@ export default function VoteClient() {
     setDiscSaving(true);
     try {
       const nextVal = !Boolean(q?.discussion_open);
-      const { error } = await supabase.from("quandr3s").update({ discussion_open: nextVal }).eq("id", id);
+      const { error } = await supabase
+        .from("quandr3s")
+        .update({ discussion_open: nextVal })
+        .eq("id", id);
+
       if (error) throw error;
       setQ((prev: any) => ({ ...(prev || {}), discussion_open: nextVal }));
     } catch (e: any) {
@@ -647,7 +690,10 @@ export default function VoteClient() {
           </span>
         </div>
 
-        <div className="mt-1 h-2 w-full rounded-full border bg-white" style={{ borderColor: emphasize ? CORAL : "#e2e8f0" }}>
+        <div
+          className="mt-1 h-2 w-full rounded-full border bg-white"
+          style={{ borderColor: emphasize ? CORAL : "#e2e8f0" }}
+        >
           <div
             className="h-2 rounded-full"
             style={{
@@ -728,7 +774,11 @@ export default function VoteClient() {
                 {requiredCategoryMissing ? (
                   <span
                     className="rounded-full border px-3 py-1"
-                    style={{ borderColor: "#fecaca", color: "#b91c1c", background: "#fef2f2" }}
+                    style={{
+                      borderColor: "#fecaca",
+                      color: "#b91c1c",
+                      background: "#fef2f2",
+                    }}
                   >
                     CATEGORY REQUIRED
                   </span>
@@ -737,22 +787,34 @@ export default function VoteClient() {
                 )}
               </div>
 
-              <h1 className="mt-3 text-3xl font-extrabold leading-tight md:text-4xl" style={{ color: NAVY }}>
+              <h1
+                className="mt-3 text-3xl font-extrabold leading-tight md:text-4xl"
+                style={{ color: NAVY }}
+              >
                 {q.title}
               </h1>
 
-              {(q.prompt || q.context) ? <p className="mt-3 text-base text-slate-700">{q.prompt || q.context}</p> : null}
+              {(q.prompt || q.context) ? (
+                <p className="mt-3 text-base text-slate-700">{q.prompt || q.context}</p>
+              ) : null}
 
               {requiredCategoryMissing ? (
                 <div
                   className="mt-4 rounded-2xl border p-4 text-sm font-semibold"
-                  style={{ borderColor: "#fecaca", background: "#fef2f2", color: "#991b1b" }}
+                  style={{
+                    borderColor: "#fecaca",
+                    background: "#fef2f2",
+                    color: "#991b1b",
+                  }}
                 >
                   This Quandr3 is missing a category. Category is mandatory for resolved posts.
                 </div>
               ) : null}
 
-              <div className="mt-6 rounded-2xl border p-5" style={{ background: banner.bg, borderColor: banner.border }}>
+              <div
+                className="mt-6 rounded-2xl border p-5"
+                style={{ background: banner.bg, borderColor: banner.border }}
+              >
                 <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                   {banner.title}
                 </div>
@@ -800,7 +862,7 @@ export default function VoteClient() {
                     </Link>
                   ) : null}
 
-                  {(isResolved || isAwaitingLike) ? (
+                  {isResolved || isAwaitingLike ? (
                     <button
                       type="button"
                       onClick={handleShare}
@@ -827,7 +889,10 @@ export default function VoteClient() {
               </div>
 
               <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-slate-600">
-                <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: badge.bg, color: badge.fg }}>
+                <span
+                  className="rounded-full px-3 py-1 text-xs font-extrabold"
+                  style={{ background: badge.bg, color: badge.fg }}
+                >
                   {badge.label}
                 </span>
 
@@ -879,6 +944,47 @@ export default function VoteClient() {
                 </div>
               </div>
 
+              <div className="mt-2 rounded-2xl border bg-slate-50 p-3 text-xs text-slate-600">
+                <div>
+                  meId: <span className="font-mono text-slate-800">{String(meId || "")}</span>
+                </div>
+                <div>
+                  authorIdForCompare:{" "}
+                  <span className="font-mono text-slate-800">
+                    {String(authorIdForCompare || "")}
+                  </span>
+                </div>
+                <div>
+                  q.author_id:{" "}
+                  <span className="font-mono text-slate-800">
+                    {String(q?.author_id || "")}
+                  </span>
+                </div>
+                <div>
+                  q.user_id:{" "}
+                  <span className="font-mono text-slate-800">
+                    {String(q?.user_id || "")}
+                  </span>
+                </div>
+                <div>
+                  author.id:{" "}
+                  <span className="font-mono text-slate-800">
+                    {String(author?.id || "")}
+                  </span>
+                </div>
+                <div>
+                  isAuthor: <span className="font-mono text-slate-800">{String(isAuthor)}</span>
+                </div>
+                <div>
+                  isAwaiting:{" "}
+                  <span className="font-mono text-slate-800">{String(isAwaiting)}</span>
+                </div>
+                <div>
+                  isAwaitingLike:{" "}
+                  <span className="font-mono text-slate-800">{String(isAwaitingLike)}</span>
+                </div>
+              </div>
+
               <div id="vote" className="mt-8 rounded-2xl border p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-extrabold" style={{ color: NAVY }}>
@@ -893,12 +999,16 @@ export default function VoteClient() {
                   </div>
                 </div>
 
-                {!isOpen ? <div className="mt-2 text-sm font-semibold text-slate-700">Votes are no longer accepted for this Quandr3.</div> : null}
+                {!isOpen ? (
+                  <div className="mt-2 text-sm font-semibold text-slate-700">
+                    Votes are no longer accepted for this Quandr3.
+                  </div>
+                ) : null}
 
                 {isAuthor && isOpen ? (
                   <div className="mt-3 rounded-2xl border bg-amber-50 p-4 text-sm text-amber-800">
-                    You posted this Quandr3. Voting is open, so you can watch responses come in, but you cannot vote on your own post.
-                    Return after voting closes to post your resolution.
+                    You posted this Quandr3. Voting is open, so you can watch responses come in,
+                    but you cannot vote on your own post. Return after voting closes to post your resolution.
                   </div>
                 ) : null}
 
@@ -948,7 +1058,9 @@ export default function VoteClient() {
                       >
                         {whySaving ? "Saving…" : "Save my reason"}
                       </button>
-                      <div className="text-xs text-slate-500">Your “why” helps the author understand the internet’s thinking.</div>
+                      <div className="text-xs text-slate-500">
+                        Your “why” helps the author understand the internet’s thinking.
+                      </div>
                     </div>
                   </div>
                 ) : null}
@@ -959,7 +1071,9 @@ export default function VoteClient() {
                   </div>
                 ) : null}
 
-                {votingErr ? <div className="mt-3 text-sm font-semibold text-red-600">{votingErr}</div> : null}
+                {votingErr ? (
+                  <div className="mt-3 text-sm font-semibold text-red-600">{votingErr}</div>
+                ) : null}
 
                 {isAuthor ? (
                   <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
@@ -968,7 +1082,9 @@ export default function VoteClient() {
                         <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                           Author controls
                         </div>
-                        <div className="mt-1 text-xs text-slate-600">Open or close discussion for this Quandr3.</div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          Open or close discussion for this Quandr3.
+                        </div>
                       </div>
 
                       <button
@@ -982,18 +1098,23 @@ export default function VoteClient() {
                       </button>
                     </div>
 
-                    {discErr ? <div className="mt-2 text-sm font-semibold text-red-600">{discErr}</div> : null}
+                    {discErr ? (
+                      <div className="mt-2 text-sm font-semibold text-red-600">{discErr}</div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
 
               <div className="mt-10">
                 <div className="flex flex-wrap items-end justify-between gap-3">
-                  <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">OPTIONS (A–D)</div>
+                  <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">
+                    OPTIONS (A–D)
+                  </div>
                   <div className="text-xs text-slate-500">
                     {totalVotes ? (
                       <>
-                        <span className="font-semibold">{totalVotes}</span> total vote{totalVotes === 1 ? "" : "s"}
+                        <span className="font-semibold">{totalVotes}</span> total vote
+                        {totalVotes === 1 ? "" : "s"}
                       </>
                     ) : (
                       <>No votes yet.</>
@@ -1010,8 +1131,8 @@ export default function VoteClient() {
                   <div className="mt-3 text-slate-600">
                     No options found on this Quandr3.
                     <div className="mt-2 text-xs text-slate-500">
-                      (This page reads from <span className="font-mono">quandr3_options.text</span> first, then falls back to{" "}
-                      <span className="font-mono">quandr3_options.value</span>.)
+                      (This page reads from <span className="font-mono">quandr3_options.text</span> first,
+                      then falls back to <span className="font-mono">quandr3_options.value</span>.)
                     </div>
                   </div>
                 ) : (
@@ -1022,7 +1143,9 @@ export default function VoteClient() {
                       const orderNum = typeof o.order === "number" ? o.order : idx + 1;
                       const votes = Number(voteCounts[label] || 0);
 
-                      const disabled = casting || !!myVote || !isOpen || openButNoOptions || isAuthor;
+                      const disabled =
+                        casting || !!myVote || !isOpen || openButNoOptions || isAuthor;
+
                       const isLeader = !!leadingLabel && label === leadingLabel;
                       const isWinner = !!closedWinnerLabel && label === closedWinnerLabel;
                       const emphasize = isLeader || isWinner;
@@ -1036,13 +1159,17 @@ export default function VoteClient() {
                           className="w-full rounded-2xl border p-4 text-left hover:bg-slate-50 disabled:opacity-60"
                           style={{
                             borderColor: emphasize ? CORAL : undefined,
-                            boxShadow: emphasize ? "0 0 0 2px rgba(255,107,107,0.18) inset" : undefined,
+                            boxShadow: emphasize
+                              ? "0 0 0 2px rgba(255,107,107,0.18) inset"
+                              : undefined,
                             background: emphasize ? "#fff7f7" : undefined,
                           }}
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex items-center gap-2">
-                              <div className="text-xs font-extrabold tracking-[0.18em] text-slate-500">{label}</div>
+                              <div className="text-xs font-extrabold tracking-[0.18em] text-slate-500">
+                                {label}
+                              </div>
 
                               {isLeader ? (
                                 <span
@@ -1082,7 +1209,9 @@ export default function VoteClient() {
 
               <div id="results" className="mt-10">
                 <div className="flex flex-wrap items-end justify-between gap-3">
-                  <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">WHY PEOPLE CHOSE…</div>
+                  <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">
+                    WHY PEOPLE CHOSE…
+                  </div>
 
                   {closedWinnerLabel ? (
                     <div className="text-xs font-bold" style={{ color: CORAL }}>
@@ -1093,7 +1222,9 @@ export default function VoteClient() {
                       Leading: {leadingLabel}
                     </div>
                   ) : isTie ? (
-                    <div className="text-xs font-bold text-slate-500">{isOpen ? "Currently tied" : "Tie"}</div>
+                    <div className="text-xs font-bold text-slate-500">
+                      {isOpen ? "Currently tied" : "Tie"}
+                    </div>
                   ) : null}
                 </div>
 
@@ -1138,11 +1269,16 @@ export default function VoteClient() {
                             ) : null}
                           </div>
 
-                          <div className="text-xs font-bold text-slate-500">{totalVotes ? `${pct(L)}%` : "—"}</div>
+                          <div className="text-xs font-bold text-slate-500">
+                            {totalVotes ? `${pct(L)}%` : "—"}
+                          </div>
                         </div>
 
                         <div className="mt-2">
-                          <div className="h-2 w-full rounded-full border bg-white" style={{ borderColor: emphasize ? CORAL : "#e2e8f0" }}>
+                          <div
+                            className="h-2 w-full rounded-full border bg-white"
+                            style={{ borderColor: emphasize ? CORAL : "#e2e8f0" }}
+                          >
                             <div
                               className="h-2 rounded-full"
                               style={{
@@ -1175,7 +1311,11 @@ export default function VoteClient() {
               </div>
 
               {isResolved ? (
-                <div id="final" className="mt-10 rounded-2xl border p-5" style={{ borderColor: CORAL, background: "#fff7f7" }}>
+                <div
+                  id="final"
+                  className="mt-10 rounded-2xl border p-5"
+                  style={{ borderColor: CORAL, background: "#fff7f7" }}
+                >
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="text-sm font-extrabold" style={{ color: NAVY }}>
                       Final resolution
@@ -1204,15 +1344,23 @@ export default function VoteClient() {
                   <div className="mt-3 text-sm text-slate-700">
                     {q?.resolved_choice_label ? (
                       <>
-                        Final choice: <span className="font-extrabold" style={{ color: CORAL }}>{q.resolved_choice_label}</span>
+                        Final choice:{" "}
+                        <span className="font-extrabold" style={{ color: CORAL }}>
+                          {q.resolved_choice_label}
+                        </span>
                       </>
                     ) : (
                       "A final choice has been posted."
                     )}
                   </div>
 
-                  {q?.resolution_note ? <div className="mt-2 text-sm text-slate-700">{q.resolution_note}</div> : null}
-                  {q?.resolved_at ? <div className="mt-2 text-xs text-slate-500">Resolved: {fmt(q.resolved_at)}</div> : null}
+                  {q?.resolution_note ? (
+                    <div className="mt-2 text-sm text-slate-700">{q.resolution_note}</div>
+                  ) : null}
+
+                  {q?.resolved_at ? (
+                    <div className="mt-2 text-xs text-slate-500">Resolved: {fmt(q.resolved_at)}</div>
+                  ) : null}
                 </div>
               ) : null}
             </>
@@ -1220,7 +1368,8 @@ export default function VoteClient() {
         </section>
 
         <div className="mt-6 text-center text-xs text-slate-500">
-          Quandr3: <span className="font-semibold">Ask.</span> <span className="font-semibold">Share.</span>{" "}
+          Quandr3: <span className="font-semibold">Ask.</span>{" "}
+          <span className="font-semibold">Share.</span>{" "}
           <span className="font-semibold">Decide.</span>
         </div>
       </div>
