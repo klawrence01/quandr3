@@ -1046,7 +1046,7 @@ export default function VoteClient() {
                     {curiosoName}
                   </span>
                 </div>
-              </div>
+              
 
               <div id="vote" className="mt-8 rounded-2xl border p-4">
                 <div className="flex items-center justify-between gap-3">
