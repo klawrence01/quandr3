@@ -65,6 +65,10 @@ function scrollToId(id: string) {
   } catch {}
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export default function VoteClient() {
   const params = useParams();
   const id = safeStr((params as any)?.id);
@@ -210,29 +214,33 @@ export default function VoteClient() {
   }
 
   async function loadMe() {
-    // FIX: use getUser() first so we get the actual authenticated auth.users.id
-    try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      const directUserId = userData?.user?.id ? String(userData.user.id) : "";
-      if (directUserId) return directUserId;
-      if (userError) {
-        console.warn("loadMe getUser warning:", userError);
+    // Most reliable path in browser: session first, then user, with retries.
+    for (let i = 0; i < 5; i++) {
+      try {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        const sessionUserId = sessionData?.session?.user?.id
+          ? String(sessionData.session.user.id)
+          : "";
+        if (sessionUserId) return sessionUserId;
+        if (sessionError) {
+          console.warn("loadMe getSession warning:", sessionError);
+        }
+      } catch (e) {
+        console.warn("loadMe getSession failed:", e);
       }
-    } catch (e) {
-      console.warn("loadMe getUser failed:", e);
-    }
 
-    try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      const sessionUserId = sessionData?.session?.user?.id
-        ? String(sessionData.session.user.id)
-        : "";
-      if (sessionUserId) return sessionUserId;
-      if (sessionError) {
-        console.warn("loadMe getSession warning:", sessionError);
+      try {
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        const directUserId = userData?.user?.id ? String(userData.user.id) : "";
+        if (directUserId) return directUserId;
+        if (userError) {
+          console.warn("loadMe getUser warning:", userError);
+        }
+      } catch (e) {
+        console.warn("loadMe getUser failed:", e);
       }
-    } catch (e) {
-      console.warn("loadMe getSession failed:", e);
+
+      if (i < 4) await sleep(300);
     }
 
     return "";
@@ -377,13 +385,12 @@ export default function VoteClient() {
 
   useEffect(() => {
     let alive = true;
-    let retryTimer: any = null;
 
     async function hydrateViewer() {
       const uid = await loadMe();
       if (!alive) return "";
-      setMeId(uid);
-      return uid;
+      setMeId(uid || "");
+      return uid || "";
     }
 
     async function loadAll() {
@@ -396,7 +403,6 @@ export default function VoteClient() {
       setShareMsg("");
 
       try {
-        const uid = await hydrateViewer();
         const qRow = await loadQuestion(id);
 
         if (
@@ -420,6 +426,7 @@ export default function VoteClient() {
         }
 
         const authorId = qRow?.author_id || qRow?.user_id || "";
+        const uid = await hydrateViewer();
 
         const [optRows, profileRow, countsRes, reasonsRes, myVoteRes] = await Promise.all([
           loadOptions(id),
@@ -442,11 +449,19 @@ export default function VoteClient() {
         setMyVote(myVoteRes.label);
         setMyVoteRowId(myVoteRes.rowId);
 
-        retryTimer = setTimeout(async () => {
-          const retryUid = await hydrateViewer();
+        // One more delayed auth hydration pass for browser/session lag.
+        setTimeout(async () => {
           if (!alive) return;
-          if (retryUid) setMeId(retryUid);
-        }, 500);
+          const lateUid = await loadMe();
+          if (!alive) return;
+          if (lateUid && lateUid !== uid) {
+            setMeId(lateUid);
+            const refreshedVote = await loadMyVote(id, lateUid);
+            if (!alive) return;
+            setMyVote(refreshedVote.label);
+            setMyVoteRowId(refreshedVote.rowId);
+          }
+        }, 1200);
       } catch (e: any) {
         console.error(e);
         if (!alive) return;
@@ -460,7 +475,7 @@ export default function VoteClient() {
       try {
         const uid = await loadMe();
         if (!alive) return;
-        setMeId(uid);
+        setMeId(uid || "");
       } catch {}
     }
 
@@ -469,13 +484,15 @@ export default function VoteClient() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async () => {
-      await syncSession();
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!alive) return;
+      const uid = session?.user?.id ? String(session.user.id) : await loadMe();
+      if (!alive) return;
+      setMeId(uid || "");
     });
 
     return () => {
       alive = false;
-      if (retryTimer) clearTimeout(retryTimer);
       subscription?.unsubscribe?.();
     };
   }, [id]);
