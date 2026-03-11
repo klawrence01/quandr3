@@ -902,9 +902,30 @@ export default function VoteClient() {
                 </div>
               ) : null}
 
-              <div
-                className="mt-6 rounded-2xl border p-5"
-                style={{ background: banner.bg, borderColor: banner.border }}
+              
+                <div
+  className="mb-4 rounded-2xl border p-3 text-xs"
+  style={{
+    borderColor: "#fecaca",
+    background: "#fff7f7",
+    color: NAVY,
+  }}
+>
+  <div className="font-extrabold">DEBUG</div>
+  <div>viewerId: {viewerId || "null"}</div>
+  <div>ownerId: {ownerId || "null"}</div>
+  <div>isAuthor: {String(isAuthor)}</div>
+  <div>votingExpired: {String(votingExpired)}</div>
+  <div>hasResolution: {String(hasResolution)}</div>
+  <div>uiState: {uiState}</div>
+  <div>status: {q?.status || "null"}</div>
+  <div>closes_at: {q?.closes_at || "null"}</div>
+</div>
+
+<div
+  className="mt-6 rounded-2xl border p-5"
+  style={{ background: banner.bg, borderColor: banner.border }}
+>
               >
                 <div
                   className="mb-4 rounded-2xl border p-3 text-xs"
