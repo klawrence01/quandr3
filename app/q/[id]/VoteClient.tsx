@@ -1031,8 +1031,8 @@ export default function VoteClient() {
                 ) : null}
               </div>
 
-              <div className="mt-6 flex flex-wrap items-center gap-3">
-                <Link
+              <Link
+  
                   href={curiosoHref}
                   className="rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50"
                   style={{ color: NAVY }}
