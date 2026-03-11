@@ -153,11 +153,13 @@ export default function VoteClient() {
   );
 
   const authorIdForCompare = useMemo(() => {
-    return String(q?.author_id || q?.user_id || author?.id || "").trim();
+    return safeStr(q?.author_id || q?.user_id || author?.id).trim().toLowerCase();
   }, [q?.author_id, q?.user_id, author?.id]);
 
   const isAuthor = useMemo(() => {
-    return !!meId && !!authorIdForCompare && String(meId).trim() === authorIdForCompare;
+    const mine = safeStr(meId).trim().toLowerCase();
+    const theirs = safeStr(authorIdForCompare).trim().toLowerCase();
+    return !!mine && !!theirs && mine === theirs;
   }, [meId, authorIdForCompare]);
 
   const totalVotes = useMemo(() => {
