@@ -69,7 +69,11 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export default function VoteClient() {
+export default function VoteClient({
+  serverUserId = "",
+}: {
+  serverUserId?: string;
+}) {
   const params = useParams();
   const id = safeStr((params as any)?.id);
 
@@ -77,7 +81,7 @@ export default function VoteClient() {
   const [q, setQ] = useState<any>(null);
   const [opts, setOpts] = useState<any[]>([]);
   const [author, setAuthor] = useState<any>(null);
-  const [meId, setMeId] = useState("");
+  const [meId, setMeId] = useState(serverUserId || "");
   const [err, setErr] = useState("");
 
   const [voteCounts, setVoteCounts] = useState<Record<string, number>>({
@@ -214,31 +218,24 @@ export default function VoteClient() {
   }
 
   async function loadMe() {
-    // Most reliable path in browser: session first, then user, with retries.
+    // Prefer server-provided user id first
+    if (serverUserId) return serverUserId;
+
+    // Browser fallback
     for (let i = 0; i < 5; i++) {
       try {
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        const { data: sessionData } = await supabase.auth.getSession();
         const sessionUserId = sessionData?.session?.user?.id
           ? String(sessionData.session.user.id)
           : "";
         if (sessionUserId) return sessionUserId;
-        if (sessionError) {
-          console.warn("loadMe getSession warning:", sessionError);
-        }
-      } catch (e) {
-        console.warn("loadMe getSession failed:", e);
-      }
+      } catch {}
 
       try {
-        const { data: userData, error: userError } = await supabase.auth.getUser();
+        const { data: userData } = await supabase.auth.getUser();
         const directUserId = userData?.user?.id ? String(userData.user.id) : "";
         if (directUserId) return directUserId;
-        if (userError) {
-          console.warn("loadMe getUser warning:", userError);
-        }
-      } catch (e) {
-        console.warn("loadMe getUser failed:", e);
-      }
+      } catch {}
 
       if (i < 4) await sleep(300);
     }
@@ -448,20 +445,6 @@ export default function VoteClient() {
         setReasonsByLabel(reasonsRes);
         setMyVote(myVoteRes.label);
         setMyVoteRowId(myVoteRes.rowId);
-
-        // One more delayed auth hydration pass for browser/session lag.
-        setTimeout(async () => {
-          if (!alive) return;
-          const lateUid = await loadMe();
-          if (!alive) return;
-          if (lateUid && lateUid !== uid) {
-            setMeId(lateUid);
-            const refreshedVote = await loadMyVote(id, lateUid);
-            if (!alive) return;
-            setMyVote(refreshedVote.label);
-            setMyVoteRowId(refreshedVote.rowId);
-          }
-        }, 1200);
       } catch (e: any) {
         console.error(e);
         if (!alive) return;
@@ -495,7 +478,7 @@ export default function VoteClient() {
       alive = false;
       subscription?.unsubscribe?.();
     };
-  }, [id]);
+  }, [id, serverUserId]);
 
   async function refreshCountsAndReasons() {
     const [countsRes, reasonsRes] = await Promise.all([
