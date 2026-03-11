@@ -51,17 +51,24 @@ function hoursLeftFromClosesAt(closesAt?: string) {
 
 function scrollToId(id: string) {
   try {
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById(id)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
   } catch {}
 }
 
 function statusBadge(status?: string, votingExpired?: boolean) {
   const s = safeStr(status).toLowerCase();
-  if (s === "resolved") return { bg: "#ecfdf5", fg: "#059669", label: "resolved" };
+  if (s === "resolved") {
+    return { bg: "#ecfdf5", fg: "#059669", label: "resolved" };
+  }
   if (s === "awaiting_user" || (s === "open" && votingExpired)) {
     return { bg: "#fff4e6", fg: "#b45309", label: "internet decided" };
   }
-  if (s === "open") return { bg: "#e8f3ff", fg: BLUE, label: "open" };
+  if (s === "open") {
+    return { bg: "#e8f3ff", fg: BLUE, label: "open" };
+  }
   return { bg: "#f1f5f9", fg: "#334155", label: s || "unknown" };
 }
 
@@ -205,8 +212,15 @@ export default function VoteClient() {
   }
 
   async function loadMe() {
-    const { data } = await supabase.auth.getUser();
-    return data?.user?.id ? String(data.user.id) : "";
+    const { data: sessionData } = await supabase.auth.getSession();
+    const sessionUserId = sessionData?.session?.user?.id
+      ? String(sessionData.session.user.id)
+      : "";
+
+    if (sessionUserId) return sessionUserId;
+
+    const { data: userData } = await supabase.auth.getUser();
+    return userData?.user?.id ? String(userData.user.id) : "";
   }
 
   async function loadQuestion(qid: string) {
@@ -395,10 +409,26 @@ export default function VoteClient() {
       }
     }
 
+    async function syncSession() {
+      try {
+        const uid = await loadMe();
+        if (!alive) return;
+        setMeId(uid);
+      } catch {}
+    }
+
     if (id) loadAll();
+    syncSession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      syncSession();
+    });
 
     return () => {
       alive = false;
+      subscription?.unsubscribe?.();
     };
   }, [id]);
 
@@ -423,7 +453,10 @@ export default function VoteClient() {
 
       const { error } = await supabase
         .from(FOLLOWS_TABLE)
-        .upsert({ user_id: uid, quandr3_id: quandr3Id }, { onConflict: "user_id,quandr3_id" });
+        .upsert(
+          { user_id: uid, quandr3_id: quandr3Id },
+          { onConflict: "user_id,quandr3_id" }
+        );
 
       if (error) console.warn("[follow] upsert failed:", error);
     } catch (e) {
@@ -941,47 +974,6 @@ export default function VoteClient() {
                   <span className="font-extrabold" style={{ color: NAVY }}>
                     {curiosoName}
                   </span>
-                </div>
-              </div>
-
-              <div className="mt-2 rounded-2xl border bg-slate-50 p-3 text-xs text-slate-600">
-                <div>
-                  meId: <span className="font-mono text-slate-800">{String(meId || "")}</span>
-                </div>
-                <div>
-                  authorIdForCompare:{" "}
-                  <span className="font-mono text-slate-800">
-                    {String(authorIdForCompare || "")}
-                  </span>
-                </div>
-                <div>
-                  q.author_id:{" "}
-                  <span className="font-mono text-slate-800">
-                    {String(q?.author_id || "")}
-                  </span>
-                </div>
-                <div>
-                  q.user_id:{" "}
-                  <span className="font-mono text-slate-800">
-                    {String(q?.user_id || "")}
-                  </span>
-                </div>
-                <div>
-                  author.id:{" "}
-                  <span className="font-mono text-slate-800">
-                    {String(author?.id || "")}
-                  </span>
-                </div>
-                <div>
-                  isAuthor: <span className="font-mono text-slate-800">{String(isAuthor)}</span>
-                </div>
-                <div>
-                  isAwaiting:{" "}
-                  <span className="font-mono text-slate-800">{String(isAwaiting)}</span>
-                </div>
-                <div>
-                  isAwaitingLike:{" "}
-                  <span className="font-mono text-slate-800">{String(isAwaitingLike)}</span>
                 </div>
               </div>
 
