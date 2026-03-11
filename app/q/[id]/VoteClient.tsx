@@ -65,20 +65,6 @@ function scrollToId(id: string) {
   } catch {}
 }
 
-function statusBadge(status?: string, votingExpired?: boolean) {
-  const s = safeStr(status).toLowerCase();
-  if (s === "resolved") {
-    return { bg: "#ecfdf5", fg: "#059669", label: "resolved" };
-  }
-  if (s === "awaiting_user" || (s === "open" && votingExpired)) {
-    return { bg: "#fff4e6", fg: "#b45309", label: "internet decided" };
-  }
-  if (s === "open") {
-    return { bg: "#e8f3ff", fg: BLUE, label: "open" };
-  }
-  return { bg: "#f1f5f9", fg: "#334155", label: s || "unknown" };
-}
-
 export default function VoteClient() {
   const params = useParams();
   const id = safeStr((params as any)?.id);
@@ -132,42 +118,47 @@ export default function VoteClient() {
     return closesAt <= Date.now();
   }, [q?.closes_at]);
 
-  const isOpen = useMemo(() => {
-    const st = safeStr(q?.status).toLowerCase();
-    if (st !== "open") return false;
-    if (votingExpired) return false;
-    return true;
-  }, [q?.status, votingExpired]);
+  const viewerId = useMemo(() => {
+    return safeStr(meId).trim().toLowerCase();
+  }, [meId]);
 
-  const isAwaiting = useMemo(
-    () => safeStr(q?.status).toLowerCase() === "awaiting_user",
-    [q?.status]
-  );
-
-  const isAwaitingLike = useMemo(() => {
-    const st = safeStr(q?.status).toLowerCase();
-    return st === "awaiting_user" || (st === "open" && votingExpired);
-  }, [q?.status, votingExpired]);
-
-  const isResolved = useMemo(
-    () => safeStr(q?.status).toLowerCase() === "resolved",
-    [q?.status]
-  );
-
-  const badge = useMemo(
-    () => statusBadge(q?.status, votingExpired),
-    [q?.status, votingExpired]
-  );
-
-  const authorIdForCompare = useMemo(() => {
+  const ownerId = useMemo(() => {
     return safeStr(q?.author_id || q?.user_id || author?.id).trim().toLowerCase();
   }, [q?.author_id, q?.user_id, author?.id]);
 
   const isAuthor = useMemo(() => {
-    const mine = safeStr(meId).trim().toLowerCase();
-    const theirs = safeStr(authorIdForCompare).trim().toLowerCase();
-    return !!mine && !!theirs && mine === theirs;
-  }, [meId, authorIdForCompare]);
+    return !!viewerId && !!ownerId && viewerId === ownerId;
+  }, [viewerId, ownerId]);
+
+  const hasResolution = useMemo(() => {
+    return !!(
+      q?.resolved_at ||
+      cleanLabel(q?.resolved_choice_label) ||
+      safeStr(q?.resolution_note).trim()
+    );
+  }, [q?.resolved_at, q?.resolved_choice_label, q?.resolution_note]);
+
+  const uiState = useMemo(() => {
+    if (hasResolution) return "resolved";
+    if (votingExpired) return isAuthor ? "owner_needs_resolution" : "awaiting_curioso";
+    return "open";
+  }, [hasResolution, votingExpired, isAuthor]);
+
+  const isOpen = uiState === "open";
+  const isAwaiting = uiState === "awaiting_curioso";
+  const isAwaitingLike =
+    uiState === "awaiting_curioso" || uiState === "owner_needs_resolution";
+  const isResolved = uiState === "resolved";
+
+  const badge = useMemo(() => {
+    if (uiState === "resolved") {
+      return { bg: "#ecfdf5", fg: "#059669", label: "resolved" };
+    }
+    if (uiState === "owner_needs_resolution" || uiState === "awaiting_curioso") {
+      return { bg: "#fff4e6", fg: "#b45309", label: "internet decided" };
+    }
+    return { bg: "#e8f3ff", fg: BLUE, label: "open" };
+  }, [uiState]);
 
   const totalVotes = useMemo(() => {
     return ALLOWED.reduce((sum, L) => sum + Number(voteCounts?.[L] || 0), 0);
@@ -396,7 +387,10 @@ export default function VoteClient() {
         if (
           qRow?.status === "open" &&
           qRow?.closes_at &&
-          new Date(qRow.closes_at).getTime() <= Date.now()
+          new Date(qRow.closes_at).getTime() <= Date.now() &&
+          !qRow?.resolved_at &&
+          !qRow?.resolved_choice_label &&
+          !safeStr(qRow?.resolution_note).trim()
         ) {
           const { error: transitionError } = await supabase
             .from("quandr3s")
@@ -737,8 +731,8 @@ export default function VoteClient() {
       return {
         bg: "#fff5e8",
         border: "#fde6c8",
-        title: "Votes are no longer accepted — this Quandr3 is closed.",
-        body: `${decidedLine} Waiting for the Curioso to decide. Check below for details and the “why” behind each choice.`,
+        title: "Voting is closed. Waiting for the Curioso to decide.",
+        body: `${decidedLine} Check below for details and the “why” behind each choice.`,
         ctaId: "results",
         ctaText: "See results & reasons",
         ctaBg: NAVY,
@@ -818,7 +812,9 @@ export default function VoteClient() {
             <div className="text-xs font-bold text-slate-500">
               {id ? (
                 <>
-                  <span className="font-extrabold" style={{ color: NAVY }}>/q/</span>
+                  <span className="font-extrabold" style={{ color: NAVY }}>
+                    /q/
+                  </span>
                   {String(id).slice(0, 6)}…{String(id).slice(-4)}
                 </>
               ) : null}
@@ -910,6 +906,25 @@ export default function VoteClient() {
                 className="mt-6 rounded-2xl border p-5"
                 style={{ background: banner.bg, borderColor: banner.border }}
               >
+                <div
+                  className="mb-4 rounded-2xl border p-3 text-xs"
+                  style={{
+                    borderColor: "#fecaca",
+                    background: "#fff7f7",
+                    color: NAVY,
+                  }}
+                >
+                  <div className="font-extrabold">DEBUG</div>
+                  <div>viewerId: {viewerId || "null"}</div>
+                  <div>ownerId: {ownerId || "null"}</div>
+                  <div>isAuthor: {String(isAuthor)}</div>
+                  <div>votingExpired: {String(votingExpired)}</div>
+                  <div>hasResolution: {String(hasResolution)}</div>
+                  <div>uiState: {uiState}</div>
+                  <div>status: {q?.status || "null"}</div>
+                  <div>closes_at: {q?.closes_at || "null"}</div>
+                </div>
+
                 <div
                   className="text-sm font-extrabold"
                   style={{ color: isAuthor && isAwaitingLike ? ACTION_TEXT : NAVY }}
@@ -1031,8 +1046,8 @@ export default function VoteClient() {
                 ) : null}
               </div>
 
-              <Link
-  
+              <div className="mt-5 flex flex-wrap items-center gap-3">
+                <Link
                   href={curiosoHref}
                   className="rounded-full border bg-white px-4 py-2 text-sm font-extrabold hover:bg-slate-50"
                   style={{ color: NAVY }}
@@ -1046,7 +1061,7 @@ export default function VoteClient() {
                     {curiosoName}
                   </span>
                 </div>
-              
+              </div>
 
               <div id="vote" className="mt-8 rounded-2xl border p-4">
                 <div className="flex items-center justify-between gap-3">
@@ -1071,7 +1086,8 @@ export default function VoteClient() {
                 {isAuthor && isOpen ? (
                   <div className="mt-3 rounded-2xl border bg-amber-50 p-4 text-sm text-amber-800">
                     You posted this Quandr3. Voting is open, so you can watch responses come in,
-                    but you cannot vote on your own post. Return after voting closes to post your resolution.
+                    but you cannot vote on your own post. Return after voting closes to post your
+                    resolution.
                   </div>
                 ) : null}
 
@@ -1084,7 +1100,8 @@ export default function VoteClient() {
                       color: ACTION_TEXT,
                     }}
                   >
-                    Voting has ended on your Quandr3. This is now waiting on you. Review the results and post your final resolution to close the loop.
+                    Voting has ended on your Quandr3. This is now waiting on you. Review the
+                    results and post your final resolution to close the loop.
                   </div>
                 ) : null}
 
@@ -1164,7 +1181,11 @@ export default function VoteClient() {
                         className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95 disabled:opacity-60"
                         style={{ background: q?.discussion_open ? CORAL : BLUE }}
                       >
-                        {discSaving ? "Saving…" : q?.discussion_open ? "Close Discussion" : "Open Discussion"}
+                        {discSaving
+                          ? "Saving…"
+                          : q?.discussion_open
+                          ? "Close Discussion"
+                          : "Open Discussion"}
                       </button>
                     </div>
 
@@ -1201,8 +1222,8 @@ export default function VoteClient() {
                   <div className="mt-3 text-slate-600">
                     No options found on this Quandr3.
                     <div className="mt-2 text-xs text-slate-500">
-                      (This page reads from <span className="font-mono">quandr3_options.text</span> first,
-                      then falls back to <span className="font-mono">quandr3_options.value</span>.)
+                      (This page reads from <span className="font-mono">quandr3_options.text</span>{" "}
+                      first, then falls back to <span className="font-mono">quandr3_options.value</span>.)
                     </div>
                   </div>
                 ) : (
@@ -1375,8 +1396,8 @@ export default function VoteClient() {
                 </div>
 
                 <div className="mt-3 text-xs text-slate-500">
-                  If votes exist but you can’t see them here, it’s almost always an RLS/select policy on{" "}
-                  <span className="font-mono">quandr3_choices</span>.
+                  If votes exist but you can’t see them here, it’s almost always an RLS/select policy
+                  on <span className="font-mono">quandr3_choices</span>.
                 </div>
               </div>
 
