@@ -375,6 +375,24 @@ export default function VoteClient() {
       try {
         const uid = await loadMe();
         const qRow = await loadQuestion(id);
+
+        if (
+          qRow?.status === "open" &&
+          qRow?.closes_at &&
+          new Date(qRow.closes_at).getTime() <= Date.now()
+        ) {
+          const { error: transitionError } = await supabase
+            .from("quandr3s")
+            .update({ status: "awaiting_user" })
+            .eq("id", id);
+
+          if (!transitionError) {
+            qRow.status = "awaiting_user";
+          } else {
+            console.warn("status transition warning:", transitionError);
+          }
+        }
+
         const authorId = qRow?.author_id || qRow?.user_id || "";
 
         const [optRows, profileRow, countsRes, reasonsRes, myVoteRes] = await Promise.all([
