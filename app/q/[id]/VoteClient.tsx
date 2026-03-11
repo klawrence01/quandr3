@@ -910,7 +910,8 @@ export default function VoteClient() {
                   className="mb-4 rounded-2xl border p-3 text-xs"
                   style={{
                     borderColor: "#fecaca",
-                    background: "#fff7f7",
+                 
+   background: "#fff7f7",
                     color: NAVY,
                   }}
                 >
