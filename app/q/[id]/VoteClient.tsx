@@ -15,7 +15,6 @@ const TEAL = "#00a9a5";
 const CORAL = "#ff6b6b";
 const SOFT_BG = "#f5f7fc";
 
-// Curioso / action-state colors
 const ACTION_BG = "#f3e8ff";
 const ACTION_BORDER = "#c084fc";
 const ACTION_TEXT = "#581c87";
@@ -82,6 +81,8 @@ export default function VoteClient({
   const [opts, setOpts] = useState<any[]>([]);
   const [author, setAuthor] = useState<any>(null);
   const [meId, setMeId] = useState(serverUserId || "");
+  const [meEmail, setMeEmail] = useState("");
+  const [meProfile, setMeProfile] = useState<any>(null);
   const [err, setErr] = useState("");
 
   const [voteCounts, setVoteCounts] = useState<Record<string, number>>({
@@ -126,11 +127,17 @@ export default function VoteClient({
     return closesAt <= Date.now();
   }, [q?.closes_at]);
 
-  const viewerId = useMemo(() => safeStr(meId).trim().toLowerCase(), [meId]);
+  const normalizedStatus = useMemo(() => {
+    return safeStr(q?.status).trim().toLowerCase();
+  }, [q?.status]);
+
+  const viewerId = useMemo(() => {
+    return safeStr(serverUserId || meId).trim().toLowerCase();
+  }, [serverUserId, meId]);
 
   const ownerId = useMemo(() => {
-    return safeStr(q?.author_id || q?.user_id || author?.id).trim().toLowerCase();
-  }, [q?.author_id, q?.user_id, author?.id]);
+    return safeStr(q?.author_id || q?.user_id).trim().toLowerCase();
+  }, [q?.author_id, q?.user_id]);
 
   const isAuthor = useMemo(() => {
     return !!viewerId && !!ownerId && viewerId === ownerId;
@@ -145,13 +152,20 @@ export default function VoteClient({
   }, [q?.resolved_at, q?.resolved_choice_label, q?.resolution_note]);
 
   const uiState = useMemo(() => {
-    if (hasResolution) return "resolved";
-    if (votingExpired) return isAuthor ? "owner_needs_resolution" : "awaiting_curioso";
+    if (hasResolution || normalizedStatus === "resolved") return "resolved";
+
+    if (normalizedStatus === "awaiting_user" || normalizedStatus === "closed") {
+      return isAuthor ? "owner_needs_resolution" : "awaiting_curioso";
+    }
+
+    if (votingExpired) {
+      return isAuthor ? "owner_needs_resolution" : "awaiting_curioso";
+    }
+
     return "open";
-  }, [hasResolution, votingExpired, isAuthor]);
+  }, [hasResolution, normalizedStatus, votingExpired, isAuthor]);
 
   const isOpen = uiState === "open";
-  const isAwaiting = uiState === "awaiting_curioso";
   const isAwaitingLike =
     uiState === "awaiting_curioso" || uiState === "owner_needs_resolution";
   const isResolved = uiState === "resolved";
@@ -179,6 +193,10 @@ export default function VoteClient({
     if (!leaderLabel || !leaderCount || isTie || !isAwaitingLike) return "";
     return leaderLabel;
   }, [leaderLabel, leaderCount, isTie, isAwaitingLike]);
+
+  const finalResolvedLabel = useMemo(() => {
+    return cleanLabel(q?.resolved_choice_label);
+  }, [q?.resolved_choice_label]);
 
   const requiredCategoryMissing = useMemo(
     () => !safeStr(q?.category).trim(),
@@ -217,30 +235,37 @@ export default function VoteClient({
     setShareMsg("");
   }
 
-  async function loadMe() {
-    // Prefer server-provided user id first
-    if (serverUserId) return serverUserId;
-
-    // Browser fallback
+  async function loadCurrentUser() {
     for (let i = 0; i < 5; i++) {
       try {
         const { data: sessionData } = await supabase.auth.getSession();
-        const sessionUserId = sessionData?.session?.user?.id
-          ? String(sessionData.session.user.id)
-          : "";
-        if (sessionUserId) return sessionUserId;
+        const sessionUser = sessionData?.session?.user;
+        if (sessionUser?.id) {
+          return {
+            id: String(sessionUser.id),
+            email: safeStr(sessionUser.email),
+          };
+        }
       } catch {}
 
       try {
         const { data: userData } = await supabase.auth.getUser();
-        const directUserId = userData?.user?.id ? String(userData.user.id) : "";
-        if (directUserId) return directUserId;
+        const user = userData?.user;
+        if (user?.id) {
+          return {
+            id: String(user.id),
+            email: safeStr(user.email),
+          };
+        }
       } catch {}
 
-      if (i < 4) await sleep(300);
+      if (i < 4) await sleep(250);
     }
 
-    return "";
+    return {
+      id: safeStr(serverUserId),
+      email: "",
+    };
   }
 
   async function loadQuestion(qid: string) {
@@ -274,16 +299,16 @@ export default function VoteClient({
       .filter((r: any) => !!cleanLabel(r?.label));
   }
 
-  async function loadAuthorProfile(authorId?: string) {
-    if (!authorId) return null;
+  async function loadProfileById(userId?: string) {
+    if (!userId) return null;
     const { data, error } = await supabase
       .from("profiles")
       .select("id,display_name,username,avatar_url,role,city,state,location")
-      .eq("id", authorId)
+      .eq("id", userId)
       .maybeSingle();
 
     if (error) {
-      console.warn("author profile warning:", error);
+      console.warn("profile warning:", error);
       return null;
     }
 
@@ -353,24 +378,51 @@ export default function VoteClient({
   }
 
   async function loadMyVote(qid: string, userId: string) {
-    if (!userId) return { label: "", rowId: "" };
+    if (!userId) return { label: "", rowId: "", text: "" };
 
     const { data, error } = await supabase
       .from("quandr3_choices")
-      .select("id,label")
+      .select("id,label,text")
       .eq("quandr3_id", qid)
       .eq("voter_id", userId)
       .maybeSingle();
 
     if (error) {
       console.warn("loadMyVote warning:", error);
-      return { label: "", rowId: "" };
+      return { label: "", rowId: "", text: "" };
     }
 
     return {
       label: cleanLabel(data?.label),
       rowId: data?.id ? String(data.id) : "",
+      text: safeStr(data?.text).trim(),
     };
+  }
+
+  async function promoteToAwaitingUserIfNeeded(qRow: any) {
+    const alreadyResolved =
+      !!qRow?.resolved_at ||
+      !!cleanLabel(qRow?.resolved_choice_label) ||
+      !!safeStr(qRow?.resolution_note).trim();
+
+    const expired =
+      !!qRow?.closes_at && new Date(qRow.closes_at).getTime() <= Date.now();
+
+    const currentStatus = safeStr(qRow?.status).trim().toLowerCase();
+
+    if (alreadyResolved) return qRow;
+    if (!expired) return qRow;
+    if (currentStatus === "awaiting_user" || currentStatus === "resolved") return qRow;
+
+    const { error } = await supabase
+      .from("quandr3s")
+      .update({ status: "awaiting_user" })
+      .eq("id", qRow.id);
+
+    if (!error) return { ...qRow, status: "awaiting_user" };
+
+    console.warn("status transition warning:", error);
+    return qRow;
   }
 
   useEffect(() => {
@@ -384,10 +436,21 @@ export default function VoteClient({
     let alive = true;
 
     async function hydrateViewer() {
-      const uid = await loadMe();
-      if (!alive) return "";
-      setMeId(uid || "");
-      return uid || "";
+      const current = await loadCurrentUser();
+      if (!alive) return { id: "", email: "" };
+
+      setMeId(current.id || safeStr(serverUserId));
+      setMeEmail(current.email || "");
+
+      if (current.id) {
+        const myProfileRow = await loadProfileById(current.id);
+        if (!alive) return current;
+        setMeProfile(myProfileRow || null);
+      } else {
+        setMeProfile(null);
+      }
+
+      return current;
     }
 
     async function loadAll() {
@@ -400,37 +463,18 @@ export default function VoteClient({
       setShareMsg("");
 
       try {
-        const qRow = await loadQuestion(id);
-
-        if (
-          qRow?.status === "open" &&
-          qRow?.closes_at &&
-          new Date(qRow.closes_at).getTime() <= Date.now() &&
-          !qRow?.resolved_at &&
-          !qRow?.resolved_choice_label &&
-          !safeStr(qRow?.resolution_note).trim()
-        ) {
-          const { error: transitionError } = await supabase
-            .from("quandr3s")
-            .update({ status: "awaiting_user" })
-            .eq("id", id);
-
-          if (!transitionError) {
-            qRow.status = "awaiting_user";
-          } else {
-            console.warn("status transition warning:", transitionError);
-          }
-        }
+        let qRow = await loadQuestion(id);
+        qRow = await promoteToAwaitingUserIfNeeded(qRow);
 
         const authorId = qRow?.author_id || qRow?.user_id || "";
-        const uid = await hydrateViewer();
+        const current = await hydrateViewer();
 
         const [optRows, profileRow, countsRes, reasonsRes, myVoteRes] = await Promise.all([
           loadOptions(id),
-          loadAuthorProfile(authorId),
+          loadProfileById(authorId),
           loadVoteCounts(id),
           loadReasons(id),
-          loadMyVote(id, uid || ""),
+          loadMyVote(id, current.id || safeStr(serverUserId)),
         ]);
 
         if (!alive) return;
@@ -445,6 +489,7 @@ export default function VoteClient({
         setReasonsByLabel(reasonsRes);
         setMyVote(myVoteRes.label);
         setMyVoteRowId(myVoteRes.rowId);
+        setWhyText(myVoteRes.text || "");
       } catch (e: any) {
         console.error(e);
         if (!alive) return;
@@ -454,24 +499,37 @@ export default function VoteClient({
       }
     }
 
-    async function syncSession() {
-      try {
-        const uid = await loadMe();
-        if (!alive) return;
-        setMeId(uid || "");
-      } catch {}
-    }
-
     if (id) loadAll();
-    syncSession();
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!alive) return;
-      const uid = session?.user?.id ? String(session.user.id) : await loadMe();
-      if (!alive) return;
-      setMeId(uid || "");
+
+      const uid = session?.user?.id ? String(session.user.id) : "";
+      const email = session?.user?.email ? String(session.user.email) : "";
+
+      setMeId(uid || safeStr(serverUserId));
+      setMeEmail(email);
+
+      if (uid) {
+        const myProfileRow = await loadProfileById(uid);
+        if (!alive) return;
+        setMeProfile(myProfileRow || null);
+
+        if (id) {
+          const myVoteRes = await loadMyVote(id, uid);
+          if (!alive) return;
+          setMyVote(myVoteRes.label);
+          setMyVoteRowId(myVoteRes.rowId);
+          setWhyText(myVoteRes.text || "");
+        }
+      } else {
+        setMeProfile(null);
+        setMyVote("");
+        setMyVoteRowId("");
+        setWhyText("");
+      }
     });
 
     return () => {
@@ -493,10 +551,23 @@ export default function VoteClient({
     setReasonsByLabel(reasonsRes);
   }
 
+  async function refreshQuestion() {
+    try {
+      let fresh = await loadQuestion(id);
+      fresh = await promoteToAwaitingUserIfNeeded(fresh);
+      setQ(fresh);
+    } catch (e) {
+      console.warn("refreshQuestion warning:", e);
+    }
+  }
+
   async function followThisDilemmaIfLoggedIn(quandr3Id: string) {
     try {
       let uid = meId;
-      if (!uid) uid = await loadMe();
+      if (!uid) {
+        const current = await loadCurrentUser();
+        uid = current.id;
+      }
       if (!uid) return;
 
       const { error } = await supabase
@@ -509,6 +580,64 @@ export default function VoteClient({
       if (error) console.warn("[follow] upsert failed:", error);
     } catch (e) {
       console.warn("[follow] could not follow dilemma", e);
+    }
+  }
+
+  async function handleResolve(choiceLabel: string) {
+    clearMessages();
+
+    const finalLabel = cleanLabel(choiceLabel);
+    if (!id || !finalLabel) return;
+
+    if (!isAuthor) {
+      setVotingErr("Only the Curioso can post the final resolution.");
+      return;
+    }
+
+    if (!isAwaitingLike) {
+      setVotingErr("This Quandr3 is not ready for final resolution yet.");
+      return;
+    }
+
+    try {
+      const now = new Date().toISOString();
+
+      const fallbackNote =
+        finalLabel === "C"
+          ? "My daughter really wants a pet, but a 30-day trial lets us test responsibility, routines, and follow-through before making a full commitment."
+          : finalLabel === "A"
+          ? "We’re going forward now, but with a careful plan so this decision is thoughtful and sustainable."
+          : finalLabel === "B"
+          ? "This is not the right season yet. We’re choosing patience over pressure and will revisit it later."
+          : finalLabel === "D"
+          ? "We’re taking the smaller first step so we can learn responsibly before making the bigger commitment."
+          : "After hearing the perspectives and reviewing the vote, the Curioso makes the final call here.";
+
+      const { error } = await supabase
+        .from("quandr3s")
+        .update({
+          status: "resolved",
+          resolved_choice_label: finalLabel,
+          resolved_at: now,
+          resolution_note: safeStr(q?.resolution_note).trim() || fallbackNote,
+        })
+        .eq("id", id);
+
+      if (error) throw error;
+
+      setQ((prev: any) => ({
+        ...(prev || {}),
+        status: "resolved",
+        resolved_choice_label: finalLabel,
+        resolved_at: now,
+        resolution_note: safeStr(prev?.resolution_note).trim() || fallbackNote,
+      }));
+
+      setVotingMsg(`Final resolution posted: ${finalLabel}`);
+      setTimeout(() => scrollToId("final"), 150);
+    } catch (e: any) {
+      console.error("Resolve error:", e);
+      setVotingErr(e?.message || "Failed to post final resolution.");
     }
   }
 
@@ -535,7 +664,8 @@ export default function VoteClient({
 
     setCasting(true);
     try {
-      const uid = await loadMe();
+      const current = await loadCurrentUser();
+      const uid = current.id;
       if (!uid) {
         setVotingErr("You must be signed in to vote.");
         return;
@@ -545,6 +675,7 @@ export default function VoteClient({
       if (existing.rowId) {
         setMyVote(existing.label);
         setMyVoteRowId(existing.rowId);
+        setWhyText(existing.text || "");
         setVotingErr(`You already voted${existing.label ? ` (${existing.label})` : ""}.`);
         return;
       }
@@ -569,6 +700,7 @@ export default function VoteClient({
 
       await followThisDilemmaIfLoggedIn(id);
       await refreshCountsAndReasons();
+      await refreshQuestion();
 
       setTimeout(() => scrollToId("whybox"), 150);
     } catch (e: any) {
@@ -595,7 +727,8 @@ export default function VoteClient({
 
     setWhySaving(true);
     try {
-      const uid = await loadMe();
+      const current = await loadCurrentUser();
+      const uid = current.id;
       if (!uid) {
         setVotingErr("You must be signed in.");
         return;
@@ -610,7 +743,6 @@ export default function VoteClient({
       if (error) throw error;
 
       setVotingMsg("Reason saved. Thank you — the “why” is what creates clarity.");
-      setWhyText("");
       await refreshCountsAndReasons();
     } catch (e: any) {
       console.error(e);
@@ -704,7 +836,7 @@ export default function VoteClient({
       return {
         bg: "#eaf6ff",
         border: "#cfe8ff",
-        title: "Help someone decide.",
+        title: "Help someone Decide-TEST.",
         body: "Pick A–D. If you can, add a quick reason — that’s where the clarity comes from.",
         ctaId: "vote",
         ctaText: "Jump to voting",
@@ -734,18 +866,11 @@ export default function VoteClient({
     }
 
     if (!isAuthor && isAwaitingLike) {
-      const decidedLine =
-        leaderLabel && !isTie
-          ? `Winner: ${leaderLabel}. The internet has decided (${leaderCount} vote${leaderCount === 1 ? "" : "s"}).`
-          : leaderLabel && isTie
-          ? "It’s a tie — the internet is split right now."
-          : "Voting is closed.";
-
       return {
         bg: "#fff5e8",
         border: "#fde6c8",
-        title: "Voting is closed. Waiting for the Curioso to decide.",
-        body: `${decidedLine} Check below for details and the “why” behind each choice.`,
+        title: "Votes are no longer accepted — this Quandr3 is closed.",
+        body: "Voting is closed. Waiting for the Curioso to decide. Check below for details and the “why” behind each choice.",
         ctaId: "results",
         ctaText: "See results & reasons",
         ctaBg: NAVY,
@@ -895,12 +1020,35 @@ export default function VoteClient({
                 className="mt-3 text-3xl font-extrabold leading-tight md:text-4xl"
                 style={{ color: NAVY }}
               >
-                {q.title}
+                {q.title} — TEST
               </h1>
+
+<div style={{ fontSize: 12, color: "red", marginTop: 10 }}>
+  viewerId: {viewerId} <br />
+  ownerId: {ownerId} <br />
+  isAuthor: {String(isAuthor)}
+</div>
 
               {(q.prompt || q.context) ? (
                 <p className="mt-3 text-base text-slate-700">{q.prompt || q.context}</p>
               ) : null}
+
+              <div
+                className="mt-4 rounded-2xl border p-3 text-xs font-semibold"
+                style={{
+                  borderColor: "#bfdbfe",
+                  background: "#eff6ff",
+                  color: "#1e3a8a",
+                }}
+              >
+                viewerId: <span className="font-mono">{viewerId || "none"}</span>
+                {" | "}
+                ownerId: <span className="font-mono">{ownerId || "none"}</span>
+                {" | "}
+                isAuthor: <span className="font-mono">{String(isAuthor)}</span>
+                {" | "}
+                status: <span className="font-mono">{normalizedStatus || "none"}</span>
+              </div>
 
               {requiredCategoryMissing ? (
                 <div
@@ -914,25 +1062,6 @@ export default function VoteClient({
                   This Quandr3 is missing a category. Category is mandatory for resolved posts.
                 </div>
               ) : null}
-
-              <div
-                className="mb-4 mt-4 rounded-2xl border p-3 text-xs"
-                style={{
-                  borderColor: "#fecaca",
-                  background: "#fff7f7",
-                  color: NAVY,
-                }}
-              >
-                <div className="font-extrabold">DEBUG</div>
-                <div>viewerId: {viewerId || "null"}</div>
-                <div>ownerId: {ownerId || "null"}</div>
-                <div>isAuthor: {String(isAuthor)}</div>
-                <div>votingExpired: {String(votingExpired)}</div>
-                <div>hasResolution: {String(hasResolution)}</div>
-                <div>uiState: {uiState}</div>
-                <div>status: {q?.status || "null"}</div>
-                <div>closes_at: {q?.closes_at || "null"}</div>
-              </div>
 
               <div
                 className="mt-6 rounded-2xl border p-5"
@@ -984,17 +1113,7 @@ export default function VoteClient({
                     </button>
                   ) : null}
 
-                  {(isResolved || (!isAuthor && isAwaitingLike)) && id ? (
-                    <Link
-                      href={`/q/${id}/results`}
-                      className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
-                      style={{ background: CORAL }}
-                    >
-                      View Results
-                    </Link>
-                  ) : null}
-
-                  {(isResolved || isAwaitingLike) ? (
+                  {(isResolved || (!isAuthor && isAwaitingLike)) ? (
                     <button
                       type="button"
                       onClick={handleShare}
@@ -1412,7 +1531,92 @@ export default function VoteClient({
                   If votes exist but you can’t see them here, it’s almost always an RLS/select policy
                   on <span className="font-mono">quandr3_choices</span>.
                 </div>
+
+                {isAuthor && isAwaitingLike ? (
+                  <div className="mt-4 rounded-2xl border bg-white p-4">
+                    <div className="text-sm font-extrabold" style={{ color: NAVY }}>
+                      Curioso: select final decision
+                    </div>
+
+                    <div className="mt-1 text-xs text-slate-500">
+                      This posts the final resolution and closes the loop.
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {ALLOWED.map((label) => (
+                        <button
+                          key={`resolve-${label}`}
+                          type="button"
+                          onClick={() => handleResolve(label)}
+                          className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
+                          style={{ background: ACTION_BUTTON }}
+                        >
+                          Resolve as {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
+
+              {isAwaitingLike ? (
+                <div
+                  id="final"
+                  className="mt-10 rounded-2xl border p-5"
+                  style={{ borderColor: CORAL, background: "#fff7f7" }}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-sm font-extrabold" style={{ color: NAVY }}>
+                      Internet decided
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className="rounded-full px-3 py-1 text-[11px] font-extrabold"
+                        style={{ background: CORAL, color: "white" }}
+                      >
+                        INTERNET DECIDED
+                      </span>
+
+                      {id ? (
+                        <Link
+                          href={`/q/${id}/results`}
+                          className="rounded-full px-3 py-1 text-[11px] font-extrabold text-white hover:opacity-95"
+                          style={{ background: NAVY }}
+                        >
+                          Open Results Page
+                        </Link>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 text-sm text-slate-700">
+                    {closedWinnerLabel ? (
+                      <>
+                        Top choice so far:{" "}
+                        <span className="font-extrabold" style={{ color: CORAL }}>
+                          {closedWinnerLabel}
+                        </span>
+                      </>
+                    ) : isTie ? (
+                      "The internet is currently split. A final winner has not emerged."
+                    ) : (
+                      "Voting has ended. Waiting for the Curioso to post the final resolution."
+                    )}
+                  </div>
+
+                  <div className="mt-3 rounded-2xl border bg-white p-4">
+                    <div className="text-xs font-extrabold tracking-[0.18em] text-slate-500">
+                      STATUS
+                    </div>
+
+                    <div className="mt-2 text-sm leading-6 text-slate-700">
+                      The community has weighed in. The Curioso still needs to post the final
+                      decision to complete the loop.
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               {isResolved ? (
                 <div
@@ -1446,36 +1650,58 @@ export default function VoteClient({
                   </div>
 
                   <div className="mt-3 text-sm text-slate-700">
-                    {q?.resolved_choice_label ? (
+                    {finalResolvedLabel ? (
                       <>
                         Final choice:{" "}
                         <span className="font-extrabold" style={{ color: CORAL }}>
-                          {q.resolved_choice_label}
+                          {finalResolvedLabel}
                         </span>
                       </>
                     ) : (
-                      "A final choice has been posted."
+                      "A final choice will appear here."
                     )}
                   </div>
 
-                  {q?.resolution_note ? (
-                    <div className="mt-2 text-sm text-slate-700">{q.resolution_note}</div>
-                  ) : null}
+                  <div className="mt-3 rounded-2xl border bg-white p-4">
+                    <div className="text-xs font-extrabold tracking-[0.18em] text-slate-500">
+                      RESOLUTION NOTE
+                    </div>
 
-                  {q?.resolved_at ? (
-                    <div className="mt-2 text-xs text-slate-500">Resolved: {fmt(q.resolved_at)}</div>
-                  ) : null}
+                    <div className="mt-2 text-sm leading-6 text-slate-700">
+                      {q?.resolution_note ? (
+                        q.resolution_note
+                      ) : finalResolvedLabel === "C" ? (
+                        "My daughter really wants a pet, but a 30-day trial lets us test responsibility, routines, and follow-through before making a full commitment."
+                      ) : finalResolvedLabel === "A" ? (
+                        "We’re going forward now, but with a careful plan so this decision is thoughtful and sustainable."
+                      ) : finalResolvedLabel === "B" ? (
+                        "This is not the right season yet. We’re choosing patience over pressure and will revisit it later."
+                      ) : finalResolvedLabel === "D" ? (
+                        "We’re taking the smaller first step so we can learn responsibly before making the bigger commitment."
+                      ) : (
+                        "After hearing the perspectives and reviewing the vote, the Curioso makes the final call here."
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 rounded-2xl border bg-white p-4">
+                    <div className="text-xs font-extrabold tracking-[0.18em] text-slate-500">
+                      OUTCOME
+                    </div>
+
+                    <div className="mt-2 text-sm leading-6 text-slate-700">
+                      {finalResolvedLabel ? (
+                        "Resolution posted and loop completed."
+                      ) : (
+                        "Outcome: The internet weighs in. The Curioso decides."
+                      )}
+                    </div>
+                  </div>
                 </div>
               ) : null}
             </>
           )}
         </section>
-
-        <div className="mt-6 text-center text-xs text-slate-500">
-          Quandr3: <span className="font-semibold">Ask.</span>{" "}
-          <span className="font-semibold">Share.</span>{" "}
-          <span className="font-semibold">Decide.</span>
-        </div>
       </div>
     </main>
   );

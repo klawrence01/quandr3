@@ -19,7 +19,7 @@ const TEAL = "#00a9a5";
 const CORAL = "#ff6b6b";
 const SOFT_BG = "#f5f7fc";
 
-const LETTER = ["A", "B", "C", "D", "E", "F"];
+const ALLOWED = ["A", "B", "C", "D"];
 
 const CATEGORY_HERO: Record<string, string> = {
   money: "/quandr3/placeholders/money.jpg",
@@ -30,12 +30,14 @@ const CATEGORY_HERO: Record<string, string> = {
   tech: "/quandr3/placeholders/tech.jpg",
   style: "/quandr3/placeholders/style.jpg",
   lifestyle: "/quandr3/placeholders/lifestyle.jpg",
+  faith: "/quandr3/placeholders/default.jpg",
+  school: "/quandr3/placeholders/default.jpg",
   "real estate": "/quandr3/placeholders/realestate.jpg",
   realestate: "/quandr3/placeholders/realestate.jpg",
 };
 
 function heroForCategory(category?: string) {
-  const key = (category || "").toLowerCase().trim();
+  const key = safeStr(category).toLowerCase();
   return CATEGORY_HERO[key] || "/quandr3/placeholders/default.jpg";
 }
 
@@ -44,31 +46,34 @@ function fmt(ts?: string) {
   try {
     return new Date(ts).toLocaleString();
   } catch {
-    return "";
+    return ts || "";
   }
 }
 
 function safeStr(v: any) {
   if (v === null || v === undefined) return "";
-  if (typeof v === "string") return v.trim();
-  return String(v);
+  return String(v).trim();
+}
+
+function cleanLabel(x?: any) {
+  const s = safeStr(x).toUpperCase();
+  return ALLOWED.includes(s) ? s : "";
 }
 
 function cleanReason(s?: string) {
-  if (!s) return "";
-  const t = String(s).trim();
+  const t = safeStr(s);
   if (!t) return "";
   if (t.toUpperCase() === "UPDATED TEXT HERE") return "";
   return t;
 }
 
 function getCreatorId(qRow: any) {
-  return qRow?.author_id || qRow?.user_id || qRow?.creator_id || qRow?.created_by || null;
+  return qRow?.author_id || qRow?.user_id || null;
 }
 
 function creatorLabel(qRow: any, profile: any) {
   if (profile?.display_name) return profile.display_name;
-  if (qRow?.creator_name) return qRow.creator_name;
+  if (profile?.username) return profile.username;
   const cid = getCreatorId(qRow);
   if (cid) return `Curioso ${String(cid).slice(0, 6)}`;
   return "Curioso";
@@ -76,8 +81,9 @@ function creatorLabel(qRow: any, profile: any) {
 
 function statusLabel(kind: "open" | "awaiting_user" | "resolved") {
   if (kind === "open") return { bg: "rgba(30,99,243,0.12)", fg: BLUE, label: "Open" };
-  if (kind === "awaiting_user")
-    return { bg: "rgba(255,107,107,0.12)", fg: CORAL, label: "Closed (Awaiting Curioso)" };
+  if (kind === "awaiting_user") {
+    return { bg: "rgba(255,107,107,0.12)", fg: CORAL, label: "Internet Decided" };
+  }
   return { bg: "rgba(0,169,165,0.12)", fg: TEAL, label: "Resolved" };
 }
 
@@ -96,39 +102,38 @@ export default function ResultsPage() {
 
   const [q, setQ] = useState<any>(null);
   const [options, setOptions] = useState<any[]>([]);
-  const [votes, setVotes] = useState<any[]>([]);
-  const [resolution, setResolution] = useState<any>(null);
+  const [choices, setChoices] = useState<any[]>([]);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  const [reasonsByChoiceIndex, setReasonsByChoiceIndex] = useState<Record<number, string[]>>({});
   const [showAllReasons, setShowAllReasons] = useState(false);
 
-  const totalVotes = votes.length;
-
-  const zeroBasedVotes = useMemo(() => {
-    if (!votes?.length) return false;
-    const mins = Math.min(...votes.map((v: any) => Number(v.choice_index ?? 9999)));
-    return mins === 0;
-  }, [votes]);
-
-  function normChoiceIndex(vChoice: any) {
-    const n = Number(vChoice);
-    if (Number.isNaN(n)) return null;
-    return zeroBasedVotes ? n + 1 : n;
-  }
-
   async function refreshAll(qid: string) {
-    const { data: qRow } = await supabase.from("quandr3s").select("*").eq("id", qid).single();
+    const { data: qRow, error: qErr } = await supabase
+      .from("quandr3s")
+      .select(
+        "id,title,prompt,context,category,status,created_at,closes_at,author_id,user_id,city,state,resolved_choice_label,resolved_at,resolution_note,media_url"
+      )
+      .eq("id", qid)
+      .single();
+
+    if (qErr) {
+      setQ(null);
+      setOptions([]);
+      setChoices([]);
+      setProfile(null);
+      return;
+    }
+
     setQ(qRow ?? null);
 
     const creatorId = getCreatorId(qRow);
     if (creatorId) {
       const { data: p } = await supabase
         .from("profiles")
-        .select("display_name, avatar_url")
+        .select("display_name, username, avatar_url")
         .eq("id", creatorId)
-        .single();
+        .maybeSingle();
       setProfile(p ?? null);
     } else {
       setProfile(null);
@@ -141,39 +146,15 @@ export default function ResultsPage() {
       .order("order", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
 
-    if (optErr) setOptions([]);
-    else setOptions(optRows ?? []);
+    setOptions(optErr ? [] : optRows ?? []);
 
-    const { data: vRows } = await supabase.from("quandr3_votes").select("*").eq("quandr3_id", qid);
-    setVotes(vRows ?? []);
-
-    const { data: rr, error: rrErr } = await supabase
-      .from("vote_reasons")
-      .select("*")
+    const { data: cRows, error: cErr } = await supabase
+      .from("quandr3_choices")
+      .select("id,quandr3_id,voter_id,label,text,created_at")
       .eq("quandr3_id", qid)
       .order("created_at", { ascending: true });
 
-    if (rrErr) {
-      setReasonsByChoiceIndex({});
-    } else {
-      const grouped: Record<number, string[]> = {};
-      (rr ?? []).forEach((r: any) => {
-        const idxRaw = r.choice_index ?? r.choice ?? r.picked_index ?? r.option_index;
-        const idx = normChoiceIndex(idxRaw);
-        const txt = cleanReason(r.reason ?? r.text ?? r.value ?? r.note);
-        if (!idx || !txt) return;
-        grouped[idx] = grouped[idx] || [];
-        grouped[idx].push(txt);
-      });
-      setReasonsByChoiceIndex(grouped);
-    }
-
-    const { data: r } = await supabase
-      .from("quandr3_resolutions")
-      .select("*")
-      .eq("quandr3_id", qid)
-      .maybeSingle();
-    setResolution(r ?? null);
+    setChoices(cErr ? [] : cRows ?? []);
   }
 
   useEffect(() => {
@@ -186,72 +167,123 @@ export default function ResultsPage() {
   }, [id]);
 
   const votingExpired = useMemo(() => {
-    if (!q) return false;
-    const duration = Number(q.voting_duration_hours || 0);
-    const createdAt = q.created_at;
+    if (!q?.closes_at) return false;
+    const closesAt = new Date(q.closes_at).getTime();
+    if (Number.isNaN(closesAt)) return false;
+    return closesAt <= Date.now();
+  }, [q?.closes_at]);
 
-    const timeExpired =
-      !!createdAt && !!duration
-        ? Date.now() > new Date(createdAt).getTime() + duration * 3600 * 1000
-        : false;
-
-    const voteCapReached = q.voting_max_votes ? totalVotes >= Number(q.voting_max_votes) : false;
-
-    return timeExpired || voteCapReached;
-  }, [q, totalVotes]);
+  const hasResolution = useMemo(() => {
+    return !!(
+      q?.resolved_at ||
+      cleanLabel(q?.resolved_choice_label) ||
+      safeStr(q?.resolution_note)
+    );
+  }, [q?.resolved_at, q?.resolved_choice_label, q?.resolution_note]);
 
   const status = useMemo(() => {
-    const s = String(q?.status || "").toLowerCase();
-    if (s === "open" || s === "awaiting_user" || s === "resolved") return s;
-    if (resolution) return "resolved";
-    if (votingExpired) return "awaiting_user";
+    const s = safeStr(q?.status).toLowerCase();
+    if (hasResolution || s === "resolved") return "resolved";
+    if (s === "awaiting_user" || s === "closed" || votingExpired) return "awaiting_user";
     return "open";
-  }, [q?.status, resolution, votingExpired]);
+  }, [q?.status, hasResolution, votingExpired]);
 
   const statusPill = useMemo(() => statusLabel(status as any), [status]);
 
   const orderedOptions = useMemo(() => {
-    const arr = [...(options ?? [])];
-    return arr.map((o: any, i: number) => ({ ...o, _ord: i + 1 }));
+    const arr = [...(options ?? [])]
+      .map((o: any, i: number) => ({
+        ...o,
+        label: cleanLabel(o?.label),
+        _ord: typeof o?.order === "number" ? o.order : i + 1,
+      }))
+      .filter((o: any) => !!o.label);
+
+    arr.sort((a: any, b: any) => {
+      if (a._ord !== b._ord) return a._ord - b._ord;
+      return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+    });
+
+    return arr;
   }, [options]);
 
   const voteCounts = useMemo(() => {
-    const map: Record<number, number> = {};
-    votes.forEach((v: any) => {
-      const idx = normChoiceIndex(v.choice_index);
-      if (!idx) return;
-      map[idx] = (map[idx] || 0) + 1;
+    const map: Record<string, number> = { A: 0, B: 0, C: 0, D: 0 };
+    (choices || []).forEach((v: any) => {
+      const L = cleanLabel(v?.label);
+      if (!L) return;
+      map[L] = (map[L] || 0) + 1;
     });
     return map;
-  }, [votes, zeroBasedVotes]);
+  }, [choices]);
 
-  const crowdWinnerOrd = useMemo(() => {
-    let max = -1;
-    let win: any = null;
-    Object.entries(voteCounts).forEach(([k, v]: any) => {
-      if (v > max) {
-        max = v;
-        win = Number(k);
-      }
-    });
-    return win;
+  const totalVotes = useMemo(() => {
+    return ALLOWED.reduce((sum, L) => sum + Number(voteCounts?.[L] || 0), 0);
   }, [voteCounts]);
 
-  const curiosoChoiceOpt = useMemo(() => {
-    if (!resolution?.option_id) return null;
-    return orderedOptions.find((o: any) => o.id === resolution.option_id) ?? null;
-  }, [resolution, orderedOptions]);
+  const reasonsByLabel = useMemo(() => {
+    const grouped: Record<string, string[]> = { A: [], B: [], C: [], D: [] };
+    (choices || []).forEach((r: any) => {
+      const L = cleanLabel(r?.label);
+      const txt = cleanReason(r?.text);
+      if (!L || !txt) return;
+      grouped[L] = grouped[L] || [];
+      grouped[L].push(txt);
+    });
+    return grouped;
+  }, [choices]);
+
+  const crowdResult = useMemo(() => {
+    const entries = ALLOWED.map((L) => ({ label: L, votes: Number(voteCounts?.[L] || 0) })).sort(
+      (a, b) => b.votes - a.votes
+    );
+
+    const top = entries[0];
+    const second = entries[1];
+
+    if (!top || top.votes <= 0) {
+      return { label: "", isTie: false, tied: [] as string[] };
+    }
+
+    if (top.votes === Number(second?.votes || 0)) {
+      const tied = entries.filter((x) => x.votes === top.votes).map((x) => x.label);
+      return { label: "", isTie: true, tied };
+    }
+
+    return { label: top.label, isTie: false, tied: [] as string[] };
+  }, [voteCounts]);
+
+  const crowdWinnerLabel = useMemo(() => crowdResult.label, [crowdResult]);
 
   const crowdWinnerOpt = useMemo(() => {
-    if (!crowdWinnerOrd) return null;
-    return orderedOptions.find((o: any) => o._ord === crowdWinnerOrd) ?? null;
-  }, [crowdWinnerOrd, orderedOptions]);
+    if (!crowdWinnerLabel) return null;
+    return orderedOptions.find((o: any) => cleanLabel(o?.label) === crowdWinnerLabel) ?? null;
+  }, [orderedOptions, crowdWinnerLabel]);
+
+  const curiosoFinalLabel = useMemo(() => cleanLabel(q?.resolved_choice_label), [q?.resolved_choice_label]);
+
+  const curiosoFinalOpt = useMemo(() => {
+    if (!curiosoFinalLabel) return null;
+    return orderedOptions.find((o: any) => cleanLabel(o?.label) === curiosoFinalLabel) ?? null;
+  }, [orderedOptions, curiosoFinalLabel]);
 
   const heroImg = useMemo(() => {
     return q?.media_url ? q.media_url : heroForCategory(q?.category);
   }, [q]);
 
   const creatorName = useMemo(() => creatorLabel(q, profile), [q, profile]);
+
+  function optionDisplayText(opt: any) {
+    return (
+      safeStr(opt?.text || opt?.value || opt?.label || opt?.option_text) ||
+      `Option ${cleanLabel(opt?.label) || "?"}`
+    );
+  }
+
+  function percentageFor(label: string) {
+    if (!totalVotes) return 0;
+    return Math.round((Number(voteCounts?.[label] || 0) / totalVotes) * 100);
+  }
 
   if (loading) {
     return (
@@ -277,7 +309,7 @@ export default function ResultsPage() {
               Not found
             </div>
             <div className="mt-2 text-sm text-slate-600">
-              That Quandr3 ID doesn’t exist (or RLS is blocking it).
+              That Quandr3 ID doesn’t exist, or the page could not load it.
             </div>
             <div className="mt-4">
               <Link
@@ -409,7 +441,6 @@ export default function ResultsPage() {
       <div className="mx-auto max-w-6xl px-4 py-8">
         <section className="overflow-hidden rounded-[28px] border bg-white shadow-sm">
           <div className="relative h-[220px] w-full">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={heroImg} alt="" className="h-full w-full object-cover" />
             <div className="absolute inset-0 bg-gradient-to-r from-[#0b2343cc] via-[#0b234388] to-[#0b234320]" />
 
@@ -417,7 +448,10 @@ export default function ResultsPage() {
               <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
                 {safeStr(q.category || "Category")}
               </span>
-              <span className="rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: statusPill.bg, color: statusPill.fg }}>
+              <span
+                className="rounded-full px-3 py-1 text-xs font-extrabold"
+                style={{ background: statusPill.bg, color: statusPill.fg }}
+              >
                 {statusPill.label}
               </span>
             </div>
@@ -439,8 +473,10 @@ export default function ResultsPage() {
                 {safeStr(q.title) || "Untitled Quandr3"}
               </h1>
 
-              {safeStr(q.context) ? (
-                <p className="mt-2 max-w-3xl text-sm text-white/90">{safeStr(q.context)}</p>
+              {safeStr(q.prompt || q.context) ? (
+                <p className="mt-2 max-w-3xl text-sm text-white/90">
+                  {safeStr(q.prompt || q.context)}
+                </p>
               ) : (
                 <p className="mt-2 max-w-3xl text-sm text-white/80">No context provided.</p>
               )}
@@ -462,13 +498,19 @@ export default function ResultsPage() {
                   Total votes: {totalVotes}
                 </span>
 
-                {crowdWinnerOpt ? (
+                {crowdResult.isTie ? (
                   <span
                     className="rounded-full px-3 py-1 text-xs font-extrabold"
                     style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
                   >
-                    Crowd winner: {LETTER[(crowdWinnerOpt._ord || 1) - 1] ?? "?"} —{" "}
-                    {safeStr(crowdWinnerOpt.text || crowdWinnerOpt.value || crowdWinnerOpt.label || "—")}
+                    Crowd tied: {crowdResult.tied.join(" / ")}
+                  </span>
+                ) : crowdWinnerOpt ? (
+                  <span
+                    className="rounded-full px-3 py-1 text-xs font-extrabold"
+                    style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
+                  >
+                    Crowd winner: {cleanLabel(crowdWinnerOpt.label)} — {optionDisplayText(crowdWinnerOpt)}
                   </span>
                 ) : (
                   <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
@@ -476,17 +518,16 @@ export default function ResultsPage() {
                   </span>
                 )}
 
-                {status === "resolved" && curiosoChoiceOpt ? (
+                {status === "resolved" && curiosoFinalOpt ? (
                   <span
                     className="rounded-full px-3 py-1 text-xs font-extrabold"
                     style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
                   >
-                    Curioso chose: {LETTER[(curiosoChoiceOpt._ord || 1) - 1] ?? "?"} —{" "}
-                    {safeStr(curiosoChoiceOpt.text || curiosoChoiceOpt.value || curiosoChoiceOpt.label || "—")}
+                    Curioso chose: {cleanLabel(curiosoFinalOpt.label)} — {optionDisplayText(curiosoFinalOpt)}
                   </span>
                 ) : null}
 
-                {resolution?.note ? (
+                {safeStr(q?.resolution_note) ? (
                   <span
                     className="rounded-full px-3 py-1 text-xs font-extrabold"
                     style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
@@ -527,21 +568,18 @@ export default function ResultsPage() {
           ) : (
             <div className="mt-6 grid gap-4 md:grid-cols-2">
               {orderedOptions.map((opt: any, i: number) => {
-                const ord = Number(opt._ord || i + 1);
-                const count = voteCounts[ord] || 0;
+                const label = cleanLabel(opt?.label);
+                const count = Number(voteCounts[label] || 0);
                 const pct = totalVotes ? Math.round((count / totalVotes) * 100) : 0;
 
-                const isCrowdWinner = crowdWinnerOrd === ord;
-                const isCuriosoChoice = !!resolution?.option_id && resolution.option_id === opt.id;
-                const isHighlighted = isCrowdWinner || isCuriosoChoice;
-                const isBoth = isCrowdWinner && isCuriosoChoice;
+                const isCrowdWinner = !crowdResult.isTie && crowdWinnerLabel === label;
+                const isTiedWinner = crowdResult.isTie && crowdResult.tied.includes(label);
+                const isCuriosoChoice = !!curiosoFinalLabel && curiosoFinalLabel === label;
+                const isHighlighted = isCrowdWinner || isCuriosoChoice || isTiedWinner;
+                const isBoth = (isCrowdWinner || isTiedWinner) && isCuriosoChoice;
 
-                const reasons = reasonsByChoiceIndex[ord] ?? [];
+                const reasons = reasonsByLabel[label] ?? [];
                 const reasonsToShow = showAllReasons ? reasons.slice(0, 20) : reasons.slice(0, 5);
-
-                const label =
-                  safeStr(opt.text || opt.value || opt.label || opt.option_text) ||
-                  `Option ${LETTER[ord - 1] ?? ord}`;
 
                 return (
                   <div
@@ -560,10 +598,10 @@ export default function ResultsPage() {
                             className="flex h-9 w-9 items-center justify-center rounded-2xl text-sm font-extrabold text-white"
                             style={{ background: isHighlighted ? CORAL : NAVY }}
                           >
-                            {LETTER[ord - 1] ?? ord}
+                            {label || "?"}
                           </span>
                           <div className="text-lg font-extrabold" style={{ color: NAVY }}>
-                            {label}
+                            {optionDisplayText(opt)}
                           </div>
                         </div>
 
@@ -578,6 +616,15 @@ export default function ResultsPage() {
                               style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
                             >
                               Crowd winner
+                            </span>
+                          ) : null}
+
+                          {isTiedWinner ? (
+                            <span
+                              className="rounded-full px-3 py-1 text-xs font-extrabold"
+                              style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
+                            >
+                              Crowd tied
                             </span>
                           ) : null}
 
@@ -648,7 +695,7 @@ export default function ResultsPage() {
           )}
         </section>
 
-        {resolution ? (
+        {status === "resolved" ? (
           <section
             className="mt-7 rounded-[28px] border p-6 shadow-sm"
             style={{
@@ -663,14 +710,13 @@ export default function ResultsPage() {
               Final word from the Curioso
             </div>
 
-            {curiosoChoiceOpt ? (
+            {curiosoFinalOpt ? (
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <span
                   className="rounded-full px-3 py-1 text-xs font-extrabold"
                   style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
                 >
-                  Final choice: {LETTER[(curiosoChoiceOpt._ord || 1) - 1] ?? "?"} —{" "}
-                  {safeStr(curiosoChoiceOpt.text || curiosoChoiceOpt.value || curiosoChoiceOpt.label || "—")}
+                  Final choice: {cleanLabel(curiosoFinalOpt.label)} — {optionDisplayText(curiosoFinalOpt)}
                 </span>
               </div>
             ) : null}
@@ -683,13 +729,10 @@ export default function ResultsPage() {
               }}
             >
               <div className="whitespace-pre-wrap text-sm text-slate-800">
-                {resolution.note ? resolution.note : "No note was left for this resolution."}
+                {safeStr(q?.resolution_note) || "No note was left for this resolution."}
               </div>
               <div className="mt-3 text-xs text-slate-600">
-                Resolved on{" "}
-                <span className="font-semibold">
-                  {fmt(resolution.created_at || resolution.resolved_at)}
-                </span>
+                Resolved on <span className="font-semibold">{fmt(q?.resolved_at)}</span>
               </div>
             </div>
           </section>

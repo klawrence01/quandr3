@@ -18,7 +18,16 @@ const TEAL = "#00a9a5";
 const CORAL = "#ff6b6b";
 const SOFT_BG = "#f5f7fc";
 
-const CATEGORIES = ["Family", "Career", "Money", "Health", "Relationships", "School", "Faith", "Lifestyle"];
+const CATEGORIES = [
+  "Family",
+  "Career",
+  "Money",
+  "Health",
+  "Relationships",
+  "School",
+  "Faith",
+  "Lifestyle",
+];
 
 /* =========================
    Helpers
@@ -36,6 +45,10 @@ function getOrigin() {
   return window.location.origin || "";
 }
 
+function safeStr(x: any) {
+  return (x ?? "").toString();
+}
+
 async function shareUrl(url: string, title?: string) {
   try {
     if (navigator.share) {
@@ -43,6 +56,7 @@ async function shareUrl(url: string, title?: string) {
       return true;
     }
   } catch {}
+
   try {
     await navigator.clipboard.writeText(url);
     alert("Link copied.");
@@ -53,6 +67,7 @@ async function shareUrl(url: string, title?: string) {
       return true;
     } catch {}
   }
+
   return false;
 }
 
@@ -67,6 +82,7 @@ async function copyUrl(url: string) {
       return true;
     } catch {}
   }
+
   return false;
 }
 
@@ -127,21 +143,25 @@ export default function CreateQuandr3Page() {
         return;
       }
 
+      const userId = String(user.id);
+
       // Ensure a matching profile row exists before inserting into quandr3s.
-      // author_id on quandr3s references profiles.id.
+      // author_id on quandr3s should match profiles.id / auth user id.
       const { error: profileErr } = await supabase
         .from("profiles")
-        .upsert({ id: user.id }, { onConflict: "id" });
+        .upsert({ id: userId }, { onConflict: "id" });
 
       if (profileErr) throw profileErr;
 
       const payload = {
         title: title.trim(),
+        prompt: prompt.trim(),
         context: prompt.trim(),
-        category,
+        category: category.trim(),
         slug: slugify(title.trim()),
         status: "open",
-        author_id: user.id,
+        author_id: userId,
+        user_id: userId,
       };
 
       console.log("CREATE QUANDR3 PAYLOAD:", payload);
@@ -149,18 +169,29 @@ export default function CreateQuandr3Page() {
       const { data: q, error: qErr } = await supabase
         .from("quandr3s")
         .insert([payload])
-        .select("id, created_at")
+        .select("id, created_at, author_id, user_id, status")
         .single();
 
       if (qErr) throw qErr;
       if (!q?.id) throw new Error("Create succeeded but returned no id.");
 
+      const savedAuthorId = safeStr(q.author_id);
+      const savedUserId = safeStr(q.user_id);
+
+      if (savedAuthorId && savedAuthorId !== userId) {
+        throw new Error("Ownership mismatch: saved author_id does not match signed-in user.");
+      }
+
+      if (savedUserId && savedUserId !== userId) {
+        throw new Error("Ownership mismatch: saved user_id does not match signed-in user.");
+      }
+
       const options = [
-        { label: "A", text: optA.trim() },
-        { label: "B", text: optB.trim() },
-        optC?.trim() ? { label: "C", text: optC.trim() } : null,
-        optD?.trim() ? { label: "D", text: optD.trim() } : null,
-      ].filter(Boolean) as Array<{ label: string; text: string }>;
+        { label: "A", text: optA.trim(), order: 1 },
+        { label: "B", text: optB.trim(), order: 2 },
+        optC?.trim() ? { label: "C", text: optC.trim(), order: 3 } : null,
+        optD?.trim() ? { label: "D", text: optD.trim(), order: 4 } : null,
+      ].filter(Boolean) as Array<{ label: string; text: string; order: number }>;
 
       const { error: optErr } = await supabase.from("quandr3_options").insert(
         options.map((o) => ({
@@ -168,6 +199,7 @@ export default function CreateQuandr3Page() {
           label: o.label,
           value: o.text,
           text: o.text,
+          order: o.order,
         }))
       );
 
@@ -189,9 +221,15 @@ export default function CreateQuandr3Page() {
       const msg = e?.message || "Failed to create Quandr3";
 
       if (String(msg).toLowerCase().includes("foreign key")) {
-        setError("Profile link failed. The signed-in user could not be matched to a profile record.");
+        setError(
+          "Profile link failed. The signed-in user could not be matched to a profile record."
+        );
       } else if (String(msg).toLowerCase().includes("row-level security")) {
-        setError("Blocked by security policy. Make sure you are signed in and allowed to create Quandr3s.");
+        setError(
+          "Blocked by security policy. Make sure you are signed in and allowed to create Quandr3s."
+        );
+      } else if (String(msg).toLowerCase().includes("ownership mismatch")) {
+        setError(msg);
       } else {
         setError(msg);
       }
@@ -221,7 +259,10 @@ export default function CreateQuandr3Page() {
           {error && <div className="mt-4 text-sm text-red-600">{error}</div>}
 
           {publishedId && (
-            <div className="mt-4 rounded-lg p-3 text-sm" style={{ background: "#e9fff7", border: `1px solid ${TEAL}` }}>
+            <div
+              className="mt-4 rounded-lg p-3 text-sm"
+              style={{ background: "#e9fff7", border: `1px solid ${TEAL}` }}
+            >
               <div className="font-bold" style={{ color: NAVY }}>
                 Published ✅
               </div>
@@ -251,7 +292,11 @@ export default function CreateQuandr3Page() {
                 >
                   Share
                 </button>
-                <Link href={`/q/${publishedId}`} className="text-xs font-extrabold" style={{ color: BLUE }}>
+                <Link
+                  href={`/q/${publishedId}`}
+                  className="text-xs font-extrabold"
+                  style={{ color: BLUE }}
+                >
                   View →
                 </Link>
               </div>
@@ -259,7 +304,10 @@ export default function CreateQuandr3Page() {
           )}
 
           <div className="mt-6 flex gap-3">
-            <button onClick={() => setPreviewMode(false)} className="rounded bg-gray-200 px-4 py-2">
+            <button
+              onClick={() => setPreviewMode(false)}
+              className="rounded bg-gray-200 px-4 py-2"
+            >
               Back to Edit
             </button>
 
@@ -291,7 +339,10 @@ export default function CreateQuandr3Page() {
         <h1 className="mb-4 text-2xl font-bold">Create a Quandr3</h1>
 
         {publishedId && (
-          <div className="mb-4 rounded-lg p-3 text-sm" style={{ background: "#e9fff7", border: `1px solid ${TEAL}` }}>
+          <div
+            className="mb-4 rounded-lg p-3 text-sm"
+            style={{ background: "#e9fff7", border: `1px solid ${TEAL}` }}
+          >
             <div className="font-bold" style={{ color: NAVY }}>
               Published ✅
             </div>
@@ -318,14 +369,23 @@ export default function CreateQuandr3Page() {
               >
                 Share
               </button>
-              <Link href={`/q/${publishedId}`} className="text-xs font-extrabold" style={{ color: BLUE }}>
+              <Link
+                href={`/q/${publishedId}`}
+                className="text-xs font-extrabold"
+                style={{ color: BLUE }}
+              >
                 View →
               </Link>
             </div>
           </div>
         )}
 
-        <input className="mb-3 w-full rounded border p-2" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <input
+          className="mb-3 w-full rounded border p-2"
+          placeholder="Title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
 
         <textarea
           className="mb-3 w-full rounded border p-2"
@@ -335,7 +395,11 @@ export default function CreateQuandr3Page() {
           onChange={(e) => setPrompt(e.target.value)}
         />
 
-        <select className="mb-3 w-full rounded border p-2" value={category} onChange={(e) => setCategory(e.target.value)}>
+        <select
+          className="mb-3 w-full rounded border p-2"
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+        >
           {CATEGORIES.map((c) => (
             <option key={c} value={c}>
               {c}
@@ -343,10 +407,30 @@ export default function CreateQuandr3Page() {
           ))}
         </select>
 
-        <input className="mb-2 w-full rounded border p-2" placeholder="Option A" value={optA} onChange={(e) => setOptA(e.target.value)} />
-        <input className="mb-2 w-full rounded border p-2" placeholder="Option B" value={optB} onChange={(e) => setOptB(e.target.value)} />
-        <input className="mb-2 w-full rounded border p-2" placeholder="Option C (optional)" value={optC} onChange={(e) => setOptC(e.target.value)} />
-        <input className="mb-4 w-full rounded border p-2" placeholder="Option D (optional)" value={optD} onChange={(e) => setOptD(e.target.value)} />
+        <input
+          className="mb-2 w-full rounded border p-2"
+          placeholder="Option A"
+          value={optA}
+          onChange={(e) => setOptA(e.target.value)}
+        />
+        <input
+          className="mb-2 w-full rounded border p-2"
+          placeholder="Option B"
+          value={optB}
+          onChange={(e) => setOptB(e.target.value)}
+        />
+        <input
+          className="mb-2 w-full rounded border p-2"
+          placeholder="Option C (optional)"
+          value={optC}
+          onChange={(e) => setOptC(e.target.value)}
+        />
+        <input
+          className="mb-4 w-full rounded border p-2"
+          placeholder="Option D (optional)"
+          value={optD}
+          onChange={(e) => setOptD(e.target.value)}
+        />
 
         {error && <div className="mb-3 text-sm text-red-600">{error}</div>}
 

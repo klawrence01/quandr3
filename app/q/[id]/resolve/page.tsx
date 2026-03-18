@@ -74,6 +74,22 @@ async function shareOrCopy(url: string) {
   return { ok: false, mode: "none" };
 }
 
+async function loadCurrentUserId() {
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const sid = sessionData?.session?.user?.id;
+    if (sid) return String(sid);
+  } catch {}
+
+  try {
+    const { data: userData } = await supabase.auth.getUser();
+    const uid = userData?.user?.id;
+    if (uid) return String(uid);
+  } catch {}
+
+  return "";
+}
+
 export default function ResolveQuandr3Page() {
   const params = useParams();
   const id = (params || {})?.id ? String((params as any).id) : "";
@@ -94,11 +110,26 @@ export default function ResolveQuandr3Page() {
 
   const [shareMsg, setShareMsg] = useState("");
 
+  const [viewerId, setViewerId] = useState("");
+  const [viewerReady, setViewerReady] = useState(false);
+
   const totalVotes = useMemo(() => ALLOWED.reduce((sum, L) => sum + Number(counts?.[L] || 0), 0), [counts]);
   const internet = useMemo(() => computeInternetDecided(counts), [counts]);
 
   const curiosoFinal = useMemo(() => cleanLabel(q?.resolved_choice_label), [q]);
   const canPublish = useMemo(() => !!cleanLabel(finalChoice) && !!categoryClean, [finalChoice, categoryClean]);
+
+  const ownerId = useMemo(() => {
+    return safeStr(q?.author_id || q?.user_id).trim().toLowerCase();
+  }, [q?.author_id, q?.user_id]);
+
+  const normalizedViewerId = useMemo(() => {
+    return safeStr(viewerId).trim().toLowerCase();
+  }, [viewerId]);
+
+  const isOwner = useMemo(() => {
+    return !!ownerId && !!normalizedViewerId && ownerId === normalizedViewerId;
+  }, [ownerId, normalizedViewerId]);
 
   function optionText(label: string) {
     const L = cleanLabel(label);
@@ -170,10 +201,14 @@ export default function ResolveQuandr3Page() {
     setShareMsg("");
 
     try {
+      const uid = await loadCurrentUserId();
+      setViewerId(uid);
+      setViewerReady(true);
+
       const { data: qRow, error: qErr } = await supabase
         .from("quandr3s")
         .select(
-          "id,title,prompt,context,category,status,author_id,created_at,closes_at,city,state,resolved_choice_label,resolved_at,resolution_note"
+          "id,title,prompt,context,category,status,author_id,user_id,created_at,closes_at,city,state,resolved_choice_label,resolved_at,resolution_note"
         )
         .eq("id", id)
         .single();
@@ -186,7 +221,10 @@ export default function ResolveQuandr3Page() {
         .eq("quandr3_id", id)
         .order("order", { ascending: true });
 
-      const { data: choiceRows } = await supabase.from("quandr3_choices").select("label,text").eq("quandr3_id", id);
+      const { data: choiceRows } = await supabase
+        .from("quandr3_choices")
+        .select("label,text")
+        .eq("quandr3_id", id);
 
       const nextCounts: any = { A: 0, B: 0, C: 0, D: 0 };
       const nextReasons: any = { A: [], B: [], C: [], D: [] };
@@ -233,6 +271,16 @@ export default function ResolveQuandr3Page() {
 
   async function submitResolution() {
     setShareMsg("");
+
+    if (!viewerReady) {
+      alert("Still checking your session. Try again.");
+      return;
+    }
+
+    if (!isOwner) {
+      alert("Only the Curioso can publish the final verdict.");
+      return;
+    }
 
     const chosen = cleanLabel(finalChoice);
     if (!categoryClean) {
@@ -320,6 +368,31 @@ export default function ResolveQuandr3Page() {
             <div className="font-semibold text-red-600">{err}</div>
           ) : !q ? (
             <div>Not found.</div>
+          ) : !isOwner ? (
+            <div className="rounded-2xl border p-5" style={{ background: "#fff7f7", borderColor: "#fecaca" }}>
+              <div className="text-lg font-extrabold" style={{ color: NAVY }}>
+                This page is only for the Curioso.
+              </div>
+              <div className="mt-2 text-sm text-slate-700">
+                You can view the Quandr3 and results, but only the original poster can publish the final verdict.
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Link
+                  href={`/q/${id}`}
+                  className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
+                  style={{ background: NAVY }}
+                >
+                  Back to Quandr3
+                </Link>
+                <Link
+                  href={`/q/${id}/results`}
+                  className="rounded-full px-4 py-2 text-sm font-extrabold text-white hover:opacity-95"
+                  style={{ background: CORAL }}
+                >
+                  View Results
+                </Link>
+              </div>
+            </div>
           ) : (
             <>
               <div className="mb-4 rounded-2xl border p-4" style={{ background: "#f8fafc" }}>
