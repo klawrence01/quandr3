@@ -1,4 +1,3 @@
-// /app/auth/callback/page.tsx
 "use client";
 // @ts-nocheck
 
@@ -22,23 +21,52 @@ function CallbackInner() {
 
     (async () => {
       try {
-        // Optional redirect target: /auth/callback?next=/explore
         const next = sp.get("next") || "/explore";
-
-        // PKCE flow: /auth/callback?code=...
         const code = sp.get("code");
+        const token_hash = sp.get("token_hash");
+        const type = sp.get("type");
 
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
+        } else if (token_hash && type) {
+          const { error } = await supabase.auth.verifyOtp({
+            token_hash,
+            type,
+          });
+          if (error) throw error;
         } else {
-          // Magic link / hash flow fallback
-          // (If nothing to exchange, this safely no-ops)
-          try {
-            const { error } = await supabase.auth.getSession();
+          const hash = window.location.hash || "";
+          const hashParams = new URLSearchParams(hash.replace(/^#/, ""));
+          const access_token = hashParams.get("access_token");
+          const refresh_token = hashParams.get("refresh_token");
+
+          if (access_token && refresh_token) {
+            const { error } = await supabase.auth.setSession({
+              access_token,
+              refresh_token,
+            });
             if (error) throw error;
-          } catch {}
+          } else {
+            const {
+              data: { session },
+              error,
+            } = await supabase.auth.getSession();
+
+            if (error) throw error;
+            if (!session) {
+              throw new Error("No auth session was created from the callback.");
+            }
+          }
         }
+
+        const {
+          data: { session },
+          error: sessionErr,
+        } = await supabase.auth.getSession();
+
+        if (sessionErr) throw sessionErr;
+        if (!session) throw new Error("Sign-in completed, but no session is available.");
 
         if (!alive) return;
 
@@ -70,6 +98,7 @@ function CallbackInner() {
           <div style={{ fontSize: 22, fontWeight: 1000, color: NAVY }}>
             Auth Callback
           </div>
+
           <div style={{ marginTop: 10, fontWeight: 900, color: "#2b405b" }}>
             {msg}
           </div>
@@ -109,7 +138,6 @@ function CallbackInner() {
 }
 
 export default function CallbackPage() {
-  // ✅ Fix: useSearchParams must be inside a Suspense boundary
   return (
     <Suspense fallback={<div style={{ padding: 24 }}>Loading…</div>}>
       <CallbackInner />
