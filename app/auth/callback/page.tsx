@@ -9,6 +9,14 @@ import { supabase } from "@/utils/supabase/browser";
 const NAVY = "#0b2343";
 const SOFT_BG = "#f5f7fc";
 
+type OtpType =
+  | "signup"
+  | "magiclink"
+  | "recovery"
+  | "invite"
+  | "email_change"
+  | "email";
+
 function CallbackInner() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -24,7 +32,7 @@ function CallbackInner() {
         const next = sp.get("next") || "/explore";
         const code = sp.get("code");
         const token_hash = sp.get("token_hash");
-        const type = sp.get("type");
+        const type = (sp.get("type") || "") as OtpType;
 
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
