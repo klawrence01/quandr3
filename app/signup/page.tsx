@@ -1,28 +1,15 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-
-type SignupStub = {
-  displayName: string;
-  email: string;
-  createdAtISO: string;
-};
-
-const LS_KEY_SIGNUP_STUB = "q3_signup_stub_v1";
-
-function saveSignupStub(data: SignupStub) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(LS_KEY_SIGNUP_STUB, JSON.stringify(data));
-}
+import React, { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { supabase } from "@/utils/supabase/browser";
 
 /* ---------- Design tokens ---------- */
 
 const NAVY = "#0b2343";
-const BLUE = "#1e63f3";
-const TEAL = "#00a9a5";
 const CORAL = "#ff6b6b";
 const SOFT_BG = "#f7f9ff";
+const PENDING_PROFILE_KEY = "q3_pending_profile";
 
 /* ---------- Small UI pieces ---------- */
 
@@ -150,17 +137,31 @@ function Field({
 
 export default function SignupPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
   const [agree, setAgree] = useState(false);
+  const [referrer, setReferrer] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const ref = searchParams.get("ref") || "";
+    setReferrer(ref);
+  }, [searchParams]);
 
   const canSubmit = useMemo(() => {
     const e = email.trim().toLowerCase();
     const hasEmail = e.includes("@") && e.includes(".");
     const hasName = displayName.trim().length >= 2;
-    return hasEmail && hasName && agree;
-  }, [displayName, email, agree]);
+    const hasPassword = password.trim().length >= 6;
+    const hasCity = city.trim().length >= 2;
+    const hasState = state.trim().length >= 2;
+    return hasEmail && hasName && hasPassword && hasCity && hasState && agree;
+  }, [displayName, email, password, city, state, agree]);
 
   const shellStyle: React.CSSProperties = {
     minHeight: "100vh",
@@ -181,10 +182,58 @@ export default function SignupPage() {
     boxShadow: "0 18px 50px rgba(11,35,67,0.12)",
   };
 
+  async function handleSignup(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSubmit) return;
+
+    setLoading(true);
+
+    try {
+      const cleanEmail = email.trim().toLowerCase();
+
+      const { data, error } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password,
+      });
+
+      if (error) {
+        alert(error.message);
+        return;
+      }
+
+      const user = data?.user;
+
+      if (!user) {
+        alert("Account created, but no user was returned.");
+        return;
+      }
+
+      // Save extra profile details locally so we can apply them AFTER login
+      // when the session is fully active and RLS won't fight us.
+      if (typeof window !== "undefined") {
+        localStorage.setItem(
+          PENDING_PROFILE_KEY,
+          JSON.stringify({
+            email: cleanEmail,
+            display_name: displayName.trim(),
+            city: city.trim(),
+            state: state.trim(),
+            referred_by: referrer || null,
+            created_at: new Date().toISOString(),
+          })
+        );
+      }
+
+      alert("Account created. Please log in to finish setup.");
+      router.push("/login?completeProfile=1");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <main style={shellStyle}>
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "26px 18px" }}>
-        {/* Top Row */}
         <div
           style={{
             display: "flex",
@@ -240,7 +289,6 @@ export default function SignupPage() {
           </div>
         </div>
 
-        {/* Main Card */}
         <div style={cardStyle}>
           <div
             style={{
@@ -288,54 +336,25 @@ export default function SignupPage() {
             </div>
           </div>
 
-          <div
-            style={{
-              marginTop: 16,
-              padding: 14,
-              borderRadius: 18,
-              background: "rgba(30,99,243,0.04)",
-              border: "1px solid rgba(30,99,243,0.18)",
-            }}
-          >
+          {referrer ? (
             <div
               style={{
+                marginTop: 16,
+                padding: 14,
+                borderRadius: 18,
+                background: "rgba(0,169,165,0.08)",
+                border: "1px solid rgba(0,169,165,0.24)",
                 fontSize: 13,
-                opacity: 0.9,
-                fontWeight: 850,
-                marginBottom: 4,
+                fontWeight: 800,
                 color: NAVY,
               }}
             >
-              Quick setup (V1 stub)
+              Referral detected
             </div>
-            <div
-              style={{
-                fontSize: 13,
-                opacity: 0.85,
-                lineHeight: 1.5,
-                color: "rgba(11,35,67,0.9)",
-              }}
-            >
-              This is a local-first scaffold — we’ll wire Supabase/Auth later.
-              Submitting stores a tiny signup stub on this device so the flow
-              feels real from day one.
-            </div>
-          </div>
+          ) : null}
 
           <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!canSubmit) return;
-
-              saveSignupStub({
-                displayName: displayName.trim(),
-                email: email.trim().toLowerCase(),
-                createdAtISO: new Date().toISOString(),
-              });
-
-              // For now, send new users into onboarding step 1 (later: feed/home).
-              router.push("/onboarding/step1");
-            }}
+            onSubmit={handleSignup}
             style={{ marginTop: 16, display: "grid", gap: 12 }}
           >
             <Field
@@ -344,12 +363,35 @@ export default function SignupPage() {
               onChange={setDisplayName}
               placeholder="e.g., CuriosoKen"
             />
+
             <Field
               label="Email"
               value={email}
               onChange={setEmail}
               placeholder="you@example.com"
               type="email"
+            />
+
+            <Field
+              label="Password"
+              value={password}
+              onChange={setPassword}
+              placeholder="At least 6 characters"
+              type="password"
+            />
+
+            <Field
+              label="City"
+              value={city}
+              onChange={setCity}
+              placeholder="e.g., Providence"
+            />
+
+            <Field
+              label="State"
+              value={state}
+              onChange={setState}
+              placeholder="e.g., RI"
             />
 
             <label
@@ -380,30 +422,20 @@ export default function SignupPage() {
                 marginTop: 6,
               }}
             >
-              <Button type="submit" disabled={!canSubmit}>
-                Create free account
+              <Button type="submit" disabled={!canSubmit || loading}>
+                {loading ? "Creating..." : "Create free account"}
               </Button>
+
               <Button
                 variant="ghost"
-                onClick={() => alert("Stub: Google sign-in coming later.")}
+                onClick={() => alert("Google sign-in coming later.")}
               >
                 Continue with Google (later)
               </Button>
+
               <Button variant="ghost" onClick={() => router.push("/login")}>
                 I already have an account
               </Button>
-            </div>
-
-            <div
-              style={{
-                opacity: 0.8,
-                fontSize: 12,
-                marginTop: 8,
-                color: "rgba(11,35,67,0.85)",
-              }}
-            >
-              V1 note: This page is intentionally local-first. No server, no
-              database, no real auth yet — just a clean path ready to plug in.
             </div>
           </form>
         </div>

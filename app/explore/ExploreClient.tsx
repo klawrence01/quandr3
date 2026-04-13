@@ -1,10 +1,10 @@
-// /app/explore/ExploreClient.tsx
 "use client";
 // @ts-nocheck
 
 export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "@/utils/supabase/browser";
 import ExploreInner from "./_ExploreInner";
 
@@ -81,6 +81,8 @@ function normStatusForFilter(row: any) {
 }
 
 export default function ExploreClient() {
+  const searchParams = useSearchParams();
+
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<any[]>([]);
   const [err, setErr] = useState("");
@@ -126,6 +128,16 @@ export default function ExploreClient() {
     return () =>
       window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
   }, []);
+
+  useEffect(() => {
+    const cat = safeStr(searchParams.get("category")).trim().toLowerCase();
+
+    if (cat) {
+      setCategoryFilter(cat);
+    } else {
+      setCategoryFilter("all");
+    }
+  }, [searchParams]);
 
   async function handleInstall() {
     if (installPrompt) {
@@ -369,9 +381,13 @@ export default function ExploreClient() {
       out = out.filter((r) => normStatusForFilter(r) === statusFilter);
     }
 
-    // Category filter
-    if (categoryFilter !== "all") {
-      out = out.filter((r) => safeStr(r?.category).trim() === categoryFilter);
+    // ✅ Category filter from hub or manual selection
+    if (safeStr(categoryFilter).trim().toLowerCase() !== "all") {
+      out = out.filter(
+        (r) =>
+          safeStr(r?.category).trim().toLowerCase() ===
+          safeStr(categoryFilter).trim().toLowerCase()
+      );
     }
 
     // Search

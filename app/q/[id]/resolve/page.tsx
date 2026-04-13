@@ -1,4 +1,3 @@
-// /app/q/[id]/resolve/page.tsx
 "use client";
 // @ts-nocheck
 
@@ -22,6 +21,8 @@ const CORAL_BG = "#fff7f7";
 const CORAL_RING = "0 0 0 2px rgba(255,107,107,0.18) inset";
 
 const ALLOWED = ["A", "B", "C", "D"];
+const MAX_IMAGES = 4;
+const BUCKET = "resolution-images";
 
 function cleanLabel(x: any) {
   const s = (x ?? "").toString().trim().toUpperCase();
@@ -42,11 +43,16 @@ function fmt(ts: any) {
 }
 
 function computeInternetDecided(counts: any) {
-  const entries = ALLOWED.map((L) => ({ label: L, votes: Number(counts?.[L] || 0) }));
+  const entries = ALLOWED.map((L) => ({
+    label: L,
+    votes: Number(counts?.[L] || 0),
+  }));
   entries.sort((a, b) => b.votes - a.votes);
 
   const top = entries[0];
-  if (!top || top.votes <= 0) return { label: "", isTie: false, tied: [] as string[] };
+  if (!top || top.votes <= 0) {
+    return { label: "", isTie: false, tied: [] as string[] };
+  }
 
   const tied = entries.filter((x) => x.votes === top.votes).map((x) => x.label);
   return { label: tied.length === 1 ? top.label : "", isTie: tied.length > 1, tied };
@@ -59,18 +65,17 @@ function pct(counts: any, totalVotes: number, label: string) {
 
 async function shareOrCopy(url: string) {
   try {
-    // @ts-ignore
     if (navigator?.share) {
-      // @ts-ignore
       await navigator.share({ title: "Quandr3", url });
       return { ok: true, mode: "share" };
     }
   } catch {}
+
   try {
-    // @ts-ignore
     await navigator.clipboard.writeText(url);
     return { ok: true, mode: "copy" };
   } catch {}
+
   return { ok: false, mode: "none" };
 }
 
@@ -90,6 +95,15 @@ async function loadCurrentUserId() {
   return "";
 }
 
+function makeSafeFileName(name: string) {
+  const cleaned = safeStr(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9.\-_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return cleaned || `image-${Date.now()}.jpg`;
+}
+
 export default function ResolveQuandr3Page() {
   const params = useParams();
   const id = (params || {})?.id ? String((params as any).id) : "";
@@ -100,7 +114,12 @@ export default function ResolveQuandr3Page() {
   const [q, setQ] = useState<any>(null);
   const [options, setOptions] = useState<any[]>([]);
   const [counts, setCounts] = useState<any>({ A: 0, B: 0, C: 0, D: 0 });
-  const [reasonsByLabel, setReasonsByLabel] = useState<any>({ A: [], B: [], C: [], D: [] });
+  const [reasonsByLabel, setReasonsByLabel] = useState<any>({
+    A: [],
+    B: [],
+    C: [],
+    D: [],
+  });
 
   const [finalChoice, setFinalChoice] = useState("");
   const [finalNote, setFinalNote] = useState("");
@@ -113,11 +132,27 @@ export default function ResolveQuandr3Page() {
   const [viewerId, setViewerId] = useState("");
   const [viewerReady, setViewerReady] = useState(false);
 
-  const totalVotes = useMemo(() => ALLOWED.reduce((sum, L) => sum + Number(counts?.[L] || 0), 0), [counts]);
+  const [images, setImages] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
+
+  const totalVotes = useMemo(
+    () => ALLOWED.reduce((sum, L) => sum + Number(counts?.[L] || 0), 0),
+    [counts]
+  );
+
   const internet = useMemo(() => computeInternetDecided(counts), [counts]);
 
   const curiosoFinal = useMemo(() => cleanLabel(q?.resolved_choice_label), [q]);
-  const canPublish = useMemo(() => !!cleanLabel(finalChoice) && !!categoryClean, [finalChoice, categoryClean]);
+  const canPublish = useMemo(
+    () =>
+      !loading &&
+      !uploading &&
+      !!cleanLabel(finalChoice) &&
+      !!categoryClean &&
+      safeStr(q?.status).trim().toLowerCase() === "awaiting_user",
+    [loading, uploading, finalChoice, categoryClean, q?.status]
+  );
 
   const ownerId = useMemo(() => {
     return safeStr(q?.author_id || q?.user_id).trim().toLowerCase();
@@ -208,7 +243,7 @@ export default function ResolveQuandr3Page() {
       const { data: qRow, error: qErr } = await supabase
         .from("quandr3s")
         .select(
-          "id,title,prompt,context,category,status,author_id,user_id,created_at,closes_at,city,state,resolved_choice_label,resolved_at,resolution_note"
+          "id,title,prompt,context,category,status,author_id,user_id,created_at,closes_at,city,state,resolved_choice_label,resolved_at,resolution_note,resolution_image_urls"
         )
         .eq("id", id)
         .single();
@@ -269,6 +304,50 @@ export default function ResolveQuandr3Page() {
     if (id) load();
   }, [id]);
 
+  useEffect(() => {
+    const nextPreviews = images.map((file) => URL.createObjectURL(file));
+    setImagePreviews(nextPreviews);
+
+    return () => {
+      nextPreviews.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [images]);
+
+  async function uploadImages() {
+    if (!images.length) return [];
+
+    setUploading(true);
+    const urls: string[] = [];
+
+    try {
+      for (const file of images) {
+        const safeName = makeSafeFileName(file.name);
+        const filePath = `${id}/${Date.now()}-${safeName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from(BUCKET)
+          .upload(filePath, file, {
+            cacheControl: "3600",
+            upsert: false,
+          });
+
+        if (uploadError) {
+          throw uploadError;
+        }
+
+        const { data } = supabase.storage.from(BUCKET).getPublicUrl(filePath);
+
+        if (data?.publicUrl) {
+          urls.push(data.publicUrl);
+        }
+      }
+
+      return urls;
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function submitResolution() {
     setShareMsg("");
 
@@ -282,18 +361,31 @@ export default function ResolveQuandr3Page() {
       return;
     }
 
+    if (safeStr(q?.status).trim().toLowerCase() !== "awaiting_user") {
+      alert("You can only resolve after voting has closed.");
+      return;
+    }
+
     const chosen = cleanLabel(finalChoice);
+
     if (!categoryClean) {
       alert("Category is required. Add a category first.");
       return;
     }
+
     if (!chosen) {
       alert("Pick a final choice (A–D)");
       return;
     }
 
+    if (images.length > MAX_IMAGES) {
+      alert(`You can upload up to ${MAX_IMAGES} images.`);
+      return;
+    }
+
     try {
       const nowIso = new Date().toISOString();
+      const imageUrls = await uploadImages();
 
       const { error } = await supabase
         .from("quandr3s")
@@ -304,6 +396,7 @@ export default function ResolveQuandr3Page() {
           resolved_at: nowIso,
           resolution_note: finalNote,
           published_at: nowIso,
+          resolution_image_urls: imageUrls,
         })
         .eq("id", id);
 
@@ -313,18 +406,22 @@ export default function ResolveQuandr3Page() {
         localStorage.setItem("quandr3_explore_refresh", String(Date.now()));
       } catch {}
 
-      await load();
-      alert("Resolution saved.");
+      window.location.assign(`/q/${id}/results`);
     } catch (e: any) {
       alert(e?.message || "Failed to resolve.");
     }
   }
 
   async function handleShare() {
-    const url = typeof window !== "undefined" ? `${window.location.origin}/q/${id}` : `/q/${id}`;
+    const url =
+      typeof window !== "undefined" ? `${window.location.origin}/q/${id}` : `/q/${id}`;
     const res = await shareOrCopy(url);
     setShareMsg(
-      res.ok ? (res.mode === "share" ? "Shared." : "Link copied.") : "Could not share/copy on this device."
+      res.ok
+        ? res.mode === "share"
+          ? "Shared."
+          : "Link copied."
+        : "Could not share/copy on this device."
     );
   }
 
@@ -369,7 +466,10 @@ export default function ResolveQuandr3Page() {
           ) : !q ? (
             <div>Not found.</div>
           ) : !isOwner ? (
-            <div className="rounded-2xl border p-5" style={{ background: "#fff7f7", borderColor: "#fecaca" }}>
+            <div
+              className="rounded-2xl border p-5"
+              style={{ background: "#fff7f7", borderColor: "#fecaca" }}
+            >
               <div className="text-lg font-extrabold" style={{ color: NAVY }}>
                 This page is only for the Curioso.
               </div>
@@ -395,11 +495,18 @@ export default function ResolveQuandr3Page() {
             </div>
           ) : (
             <>
-              <div className="mb-4 rounded-2xl border p-4" style={{ background: "#f8fafc" }}>
+              <div
+                className="mb-4 rounded-2xl border p-4"
+                style={{ background: "#f8fafc" }}
+              >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">CATEGORY (REQUIRED)</div>
-                    <div className="mt-1 text-xs text-slate-600">This must be set before publishing the Curioso Verdict.</div>
+                    <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">
+                      CATEGORY (REQUIRED)
+                    </div>
+                    <div className="mt-1 text-xs text-slate-600">
+                      This must be set before publishing the Curioso Verdict.
+                    </div>
                   </div>
 
                   {q?.city || q?.state ? (
@@ -418,7 +525,11 @@ export default function ResolveQuandr3Page() {
                   className="mt-3 w-full rounded-2xl border p-3 text-sm outline-none"
                 />
 
-                {!categoryClean ? <div className="mt-2 text-xs font-semibold text-red-600">Category is required.</div> : null}
+                {!categoryClean ? (
+                  <div className="mt-2 text-xs font-semibold text-red-600">
+                    Category is required.
+                  </div>
+                ) : null}
               </div>
 
               <h1 className="text-3xl font-extrabold" style={{ color: NAVY }}>
@@ -438,7 +549,11 @@ export default function ResolveQuandr3Page() {
                 {q?.author_id ? (
                   <>
                     <span className="text-slate-400">•</span>
-                    <Link href={`/u/${q.author_id}`} className="font-extrabold underline" style={{ color: NAVY }}>
+                    <Link
+                      href={`/u/${q.author_id}`}
+                      className="font-extrabold underline"
+                      style={{ color: NAVY }}
+                    >
                       View Curioso
                     </Link>
                   </>
@@ -451,10 +566,18 @@ export default function ResolveQuandr3Page() {
                 </div>
               ) : null}
 
-              <div className="mt-6 rounded-2xl border p-4" style={{ borderColor: CORAL, background: CORAL_BG, boxShadow: CORAL_RING }}>
+              <div
+                className="mt-6 rounded-2xl border p-4"
+                style={{ borderColor: CORAL, background: CORAL_BG, boxShadow: CORAL_RING }}
+              >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">INTERNET DECIDED</div>
-                  <span className="rounded-full px-3 py-1 text-[11px] font-extrabold" style={{ background: CORAL, color: "white" }}>
+                  <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">
+                    INTERNET DECIDED
+                  </div>
+                  <span
+                    className="rounded-full px-3 py-1 text-[11px] font-extrabold"
+                    style={{ background: CORAL, color: "white" }}
+                  >
                     {internet.isTie ? "CROWD TIED" : "WINNER"}
                   </span>
                 </div>
@@ -466,7 +589,9 @@ export default function ResolveQuandr3Page() {
                 ) : internet.isTie ? (
                   <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
                     Crowd tie: <span style={{ color: CORAL }}>{internet.tied.join(" / ")}</span>{" "}
-                    <span className="font-semibold text-slate-500">({totalVotes} total votes)</span>
+                    <span className="font-semibold text-slate-500">
+                      ({totalVotes} total votes)
+                    </span>
                   </div>
                 ) : (
                   <div className="mt-1 text-sm font-extrabold" style={{ color: NAVY }}>
@@ -478,7 +603,7 @@ export default function ResolveQuandr3Page() {
                 )}
 
                 <div className="mt-2 text-xs text-slate-600">
-                  This is the crowd outcome. The <b>Curioso Verdict</b> is the official final decision.
+                  The Internet has weighed in. Now it’s your decision.
                 </div>
               </div>
 
@@ -491,7 +616,9 @@ export default function ResolveQuandr3Page() {
                 }}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">CURIOUSO VERDICT</div>
+                  <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">
+                    CURIOUSO VERDICT
+                  </div>
                   {q?.resolved_at ? (
                     <div className="text-xs text-slate-500">Resolved: {fmt(q.resolved_at)}</div>
                   ) : (
@@ -516,7 +643,9 @@ export default function ResolveQuandr3Page() {
                     )}
                   </>
                 ) : (
-                  <div className="mt-2 text-sm text-slate-700">Pick a final decision below, then publish your verdict.</div>
+                  <div className="mt-2 text-sm text-slate-700">
+                    Choose your final decision below, then publish your verdict.
+                  </div>
                 )}
               </div>
 
@@ -543,9 +672,13 @@ export default function ResolveQuandr3Page() {
                           </div>
 
                           {optionText(L) ? (
-                            <div className="mt-1 text-sm font-semibold text-slate-900">{optionText(L)}</div>
+                            <div className="mt-1 text-sm font-semibold text-slate-900">
+                              {optionText(L)}
+                            </div>
                           ) : (
-                            <div className="mt-1 text-xs text-slate-500">(No option text found)</div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              (No option text found)
+                            </div>
                           )}
                         </div>
 
@@ -563,7 +696,9 @@ export default function ResolveQuandr3Page() {
                         Votes: <b>{votes}</b> ({percent}%)
                       </div>
 
-                      <div className="mt-3 text-xs font-extrabold tracking-[0.18em] text-slate-500">WHY PEOPLE CHOSE {L}</div>
+                      <div className="mt-3 text-xs font-extrabold tracking-[0.18em] text-slate-500">
+                        WHY PEOPLE CHOSE {L}
+                      </div>
 
                       {(reasonsByLabel?.[L] || []).length === 0 ? (
                         <div className="mt-2 text-xs text-slate-500">No reasons yet.</div>
@@ -575,9 +710,15 @@ export default function ResolveQuandr3Page() {
                         </ul>
                       )}
 
-                      <label className="mt-3 flex items-center gap-2 text-sm font-bold">
-                        <input type="radio" name="final" value={L} checked={finalChoice === L} onChange={() => setFinalChoice(L)} />
-                        Set Curioso verdict to {L}
+                      <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm font-bold">
+                        <input
+                          type="radio"
+                          name="finalChoice"
+                          value={L}
+                          checked={finalChoice === L}
+                          onChange={() => setFinalChoice(L)}
+                        />
+                        Select {L} as final decision
                       </label>
                     </div>
                   );
@@ -597,19 +738,123 @@ export default function ResolveQuandr3Page() {
                 />
               </div>
 
+              <div
+                className="mt-6 rounded-2xl border p-4"
+                style={{ background: "#fff7f7", borderColor: "rgba(255,107,107,0.28)" }}
+              >
+                <div className="flex items-start gap-3">
+                  <div
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-xl font-extrabold"
+                    style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
+                  >
+                    📸
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="text-sm font-extrabold" style={{ color: NAVY }}>
+                      Add visual proof (optional)
+                    </div>
+                    <div className="mt-1 text-sm text-slate-600">
+                      Show what happened next. Upload up to {MAX_IMAGES} images from the outcome, result, or final situation.
+                    </div>
+                  </div>
+                </div>
+
+                <label
+                  className="mt-4 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-4 py-8 text-center transition hover:bg-white"
+                  style={{ borderColor: "rgba(255,107,107,0.35)", background: "#fff0f0" }}
+                >
+                  <div className="text-3xl">🖼️</div>
+                  <div className="mt-2 text-sm font-extrabold" style={{ color: NAVY }}>
+                    Click to add resolution images
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    JPG, PNG, WEBP • up to {MAX_IMAGES} images
+                  </div>
+
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={(e: any) => {
+                      const files = Array.from(e.target.files || []) as File[];
+                      setImages(files.slice(0, MAX_IMAGES));
+                    }}
+                    className="hidden"
+                  />
+                </label>
+
+                {imagePreviews.length > 0 ? (
+                  <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+                    {imagePreviews.map((src, i) => (
+                      <div
+                        key={`${src}-${i}`}
+                        className="overflow-hidden rounded-2xl border bg-white shadow-sm"
+                        style={{ borderColor: "rgba(255,107,107,0.18)" }}
+                      >
+                        <img
+                          src={src}
+                          alt={`Resolution preview ${i + 1}`}
+                          className="h-32 w-full object-cover"
+                        />
+                        <div className="flex items-center justify-between gap-2 p-2">
+                          <div className="min-w-0 truncate text-xs text-slate-600">
+                            {images[i]?.name || `Image ${i + 1}`}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setImages((prev) => prev.filter((_, idx) => idx !== i));
+                            }}
+                            className="shrink-0 rounded-full px-2 py-1 text-[11px] font-extrabold"
+                            style={{
+                              background: "rgba(255,107,107,0.12)",
+                              color: CORAL,
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
               <button
                 type="button"
                 onClick={submitResolution}
                 disabled={!canPublish}
                 className="mt-6 rounded-full px-6 py-3 text-sm font-extrabold text-white hover:opacity-95 disabled:opacity-50"
                 style={{ background: CORAL }}
-                title={!categoryClean ? "Category required" : !cleanLabel(finalChoice) ? "Pick final choice" : "Publish"}
+                title={
+                  loading
+                    ? "Loading"
+                    : uploading
+                    ? "Uploading images"
+                    : !categoryClean
+                    ? "Category required"
+                    : !cleanLabel(finalChoice)
+                    ? "Pick final choice"
+                    : safeStr(q?.status).trim().toLowerCase() !== "awaiting_user"
+                    ? "Voting must be closed first"
+                    : "Publish"
+                }
               >
-                Publish Curioso Verdict
+                {uploading ? "Uploading images..." : "Publish Curioso Verdict"}
               </button>
 
               {!categoryClean ? (
-                <div className="mt-2 text-xs font-semibold text-red-600">Category is mandatory — add it above before publishing.</div>
+                <div className="mt-2 text-xs font-semibold text-red-600">
+                  Category is mandatory — add it above before publishing.
+                </div>
+              ) : null}
+
+              {safeStr(q?.status).trim().toLowerCase() !== "awaiting_user" ? (
+                <div className="mt-2 text-xs font-semibold text-red-600">
+                  You can only publish the Curioso Verdict after voting has closed and the Quandr3 reaches awaiting_user.
+                </div>
               ) : null}
 
               <div className="mt-4 text-xs text-slate-500">

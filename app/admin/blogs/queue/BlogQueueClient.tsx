@@ -1,7 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { BlogPost, BlogStatus, BlogType } from "@/types/blog";
+
+type BlogStatus = "draft" | "scheduled" | "published" | "archived";
+type BlogType = "product" | "culture" | "community" | "founders_note";
+
+type BlogPost = {
+  id: string;
+  title: string;
+  excerpt?: string | null;
+  status: BlogStatus;
+  blog_type: BlogType;
+  published_at?: string | null;
+  scheduled_at?: string | null;
+};
 
 const NAVY = "#0b2343";
 const BLUE = "#1e63f3";
@@ -20,6 +32,7 @@ const TYPE_LABELS: Record<BlogType, string> = {
   product: "Product",
   culture: "Culture & Ideas",
   community: "Community",
+  founders_note: "Founder’s Notes",
 };
 
 export default function BlogQueueClient({
@@ -38,8 +51,7 @@ export default function BlogQueueClient({
 
       if (search) {
         const s = search.toLowerCase();
-        const haystack =
-          `${post.title} ${post.excerpt ?? ""}`.toLowerCase();
+        const haystack = `${post.title} ${post.excerpt ?? ""}`.toLowerCase();
         if (!haystack.includes(s)) return false;
       }
 
@@ -58,7 +70,6 @@ export default function BlogQueueClient({
       }}
     >
       <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-        {/* Header */}
         <header
           style={{
             display: "flex",
@@ -103,7 +114,6 @@ export default function BlogQueueClient({
           </button>
         </header>
 
-        {/* Filters */}
         <section
           style={{
             display: "flex",
@@ -112,7 +122,6 @@ export default function BlogQueueClient({
             marginBottom: 20,
           }}
         >
-          {/* Status filter */}
           <div
             style={{
               display: "flex",
@@ -129,9 +138,8 @@ export default function BlogQueueClient({
             </span>
             {["all", "draft", "scheduled", "published", "archived"].map(
               (value) => {
-                const active =
-                  statusFilter === value ||
-                  (value === "all" && statusFilter === "all");
+                const active = statusFilter === value;
+
                 return (
                   <button
                     key={value}
@@ -158,7 +166,6 @@ export default function BlogQueueClient({
             )}
           </div>
 
-          {/* Type filter */}
           <div
             style={{
               display: "flex",
@@ -173,36 +180,34 @@ export default function BlogQueueClient({
             <span style={{ fontSize: 12, fontWeight: 700, opacity: 0.7 }}>
               Blog:
             </span>
-            {["all", "product", "culture", "community"].map((value) => {
-              const active =
-                typeFilter === value ||
-                (value === "all" && typeFilter === "all");
-              return (
-                <button
-                  key={value}
-                  onClick={() =>
-                    setTypeFilter(value as BlogType | "all")
-                  }
-                  style={{
-                    border: "none",
-                    borderRadius: 999,
-                    padding: "4px 10px",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    background: active ? TEAL : "transparent",
-                    color: active ? "#fff" : NAVY,
-                  }}
-                >
-                  {value === "all"
-                    ? "All"
-                    : TYPE_LABELS[value as BlogType]}
-                </button>
-              );
-            })}
+            {["all", "product", "culture", "community", "founders_note"].map(
+              (value) => {
+                const active = typeFilter === value;
+
+                return (
+                  <button
+                    key={value}
+                    onClick={() => setTypeFilter(value as BlogType | "all")}
+                    style={{
+                      border: "none",
+                      borderRadius: 999,
+                      padding: "4px 10px",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      background: active ? TEAL : "transparent",
+                      color: active ? "#fff" : NAVY,
+                    }}
+                  >
+                    {value === "all"
+                      ? "All"
+                      : TYPE_LABELS[value as BlogType]}
+                  </button>
+                );
+              }
+            )}
           </div>
 
-          {/* Search */}
           <input
             placeholder="Search title or excerpt…"
             value={search}
@@ -220,7 +225,6 @@ export default function BlogQueueClient({
           />
         </section>
 
-        {/* Table */}
         <section
           style={{
             background: "#fff",
@@ -266,9 +270,11 @@ export default function BlogQueueClient({
                       {post.excerpt}
                     </div>
                   </td>
+
                   <td style={{ padding: "10px 6px", fontSize: 12 }}>
                     {TYPE_LABELS[post.blog_type]}
                   </td>
+
                   <td style={{ padding: "10px 6px" }}>
                     <span
                       style={{
@@ -293,6 +299,7 @@ export default function BlogQueueClient({
                       {STATUS_LABELS[post.status]}
                     </span>
                   </td>
+
                   <td style={{ padding: "10px 6px", fontSize: 12 }}>
                     {post.published_at
                       ? `Published ${new Date(
@@ -304,6 +311,7 @@ export default function BlogQueueClient({
                         ).toLocaleString()}`
                       : "—"}
                   </td>
+
                   <td
                     style={{
                       padding: "10px 6px",
@@ -327,6 +335,7 @@ export default function BlogQueueClient({
                     >
                       Edit
                     </button>
+
                     <button
                       style={{
                         border: "none",
@@ -353,7 +362,7 @@ export default function BlogQueueClient({
                       opacity: 0.7,
                     }}
                   >
-                    No posts yet — we’ll fix that next.
+                    No posts yet.
                   </td>
                 </tr>
               )}

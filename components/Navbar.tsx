@@ -4,26 +4,39 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
+import { supabase } from "@/utils/supabase/browser";
 
 export default function TopNav() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
-    // TODO: Replace with real auth check once wired
-    const stored = localStorage.getItem("quandr3-user");
-    if (stored) setUser(JSON.parse(stored));
+    loadUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
-  function handleLogout() {
-    localStorage.removeItem("quandr3-user");
+  async function loadUser() {
+    const { data } = await supabase.auth.getSession();
+    setUser(data?.session?.user ?? null);
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
     router.push("/");
   }
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-slate-200 bg-white/80 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2">
-        {/* LEFT SIDE: LOGO + TAGLINE */}
         <Link href="/" className="flex flex-shrink-0 items-center gap-2">
           <Image
             src="/assets/logo/quandr3-logo.png"
@@ -40,16 +53,23 @@ export default function TopNav() {
           </div>
         </Link>
 
-        {/* CENTER NAV */}
         <nav className="hidden min-w-[120px] flex-1 justify-center md:flex">
           <div className="flex items-center gap-6 text-sm font-medium text-slate-700">
             <Link href="/explore" className="transition hover:text-slate-900">
               Explore
             </Link>
+
+            {/* NEW: Founder's Notes */}
+            <Link href="/blog" className="transition hover:text-slate-900">
+              Founder’s Notes
+            </Link>
+
+            <Link href="/invite" className="transition hover:text-slate-900">
+              Invite Friends
+            </Link>
           </div>
         </nav>
 
-        {/* RIGHT SIDE */}
         <div className="flex flex-shrink-0 items-center gap-3">
           <Link
             href="/q/create"
@@ -75,12 +95,23 @@ export default function TopNav() {
               </button>
             </div>
           ) : (
-            <Link
-              href="/login"
-              className="rounded-full border border-slate-300 px-3 py-1 text-sm transition hover:bg-slate-100"
-            >
-              Log in
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/login"
+                className="rounded-full border border-slate-300 px-3 py-1 text-sm transition hover:bg-slate-100"
+              ><Link href="/test" className="text-red-600 font-bold">
+  TEST NAV
+</Link>
+                Log in
+              </Link>
+
+              <Link
+                href="/signup"
+                className="rounded-full border border-slate-300 px-3 py-1 text-sm transition hover:bg-slate-100"
+              >
+                Sign up
+              </Link>
+            </div>
           )}
         </div>
       </div>

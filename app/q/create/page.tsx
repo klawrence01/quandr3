@@ -1,4 +1,3 @@
-// /app/q/create/page.tsx
 "use client";
 // @ts-nocheck
 
@@ -146,7 +145,6 @@ export default function CreateQuandr3Page() {
       const userId = String(user.id);
 
       // Ensure a matching profile row exists before inserting into quandr3s.
-      // author_id on quandr3s should match profiles.id / auth user id.
       const { error: profileErr } = await supabase
         .from("profiles")
         .upsert({ id: userId }, { onConflict: "id" });
@@ -163,8 +161,6 @@ export default function CreateQuandr3Page() {
         author_id: userId,
         user_id: userId,
       };
-
-      console.log("CREATE QUANDR3 PAYLOAD:", payload);
 
       const { data: q, error: qErr } = await supabase
         .from("quandr3s")
@@ -212,9 +208,15 @@ export default function CreateQuandr3Page() {
       setPublishedId(q.id);
       setPublishedAt(q.created_at || null);
 
+      // Give the UI a brief success moment, then do a hard redirect.
       setTimeout(() => {
-        router.push(`/q/${q.id}`);
-      }, 650);
+        if (typeof window !== "undefined") {
+          window.location.assign(`/q/${q.id}`);
+        } else {
+          router.replace(`/q/${q.id}`);
+          router.refresh();
+        }
+      }, 1200);
     } catch (e: any) {
       console.error("Create failed:", e);
 

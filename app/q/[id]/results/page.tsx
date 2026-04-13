@@ -1,4 +1,3 @@
-// /app/q/[id]/results/page.tsx
 "use client";
 // @ts-nocheck
 
@@ -87,10 +86,6 @@ function statusLabel(kind: "open" | "awaiting_user" | "resolved") {
   return { bg: "rgba(0,169,165,0.12)", fg: TEAL, label: "Resolved" };
 }
 
-/* =========================
-   Page
-========================= */
-
 export default function ResultsPage() {
   const params = useParams();
 
@@ -105,19 +100,22 @@ export default function ResultsPage() {
   const [choices, setChoices] = useState<any[]>([]);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-
+  const [loadError, setLoadError] = useState("");
   const [showAllReasons, setShowAllReasons] = useState(false);
 
   async function refreshAll(qid: string) {
+    setLoadError("");
+
     const { data: qRow, error: qErr } = await supabase
       .from("quandr3s")
       .select(
-        "id,title,prompt,context,category,status,created_at,closes_at,author_id,user_id,city,state,resolved_choice_label,resolved_at,resolution_note,media_url"
+        "id,title,prompt,context,category,status,created_at,closes_at,author_id,user_id,city,state,resolved_choice_label,resolved_at,resolution_note,resolution_image_urls,media_url"
       )
       .eq("id", qid)
-      .single();
+      .maybeSingle();
 
     if (qErr) {
+      setLoadError(qErr.message || "Failed to load Quandr3.");
       setQ(null);
       setOptions([]);
       setChoices([]);
@@ -125,7 +123,16 @@ export default function ResultsPage() {
       return;
     }
 
-    setQ(qRow ?? null);
+    if (!qRow) {
+      setLoadError(`No Quandr3 row found for id: ${qid}`);
+      setQ(null);
+      setOptions([]);
+      setChoices([]);
+      setProfile(null);
+      return;
+    }
+
+    setQ(qRow);
 
     const creatorId = getCreatorId(qRow);
     if (creatorId) {
@@ -139,22 +146,22 @@ export default function ResultsPage() {
       setProfile(null);
     }
 
-    const { data: optRows, error: optErr } = await supabase
+    const { data: optRows } = await supabase
       .from("quandr3_options")
       .select("id,quandr3_id,label,value,text,order,created_at,image_url")
       .eq("quandr3_id", qid)
       .order("order", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
 
-    setOptions(optErr ? [] : optRows ?? []);
+    setOptions(optRows ?? []);
 
-    const { data: cRows, error: cErr } = await supabase
+    const { data: cRows } = await supabase
       .from("quandr3_choices")
       .select("id,quandr3_id,voter_id,label,text,created_at")
       .eq("quandr3_id", qid)
       .order("created_at", { ascending: true });
 
-    setChoices(cErr ? [] : cRows ?? []);
+    setChoices(cRows ?? []);
   }
 
   useEffect(() => {
@@ -234,9 +241,10 @@ export default function ResultsPage() {
   }, [choices]);
 
   const crowdResult = useMemo(() => {
-    const entries = ALLOWED.map((L) => ({ label: L, votes: Number(voteCounts?.[L] || 0) })).sort(
-      (a, b) => b.votes - a.votes
-    );
+    const entries = ALLOWED.map((L) => ({
+      label: L,
+      votes: Number(voteCounts?.[L] || 0),
+    })).sort((a, b) => b.votes - a.votes);
 
     const top = entries[0];
     const second = entries[1];
@@ -260,7 +268,10 @@ export default function ResultsPage() {
     return orderedOptions.find((o: any) => cleanLabel(o?.label) === crowdWinnerLabel) ?? null;
   }, [orderedOptions, crowdWinnerLabel]);
 
-  const curiosoFinalLabel = useMemo(() => cleanLabel(q?.resolved_choice_label), [q?.resolved_choice_label]);
+  const curiosoFinalLabel = useMemo(
+    () => cleanLabel(q?.resolved_choice_label),
+    [q?.resolved_choice_label]
+  );
 
   const curiosoFinalOpt = useMemo(() => {
     if (!curiosoFinalLabel) return null;
@@ -280,11 +291,6 @@ export default function ResultsPage() {
     );
   }
 
-  function percentageFor(label: string) {
-    if (!totalVotes) return 0;
-    return Math.round((Number(voteCounts?.[label] || 0) / totalVotes) * 100);
-  }
-
   if (loading) {
     return (
       <main className="min-h-screen" style={{ background: SOFT_BG }}>
@@ -293,7 +299,6 @@ export default function ResultsPage() {
             <div className="text-sm font-semibold" style={{ color: NAVY }}>
               Loading Results…
             </div>
-            <div className="mt-2 text-sm text-slate-600">Pulling votes, options, and reasons.</div>
           </div>
         </div>
       </main>
@@ -309,7 +314,7 @@ export default function ResultsPage() {
               Not found
             </div>
             <div className="mt-2 text-sm text-slate-600">
-              That Quandr3 ID doesn’t exist, or the page could not load it.
+              {loadError || "That Quandr3 ID doesn’t exist, or the page could not load it."}
             </div>
             <div className="mt-4">
               <Link
@@ -329,37 +334,6 @@ export default function ResultsPage() {
   if (status === "open") {
     return (
       <main className="min-h-screen" style={{ background: SOFT_BG }}>
-        <header className="border-b bg-white">
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-            <Link href={`/q/${id}`} className="flex items-center gap-3">
-              <div
-                className="flex h-9 w-9 items-center justify-center rounded-xl border"
-                style={{ borderColor: "rgba(15,23,42,0.12)" }}
-              >
-                <span className="text-lg" style={{ color: NAVY }}>
-                  ←
-                </span>
-              </div>
-              <div className="leading-tight">
-                <div className="text-sm font-extrabold" style={{ color: NAVY }}>
-                  Back to Quandr3
-                </div>
-                <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">
-                  RESULTS LOCKED
-                </div>
-              </div>
-            </Link>
-
-            <Link
-              href="/explore"
-              className="rounded-full border bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-              style={{ borderColor: "rgba(15,23,42,0.12)" }}
-            >
-              Explore
-            </Link>
-          </div>
-        </header>
-
         <div className="mx-auto max-w-6xl px-4 py-10">
           <div className="rounded-[28px] border bg-white p-6 shadow-sm">
             <div
@@ -368,12 +342,15 @@ export default function ResultsPage() {
             >
               {statusPill.label}
             </div>
+
             <h1 className="mt-3 text-2xl font-extrabold" style={{ color: NAVY }}>
               Results unlock after voting closes
             </h1>
+
             <div className="mt-2 text-sm text-slate-600">
               Head back to the Quandr3 to vote while it’s open.
             </div>
+
             <div className="mt-5 flex flex-wrap gap-2">
               <Link
                 href={`/q/${id}`}
@@ -398,46 +375,6 @@ export default function ResultsPage() {
 
   return (
     <main className="min-h-screen" style={{ background: SOFT_BG }}>
-      <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-          <Link href={`/q/${id}`} className="flex items-center gap-3">
-            <div
-              className="flex h-9 w-9 items-center justify-center rounded-xl border"
-              style={{ borderColor: "rgba(15,23,42,0.12)" }}
-            >
-              <span className="text-lg" style={{ color: NAVY }}>
-                ←
-              </span>
-            </div>
-            <div className="leading-tight">
-              <div className="text-sm font-extrabold" style={{ color: NAVY }}>
-                Results
-              </div>
-              <div className="text-[11px] font-semibold tracking-[0.22em] text-slate-500">
-                SEE HOW IT PLAYED OUT
-              </div>
-            </div>
-          </Link>
-
-          <div className="flex items-center gap-3">
-            <Link
-              href="/explore"
-              className="rounded-full border bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-              style={{ borderColor: "rgba(15,23,42,0.12)" }}
-            >
-              Explore
-            </Link>
-            <Link
-              href="/q/create"
-              className="inline-flex items-center rounded-full px-4 py-2 text-sm font-extrabold text-white shadow-sm"
-              style={{ background: BLUE }}
-            >
-              Create a Quandr3
-            </Link>
-          </div>
-        </div>
-      </header>
-
       <div className="mx-auto max-w-6xl px-4 py-8">
         <section className="overflow-hidden rounded-[28px] border bg-white shadow-sm">
           <div className="relative h-[220px] w-full">
@@ -445,9 +382,13 @@ export default function ResultsPage() {
             <div className="absolute inset-0 bg-gradient-to-r from-[#0b2343cc] via-[#0b234388] to-[#0b234320]" />
 
             <div className="absolute left-5 top-5 flex items-center gap-3">
-              <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
+              <span
+                className="rounded-full bg-white/90 px-3 py-1 text-xs font-extrabold"
+                style={{ color: NAVY }}
+              >
                 {safeStr(q.category || "Category")}
               </span>
+
               <span
                 className="rounded-full px-3 py-1 text-xs font-extrabold"
                 style={{ background: statusPill.bg, color: statusPill.fg }}
@@ -477,24 +418,30 @@ export default function ResultsPage() {
                 <p className="mt-2 max-w-3xl text-sm text-white/90">
                   {safeStr(q.prompt || q.context)}
                 </p>
-              ) : (
-                <p className="mt-2 max-w-3xl text-sm text-white/80">No context provided.</p>
-              )}
+              ) : null}
             </div>
           </div>
 
           <div className="grid gap-4 p-6 lg:grid-cols-[1.2fr_0.8fr]">
             <div className="rounded-2xl border bg-slate-50 p-5">
-              <div className="text-xs font-semibold tracking-widest text-slate-600">WHAT THIS MEANS</div>
+              <div className="text-xs font-semibold tracking-widest text-slate-600">
+                WHAT THIS MEANS
+              </div>
               <div className="mt-2 text-sm text-slate-700">
                 The crowd voted. The “why” behind votes is what makes Quandr3 valuable — it turns polling into shared wisdom.
               </div>
             </div>
 
             <div className="rounded-2xl border bg-white p-5">
-              <div className="text-xs font-semibold tracking-widest text-slate-600">TOP LINE</div>
+              <div className="text-xs font-semibold tracking-widest text-slate-600">
+                TOP LINE
+              </div>
+
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
+                <span
+                  className="rounded-full bg-slate-50 px-3 py-1 text-xs font-extrabold"
+                  style={{ color: NAVY }}
+                >
                   Total votes: {totalVotes}
                 </span>
 
@@ -503,18 +450,21 @@ export default function ResultsPage() {
                     className="rounded-full px-3 py-1 text-xs font-extrabold"
                     style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
                   >
-                    Crowd tied: {crowdResult.tied.join(" / ")}
+                    Internet decided: Tie — {crowdResult.tied.join(" / ")}
                   </span>
                 ) : crowdWinnerOpt ? (
                   <span
                     className="rounded-full px-3 py-1 text-xs font-extrabold"
                     style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
                   >
-                    Crowd winner: {cleanLabel(crowdWinnerOpt.label)} — {optionDisplayText(crowdWinnerOpt)}
+                    Internet decided: {cleanLabel(crowdWinnerOpt.label)} — {optionDisplayText(crowdWinnerOpt)}
                   </span>
                 ) : (
-                  <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-extrabold" style={{ color: NAVY }}>
-                    No votes yet
+                  <span
+                    className="rounded-full px-3 py-1 text-xs font-extrabold"
+                    style={{ background: "rgba(15,23,42,0.06)", color: NAVY }}
+                  >
+                    Internet decided: No winner yet
                   </span>
                 )}
 
@@ -524,15 +474,6 @@ export default function ResultsPage() {
                     style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
                   >
                     Curioso chose: {cleanLabel(curiosoFinalOpt.label)} — {optionDisplayText(curiosoFinalOpt)}
-                  </span>
-                ) : null}
-
-                {safeStr(q?.resolution_note) ? (
-                  <span
-                    className="rounded-full px-3 py-1 text-xs font-extrabold"
-                    style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
-                  >
-                    Curioso note included
                   </span>
                 ) : null}
               </div>
@@ -570,7 +511,7 @@ export default function ResultsPage() {
               {orderedOptions.map((opt: any, i: number) => {
                 const label = cleanLabel(opt?.label);
                 const count = Number(voteCounts[label] || 0);
-                const pct = totalVotes ? Math.round((count / totalVotes) * 100) : 0;
+                const pctValue = totalVotes ? Math.round((count / totalVotes) * 100) : 0;
 
                 const isCrowdWinner = !crowdResult.isTie && crowdWinnerLabel === label;
                 const isTiedWinner = crowdResult.isTie && crowdResult.tied.includes(label);
@@ -606,7 +547,7 @@ export default function ResultsPage() {
                         </div>
 
                         <div className="mt-2 text-xs text-slate-600">
-                          {count} vote{count === 1 ? "" : "s"} • {pct}%
+                          {count} vote{count === 1 ? "" : "s"} • {pctValue}%
                         </div>
 
                         <div className="mt-2 flex flex-wrap gap-2">
@@ -652,7 +593,7 @@ export default function ResultsPage() {
                     <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-100">
                       <div
                         className="h-full rounded-full"
-                        style={{ width: `${pct}%`, background: isHighlighted ? CORAL : BLUE }}
+                        style={{ width: `${pctValue}%`, background: isHighlighted ? CORAL : BLUE }}
                       />
                     </div>
 
@@ -696,49 +637,117 @@ export default function ResultsPage() {
         </section>
 
         {status === "resolved" ? (
-          <section
-            className="mt-7 rounded-[28px] border p-6 shadow-sm"
-            style={{
-              background: "#fff5f5",
-              borderColor: "rgba(255,107,107,0.35)",
-            }}
-          >
-            <div className="text-xs font-semibold tracking-widest" style={{ color: CORAL }}>
-              CURIOSO NOTE
-            </div>
-            <div className="mt-1 text-xl font-extrabold" style={{ color: NAVY }}>
-              Final word from the Curioso
-            </div>
-
-            {curiosoFinalOpt ? (
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <span
-                  className="rounded-full px-3 py-1 text-xs font-extrabold"
-                  style={{ background: "rgba(255,107,107,0.12)", color: CORAL }}
-                >
-                  Final choice: {cleanLabel(curiosoFinalOpt.label)} — {optionDisplayText(curiosoFinalOpt)}
-                </span>
-              </div>
-            ) : null}
-
-            <div
-              className="mt-4 rounded-2xl border p-5"
+          <>
+            <section
+              className="mt-7 rounded-[28px] border p-6 shadow-sm"
               style={{
-                background: "#fff0f0",
-                borderColor: "rgba(255,107,107,0.18)",
+                background: "#fff5f5",
+                borderColor: "rgba(255,107,107,0.35)",
               }}
             >
-              <div className="whitespace-pre-wrap text-sm text-slate-800">
-                {safeStr(q?.resolution_note) || "No note was left for this resolution."}
+              <div className="text-xs font-semibold tracking-widest" style={{ color: CORAL }}>
+                CURIOSO NOTE
               </div>
-              <div className="mt-3 text-xs text-slate-600">
-                Resolved on <span className="font-semibold">{fmt(q?.resolved_at)}</span>
+
+              <div className="mt-1 text-xl font-extrabold" style={{ color: NAVY }}>
+                Final word from the Curioso
               </div>
-            </div>
-          </section>
+
+              <div className="mt-3 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {crowdResult.isTie ? (
+                    <span
+                      className="rounded-full px-3 py-1 text-xs font-extrabold"
+                      style={{ background: "rgba(15,23,42,0.06)", color: NAVY }}
+                    >
+                      Internet decided: Tie — {crowdResult.tied.join(" / ")}
+                    </span>
+                  ) : crowdWinnerOpt ? (
+                    <span
+                      className="rounded-full px-3 py-1 text-xs font-extrabold"
+                      style={{ background: "rgba(15,23,42,0.06)", color: NAVY }}
+                    >
+                      Internet decided: {cleanLabel(crowdWinnerOpt.label)} — {optionDisplayText(crowdWinnerOpt)}
+                    </span>
+                  ) : (
+                    <span
+                      className="rounded-full px-3 py-1 text-xs font-extrabold"
+                      style={{ background: "rgba(15,23,42,0.06)", color: NAVY }}
+                    >
+                      Internet decided: No winner yet
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {curiosoFinalOpt ? (
+                    <span
+                      className="rounded-full px-3 py-1 text-sm font-extrabold"
+                      style={{ background: "rgba(255,107,107,0.15)", color: CORAL }}
+                    >
+                      Final decision: {cleanLabel(curiosoFinalOpt.label)} — {optionDisplayText(curiosoFinalOpt)}
+                    </span>
+                  ) : (
+                    <span
+                      className="rounded-full px-3 py-1 text-sm font-extrabold"
+                      style={{ background: "rgba(255,107,107,0.15)", color: CORAL }}
+                    >
+                      Final decision not provided
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div
+                className="mt-4 rounded-2xl border p-5"
+                style={{
+                  background: "#fff0f0",
+                  borderColor: "rgba(255,107,107,0.18)",
+                }}
+              >
+                <div className="whitespace-pre-wrap text-sm text-slate-800">
+                  {safeStr(q?.resolution_note) || "No note was left for this resolution."}
+                </div>
+
+                <div className="mt-3 text-xs text-slate-600">
+                  Resolved on <span className="font-semibold">{fmt(q?.resolved_at)}</span>
+                </div>
+              </div>
+            </section>
+
+            {Array.isArray(q?.resolution_image_urls) && q.resolution_image_urls.length > 0 ? (
+              <section className="mt-7 rounded-[28px] border bg-white p-6 shadow-sm">
+                <div className="text-xs font-semibold tracking-widest text-slate-600">
+                  WHAT HAPPENED NEXT
+                </div>
+
+                <div className="mt-2 text-sm font-semibold text-slate-700">
+                  Real outcome from the Curioso’s decision
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-4">
+                  {q.resolution_image_urls.map((url: string, index: number) => (
+                    <div key={index} className="flex justify-center">
+                      <img
+                        src={url}
+                        alt={`Outcome ${index + 1}`}
+                        className="max-h-80 w-auto object-cover rounded-xl border shadow-md"
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-3 text-xs text-slate-500">
+                  Decisions don’t end here. This is what happened next.
+                </div>
+              </section>
+            ) : null}
+          </>
         ) : null}
 
-        <div className="mt-10 pb-8 text-center text-xs text-slate-500">Quandr3 • Ask • Share • Decide</div>
+        <div className="mt-10 pb-8 text-center text-xs text-slate-500">
+          Quandr3 • Ask • Share • Decide
+        </div>
       </div>
     </main>
   );

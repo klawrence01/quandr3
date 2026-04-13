@@ -1,4 +1,3 @@
-// app/components/TopNav.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -23,14 +22,27 @@ export default function TopNav() {
 
   const [user, setUser] = useState<AuthedUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [awaitingCount, setAwaitingCount] = useState(0);
 
-  // ✅ Canonical routes (prevents drift)
   const CREATE_HREF = "/q/create";
-  const PROFILE_HREF = useMemo(() => (user?.id ? `/u/${user.id}` : "/login"), [user?.id]);
+  const PROFILE_HREF = useMemo(
+    () => (user?.id ? `/u/${user.id}` : "/login"),
+    [user?.id]
+  );
 
   const isOnCreate =
-    pathname === "/create" || pathname === "/q/create" || pathname?.startsWith("/q/create");
-  const isOnExplore = pathname === "/explore" || pathname?.startsWith("/explore");
+    pathname === "/create" ||
+    pathname === "/q/create" ||
+    pathname?.startsWith("/q/create");
+
+  const isOnExplore =
+    pathname === "/explore" || pathname?.startsWith("/explore");
+
+  const isOnBlog =
+    pathname === "/blog" || pathname?.startsWith("/blog");
+
+  const isOnInvite =
+    pathname === "/invite" || pathname?.startsWith("/invite");
 
   useEffect(() => {
     let alive = true;
@@ -52,12 +64,13 @@ export default function TopNav() {
 
     load();
 
-    // ✅ stays in sync if auth changes while app is open
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      const u = session?.user;
-      setUser(u ? { id: u.id, email: u.email } : null);
-      setCheckingAuth(false);
-    });
+    const { data: sub } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        const u = session?.user;
+        setUser(u ? { id: u.id, email: u.email } : null);
+        setCheckingAuth(false);
+      }
+    );
 
     return () => {
       alive = false;
@@ -65,20 +78,40 @@ export default function TopNav() {
     };
   }, []);
 
-  async function handleLogout() {
-    try {
-      // ✅ real sign-out
-      await supabase.auth.signOut();
-    } catch {
-      // ignore
+  useEffect(() => {
+    if (!user?.id) {
+      setAwaitingCount(0);
+      return;
     }
 
-    // optional legacy route if you still have it
+    let alive = true;
+
+    async function loadAwaiting() {
+      const { count } = await supabase
+        .from("quandr3s")
+        .select("*", { count: "exact", head: true })
+        .eq("author_id", user.id)
+        .eq("status", "awaiting_user");
+
+      if (!alive) return;
+      setAwaitingCount(count || 0);
+    }
+
+    loadAwaiting();
+
+    return () => {
+      alive = false;
+    };
+  }, [user?.id]);
+
+  async function handleLogout() {
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+
     try {
       await fetch("/api/logout", { method: "POST" });
-    } catch {
-      // ignore
-    }
+    } catch {}
 
     router.push("/");
     router.refresh();
@@ -89,7 +122,6 @@ export default function TopNav() {
   return (
     <header className="w-full border-b border-slate-200 bg-white/80 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-        {/* LEFT */}
         <div className="flex items-center gap-6">
           <Link href="/" className="flex items-center gap-3">
             <Image
@@ -101,7 +133,9 @@ export default function TopNav() {
               priority
             />
             <div className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold text-slate-900">Quandr3</span>
+              <span className="text-sm font-semibold text-slate-900">
+                Quandr3
+              </span>
               <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
                 Ask. Share. Decide.
               </span>
@@ -112,19 +146,42 @@ export default function TopNav() {
             <Link
               href="/explore"
               className={`text-sm font-medium ${
-                isOnExplore ? "text-slate-900" : "text-slate-600 hover:text-slate-900"
+                isOnExplore
+                  ? "text-slate-900"
+                  : "text-slate-600 hover:text-slate-900"
               }`}
             >
               Explore
             </Link>
+
+            <Link
+              href="/blog"
+              className={`text-sm font-medium ${
+                isOnBlog
+                  ? "text-slate-900"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Founder’s Notes
+            </Link>
+
+            <Link
+              href="/invite"
+              className={`text-sm font-medium ${
+                isOnInvite
+                  ? "text-slate-900"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Invite
+            </Link>
           </nav>
         </div>
 
-        {/* RIGHT */}
         <div className="flex items-center gap-3">
           <Link
             href={CREATE_HREF}
-            className={`inline-flex items-center rounded-full px-4 py-1.5 text-xs sm:text-sm font-semibold text-white shadow-sm whitespace-nowrap transition-transform ${
+            className={`inline-flex items-center rounded-full px-4 py-1.5 text-xs font-semibold whitespace-nowrap text-white shadow-sm transition-transform sm:text-sm ${
               isOnCreate ? "scale-[1.02]" : "hover:scale-[1.02]"
             }`}
             style={{
@@ -136,35 +193,40 @@ export default function TopNav() {
 
           {checkingAuth ? null : user ? (
             <div className="flex items-center gap-2">
-              {/* ✅ ALWAYS goes to /u/[uuid] */}
               <Link
                 href={PROFILE_HREF}
                 className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                title="View your profile"
               >
                 View Profile
               </Link>
 
-              {/* capsule */}
-              <Link
-                href={PROFILE_HREF}
-                className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 shadow-sm"
-              >
-                <div
-                  className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white"
-                  style={{ background: NAVY }}
+              <div className="relative">
+                <Link
+                  href={PROFILE_HREF}
+                  className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 shadow-sm"
                 >
-                  {initial}
-                </div>
-                <div className="flex flex-col leading-tight">
-                  <span className="max-w-[160px] truncate text-xs font-medium text-slate-800">
-                    {user.email}
-                  </span>
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Wayfinder
-                  </span>
-                </div>
-              </Link>
+                  <div
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white"
+                    style={{ background: NAVY }}
+                  >
+                    {initial}
+                  </div>
+                  <div className="flex flex-col leading-tight">
+                    <span className="max-w-[160px] truncate text-xs font-medium text-slate-800">
+                      {user.email}
+                    </span>
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                      Wayfinder
+                    </span>
+                  </div>
+                </Link>
+
+                {awaitingCount > 0 && (
+                  <div className="absolute -top-1 -right-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow">
+                    {awaitingCount}
+                  </div>
+                )}
+              </div>
 
               <button
                 type="button"
@@ -176,7 +238,10 @@ export default function TopNav() {
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <Link href="/login" className="text-sm font-medium text-slate-700 hover:text-slate-900">
+              <Link
+                href="/login"
+                className="text-sm font-medium text-slate-700 hover:text-slate-900"
+              >
                 Log in
               </Link>
               <Link
