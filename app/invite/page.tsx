@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/utils/supabase/browser";
 
-export default function InvitePage() {
+function InvitePageInner() {
   const searchParams = useSearchParams();
 
   const [user, setUser] = useState<any>(null);
@@ -123,5 +123,20 @@ export default function InvitePage() {
         <strong>People you’ve invited:</strong> {count}
       </div>
     </div>
+  );
+}
+
+export default function InvitePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="max-w-xl mx-auto mt-10 p-6 border rounded-xl">
+          <h1 className="text-2xl font-bold mb-2">Invite Friends</h1>
+          <p className="text-sm text-gray-600">Loading invite page...</p>
+        </div>
+      }
+    >
+      <InvitePageInner />
+    </Suspense>
   );
 }

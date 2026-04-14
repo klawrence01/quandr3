@@ -1,13 +1,13 @@
 "use client";
 // @ts-nocheck
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/utils/supabase/browser";
 
 const PENDING_PROFILE_KEY = "q3_pending_profile";
 
-export default function LoginClient() {
+function LoginClientInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -178,5 +178,20 @@ export default function LoginClient() {
         Need an account? Sign up
       </button>
     </div>
+  );
+}
+
+export default function LoginClient() {
+  return (
+    <Suspense
+      fallback={
+        <div className="w-full max-w-md mx-auto p-6 border rounded-xl">
+          <h1 className="text-xl font-bold mb-4">Login</h1>
+          <p className="text-sm text-gray-600">Loading login...</p>
+        </div>
+      }
+    >
+      <LoginClientInner />
+    </Suspense>
   );
 }
