@@ -44,6 +44,7 @@ export default function TopNav() {
   const isOnInvite =
     pathname === "/invite" || pathname?.startsWith("/invite");
 
+  // 🔐 AUTH LOAD
   useEffect(() => {
     let alive = true;
 
@@ -78,8 +79,11 @@ export default function TopNav() {
     };
   }, []);
 
+  // 🔥 FIXED AWAITING COUNT (TypeScript-safe)
   useEffect(() => {
-    if (!user?.id) {
+    const uid = user?.id;
+
+    if (!uid) {
       setAwaitingCount(0);
       return;
     }
@@ -90,7 +94,7 @@ export default function TopNav() {
       const { count } = await supabase
         .from("quandr3s")
         .select("*", { count: "exact", head: true })
-        .eq("author_id", user.id)
+        .eq("author_id", uid)
         .eq("status", "awaiting_user");
 
       if (!alive) return;
@@ -122,6 +126,8 @@ export default function TopNav() {
   return (
     <header className="w-full border-b border-slate-200 bg-white/80 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+        
+        {/* LEFT */}
         <div className="flex items-center gap-6">
           <Link href="/" className="flex items-center gap-3">
             <Image
@@ -178,6 +184,7 @@ export default function TopNav() {
           </nav>
         </div>
 
+        {/* RIGHT */}
         <div className="flex items-center gap-3">
           <Link
             href={CREATE_HREF}
@@ -193,6 +200,7 @@ export default function TopNav() {
 
           {checkingAuth ? null : user ? (
             <div className="flex items-center gap-2">
+              
               <Link
                 href={PROFILE_HREF}
                 className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
@@ -211,6 +219,7 @@ export default function TopNav() {
                   >
                     {initial}
                   </div>
+
                   <div className="flex flex-col leading-tight">
                     <span className="max-w-[160px] truncate text-xs font-medium text-slate-800">
                       {user.email}
@@ -221,6 +230,7 @@ export default function TopNav() {
                   </div>
                 </Link>
 
+                {/* 🔴 Notification Badge */}
                 {awaitingCount > 0 && (
                   <div className="absolute -top-1 -right-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow">
                     {awaitingCount}
