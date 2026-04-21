@@ -27,6 +27,16 @@ function safeStr(x: any) {
   return (x ?? "").toString();
 }
 
+function normalizeCategory(x: any) {
+  const s = safeStr(x).trim().toLowerCase();
+
+  if (!s) return "";
+  if (s === "careers") return "career";
+  if (s === "relationships") return "relationship";
+
+  return s;
+}
+
 /* =========================
    ✅ location parser
    Expects: "City, County, ST" (or any subset)
@@ -130,7 +140,7 @@ export default function ExploreClient() {
   }, []);
 
   useEffect(() => {
-    const cat = safeStr(searchParams.get("category")).trim().toLowerCase();
+    const cat = normalizeCategory(searchParams.get("category"));
 
     if (cat) {
       setCategoryFilter(cat);
@@ -228,14 +238,31 @@ export default function ExploreClient() {
     try {
       const uid = await loadMe();
 
-      // ✅ QUEUE QUERY: show only released posts (published_at <= now) OR legacy rows (published_at is null)
       const nowIso = new Date().toISOString();
 
       const { data, error } = await supabase
         .from("quandr3s")
-        .select(
-          "id,title,prompt,category,status,created_at,closes_at,city,region,state,author_id,published_at"
-        )
+        .select(`
+          id,
+          title,
+          prompt,
+          category,
+          status,
+          created_at,
+          closes_at,
+          city,
+          region,
+          state,
+          author_id,
+          published_at,
+          profiles:author_id (
+            display_name,
+            username,
+            avatar_url,
+            city,
+            state
+          )
+        `)
         .or(`published_at.is.null,published_at.lte.${nowIso}`)
         .order("published_at", { ascending: false })
         .order("created_at", { ascending: false })
@@ -244,8 +271,6 @@ export default function ExploreClient() {
       if (error) throw error;
 
       setRows(data || []);
-
-      // ✅ Following list (used by Following tab)
       await loadFollows(uid);
     } catch (e: any) {
       setErr(e?.message || "Failed to load Explore.");
@@ -254,13 +279,11 @@ export default function ExploreClient() {
     }
   }
 
-  // Initial load
   useEffect(() => {
     load("mount");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ Refresh when returning to tab / window
   useEffect(() => {
     function onFocus() {
       if (!shouldReloadNow()) return;
@@ -281,7 +304,6 @@ export default function ExploreClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ Refresh when Create/Resolve sets localStorage flag
   useEffect(() => {
     function tick() {
       try {
@@ -302,7 +324,6 @@ export default function ExploreClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ Realtime: refresh on INSERT to quandr3s
   useEffect(() => {
     const channel = supabase
       .channel("quandr3s-explore-inserts")
@@ -326,7 +347,9 @@ export default function ExploreClient() {
 
   const categories = useMemo(() => {
     const cats = uniq(
-      (rows || []).map((r) => safeStr(r?.category).trim()).filter(Boolean)
+      (rows || [])
+        .map((r) => normalizeCategory(r?.category))
+        .filter(Boolean)
     );
     return ["all", ...cats.sort((a: string, b: string) => a.localeCompare(b))];
   }, [rows]);
@@ -339,19 +362,16 @@ export default function ExploreClient() {
   const filtered = useMemo(() => {
     let out = [...(rows || [])];
 
-    // ✅ Following tab (requires login)
     if (statusFilter === "following") {
       if (!meId) return [];
       out = out.filter((r) => followedSet.has(safeStr(r?.id)));
     }
 
-    // ✅ Mine tab (requires login)
     if (statusFilter === "mine") {
       if (!meId) return [];
       out = out.filter((r) => safeStr(r?.author_id) === safeStr(meId));
     }
 
-    // ✅ Local/Global: City-first, County/Region fallback
     if (scope === "local") {
       const mc = safeStr(meCity).trim().toLowerCase();
       const mr = safeStr(meRegion).trim().toLowerCase();
@@ -372,7 +392,6 @@ export default function ExploreClient() {
       }
     }
 
-    // ✅ Status filter (time-aware) — only when using the status buckets
     if (
       statusFilter === "open" ||
       statusFilter === "closed" ||
@@ -381,29 +400,30 @@ export default function ExploreClient() {
       out = out.filter((r) => normStatusForFilter(r) === statusFilter);
     }
 
-    // ✅ Category filter from hub or manual selection
-    if (safeStr(categoryFilter).trim().toLowerCase() !== "all") {
+    if (normalizeCategory(categoryFilter) !== "all") {
       out = out.filter(
-        (r) =>
-          safeStr(r?.category).trim().toLowerCase() ===
-          safeStr(categoryFilter).trim().toLowerCase()
+        (r) => normalizeCategory(r?.category) === normalizeCategory(categoryFilter)
       );
     }
 
-    // Search
     const q = searchQ.trim().toLowerCase();
     if (q) {
       out = out.filter((r) => {
+        const profile = r?.profiles || {};
         const blob = [
           r?.title,
           r?.prompt,
-          r?.category,
+          normalizeCategory(r?.category),
           r?.city,
           r?.region,
           r?.state,
           r?.status,
           effectiveStatus(r),
           r?.author_id,
+          profile?.display_name,
+          profile?.username,
+          profile?.city,
+          profile?.state,
         ]
           .map((x) => safeStr(x).toLowerCase())
           .join(" ");
@@ -427,7 +447,6 @@ export default function ExploreClient() {
 
   return (
     <div>
-      {/* ✅ Clean utility bar (minimal, matches MVP look) */}
       <div className="mx-auto max-w-6xl px-4 pt-4">
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button
@@ -451,6 +470,80 @@ export default function ExploreClient() {
           >
             {installReady ? "Install App" : "Add to Home Screen"}
           </button>
+        </div>
+      </div>
+
+      <div className="mx-auto mt-4 max-w-6xl px-4">
+        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+          <h1 className="text-xl font-semibold tracking-tight">
+            Real People. Real Dilemmas. Real Decisions.
+          </h1>
+          <p className="mt-1 text-sm text-neutral-600">
+            See what others are facing—or jump in and help decide.
+          </p>
+          <p className="mt-2 text-xs font-medium text-neutral-500">
+            Vote. Add your reason. Learn what happens next.
+          </p>
+        </div>
+      </div>
+
+      <div className="mx-auto mt-3 max-w-6xl px-4">
+        <div className="space-y-3 rounded-2xl border bg-white p-3 shadow-sm">
+          <input
+            value={searchQ}
+            onChange={(e) => setSearchQ(e.target.value)}
+            placeholder="Search Quandr3s or people"
+            className="w-full rounded-xl border px-3 py-2 text-sm"
+          />
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setScope("global")}
+              className={`rounded-full border px-3 py-1 text-sm ${
+                scope === "global" ? "bg-black text-white" : ""
+              }`}
+            >
+              Global
+            </button>
+            <button
+              onClick={() => setScope("local")}
+              className={`rounded-full border px-3 py-1 text-sm ${
+                scope === "local" ? "bg-black text-white" : ""
+              }`}
+            >
+              Local
+            </button>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {["all", "open", "closed", "resolved"].map((s) => (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(s as any)}
+                className={`rounded-full border px-3 py-1 text-sm ${
+                  statusFilter === s ? "bg-black text-white" : ""
+                }`}
+              >
+                {s === "closed"
+                  ? "Internet Decided"
+                  : s.charAt(0).toUpperCase() + s.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {categories.map((c: string) => (
+              <button
+                key={c}
+                onClick={() => setCategoryFilter(c)}
+                className={`rounded-full border px-3 py-1 text-sm ${
+                  categoryFilter === c ? "bg-black text-white" : ""
+                }`}
+              >
+                {c === "all" ? "All" : c.charAt(0).toUpperCase() + c.slice(1)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

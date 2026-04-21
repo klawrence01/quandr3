@@ -80,7 +80,7 @@ const TABS = [
   { key: "latest", label: "Latest Quandr3s" },
   { key: "followers", label: "Followers" },
   { key: "following", label: "Following" },
-  { key: "people", label: "People Search" }, // ✅ NEW
+  { key: "people", label: "People Search" },
 ];
 
 export default function UserProfilePage() {
@@ -100,7 +100,7 @@ export default function UserProfilePage() {
   const [counts, setCounts] = useState({
     followers: 0,
     following: 0,
-    referrals: 0, // ✅ NEW: running tally
+    referrals: 0,
   });
 
   const [isFollowing, setIsFollowing] = useState(false);
@@ -115,14 +115,12 @@ export default function UserProfilePage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  // ✅ newest request wins
   const reqRef = useRef(0);
 
-  // ✅ isMe only true when route param is a real UUID AND auth user is loaded
   const isMe = !!me?.id && validProfileId && me.id === profileId;
 
   /* =========================
-     People Search (NEW)
+     People Search
   ========================= */
   const [peopleQ, setPeopleQ] = useState("");
   const [peopleLoading, setPeopleLoading] = useState(false);
@@ -130,7 +128,6 @@ export default function UserProfilePage() {
   const [peopleResults, setPeopleResults] = useState<any[]>([]);
   const peopleReqRef = useRef(0);
 
-  // Load auth user
   useEffect(() => {
     let alive = true;
 
@@ -152,13 +149,11 @@ export default function UserProfilePage() {
     };
   }, []);
 
-  // Load profile + counts + lists
   useEffect(() => {
     if (!profileId) return;
 
     const reqId = ++reqRef.current;
 
-    // ✅ If route param is not a UUID, do not query Supabase
     if (!validProfileId) {
       setLoading(false);
       setProfile({
@@ -185,10 +180,8 @@ export default function UserProfilePage() {
     setErr("");
 
     const run = async () => {
-      // Wrap the whole load so we *never* hang forever
       return withTimeout(
         (async () => {
-          // 1) profile
           let prof: any = null;
 
           const { data: profRow, error: profErr } = await supabase
@@ -211,7 +204,6 @@ export default function UserProfilePage() {
             };
           }
 
-          // 2) follower/following counts
           const [{ count: followersCount }, { count: followingCount }] =
             await Promise.all([
               supabase
@@ -224,8 +216,6 @@ export default function UserProfilePage() {
                 .eq("follower_id", profileId),
             ]);
 
-          // 2b) referral count (profiles.referred_by = this profileId)
-          // ✅ This is the running tally you asked for (credit system comes later)
           let referralsCount = 0;
           try {
             const { count } = await supabase
@@ -235,11 +225,9 @@ export default function UserProfilePage() {
 
             referralsCount = count || 0;
           } catch {
-            // if RLS blocks or column missing, fail soft
             referralsCount = 0;
           }
 
-          // 3) isFollowing
           let followState = false;
           if (me?.id && me.id !== profileId) {
             const { data: fRow } = await supabase
@@ -251,7 +239,6 @@ export default function UserProfilePage() {
             followState = !!fRow?.id;
           }
 
-          // 4) Latest Quandr3s
           let latestRows: any[] = [];
           let latestErr: any = null;
 
@@ -286,7 +273,6 @@ export default function UserProfilePage() {
 
           if (latestErr) throw latestErr;
 
-          // 5) Followers / Following lists
           const [followersRes, followingRes] = await Promise.all([
             supabase
               .from("follows")
@@ -382,7 +368,6 @@ export default function UserProfilePage() {
         const name = e?.name || "";
         const msg = e?.message || "";
 
-        // ignore cancelled
         if (name === "AbortError" || msg.includes("signal is aborted")) return;
 
         setErr(msg || "Something went wrong loading this profile.");
@@ -396,7 +381,6 @@ export default function UserProfilePage() {
     };
   }, [profileId, validProfileId, me?.id]);
 
-  // ✅ People Search query (debounced)
   useEffect(() => {
     if (activeTab !== "people") return;
 
@@ -432,7 +416,6 @@ export default function UserProfilePage() {
         .catch((e: any) => {
           if (myReq !== peopleReqRef.current) return;
           const msg = e?.message || "Could not search people.";
-          // ignore aborted
           if (msg.includes("signal is aborted")) return;
           setPeopleErr(msg);
           setPeopleResults([]);
@@ -729,15 +712,51 @@ export default function UserProfilePage() {
             }}
           >
             <div>
-              <div
-                style={{
-                  fontSize: 40,
-                  fontWeight: 1100,
-                  color: NAVY,
-                  lineHeight: 1.05,
-                }}
-              >
-                {displayName}
+              {/* 🔥 Avatar + Name */}
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                <div
+                  style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: 20,
+                    background: SOFT_BG,
+                    border: "2px solid #e5ecfb",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontWeight: 1100,
+                    fontSize: 22,
+                    color: NAVY,
+                  }}
+                >
+                  {(displayName?.[0] || "U").toUpperCase()}
+                </div>
+
+                <div>
+                  <div
+                    style={{
+                      fontSize: 36,
+                      fontWeight: 1100,
+                      color: NAVY,
+                      lineHeight: 1.05,
+                    }}
+                  >
+                    {displayName}
+                  </div>
+
+                  {loc ? (
+                    <div
+                      style={{
+                        marginTop: 6,
+                        fontSize: 13,
+                        fontWeight: 900,
+                        color: "#5f7896",
+                      }}
+                    >
+                      {loc}
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
               <div
@@ -750,19 +769,6 @@ export default function UserProfilePage() {
               >
                 {bio ? bio : "No bio yet."}
               </div>
-
-              {loc ? (
-                <div
-                  style={{
-                    marginTop: 8,
-                    fontSize: 13,
-                    fontWeight: 900,
-                    color: "#5f7896",
-                  }}
-                >
-                  {loc}
-                </div>
-              ) : null}
 
               {!validProfileId ? (
                 <div
@@ -845,7 +851,6 @@ export default function UserProfilePage() {
                 Following ({counts.following})
               </button>
 
-              {/* ✅ NEW: referrals tally */}
               <button
                 onClick={() => validProfileId && setActiveTab("people")}
                 disabled={!validProfileId}
@@ -971,7 +976,6 @@ export default function UserProfilePage() {
                 </div>
               ) : null}
 
-              {/* ✅ NEW: People Search */}
               {!loading && activeTab === "people" ? (
                 <div style={{ display: "grid", gap: 12 }}>
                   <div

@@ -1,8 +1,10 @@
 "use client";
 // @ts-nocheck
 
-import { useMemo } from "react";
 import { useRouter } from "next/navigation";
+
+import FollowButton from "@/components/social/FollowButton";
+import ShareButton from "@/components/social/ShareButton";
 
 const NAVY = "#0b2343";
 const BLUE = "#1e63f3";
@@ -39,7 +41,7 @@ function isAuthorRow(row: any, meId?: string) {
   return !!mine && !!authorId && mine === authorId;
 }
 
-/* 🔥 UPDATED STATUS BADGES */
+/* 🔥 STATUS BADGES */
 function statusBadgeForRow(row: any, meId?: string) {
   const s = effectiveStatus(row);
   const mine = isAuthorRow(row, meId);
@@ -79,26 +81,7 @@ function tiny(s?: string, n = 170) {
 export default function ExploreInner(props: any) {
   const router = useRouter();
 
-  const {
-    loading,
-    error,
-    rows,
-    rawRows,
-    meId,
-    meCity,
-    meState,
-    scope,
-    setScope,
-    statusFilter,
-    setStatusFilter,
-    categoryFilter,
-    setCategoryFilter,
-    categories,
-    searchOpen,
-    setSearchOpen,
-    searchQ,
-    setSearchQ,
-  } = props;
+  const { loading, error, rows, meId } = props;
 
   const feed = rows || [];
 
@@ -117,14 +100,65 @@ export default function ExploreInner(props: any) {
               const h = hoursLeft(r?.closes_at);
               const mine = isAuthorRow(r, meId);
 
+              // 🔥 PROFILE DATA
+              const profile = r.profiles || {};
+              const name =
+                profile.display_name ||
+                profile.username ||
+                `User ${r.author_id?.slice(0, 6) || ""}`;
+
+              const initial = name?.[0]?.toUpperCase() || "U";
+
               return (
                 <div
                   key={r.id}
                   className="rounded-[28px] border bg-white p-6 shadow-sm hover:shadow-md cursor-pointer transition"
                   onClick={() => router.push(`/q/${r.id}`)}
                 >
-                  {/* HEADER */}
-                  <div className="flex flex-wrap items-center gap-2">
+
+                  {/* 🔥 AUTHOR ROW */}
+                  <div className="flex items-center justify-between gap-3">
+
+                    {/* LEFT: Avatar + Name */}
+                    <div className="flex items-center gap-2">
+                      <div className="h-9 w-9 rounded-full bg-slate-200 overflow-hidden flex items-center justify-center text-xs font-bold">
+                        {profile.avatar_url ? (
+                          <img
+                            src={profile.avatar_url}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <span>{initial}</span>
+                        )}
+                      </div>
+
+                      <div
+                        className="text-sm font-semibold cursor-pointer hover:underline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          router.push(`/u/${r.author_id}`);
+                        }}
+                      >
+                        {name}
+                      </div>
+                    </div>
+
+                    {/* RIGHT: Follow + Share */}
+                    <div
+                      className="flex items-center gap-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <FollowButton profileId={r.author_id} />
+                      <ShareButton
+                        quandr3Id={r.id}
+                        title={r.title}
+                        isAuthor={meId === r.author_id}
+                      />
+                    </div>
+                  </div>
+
+                  {/* CATEGORY + YOURS */}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
                     <div className="text-xs font-extrabold tracking-[0.22em] text-slate-500">
                       {(r?.category || "QUANDR3").toUpperCase()}
                     </div>

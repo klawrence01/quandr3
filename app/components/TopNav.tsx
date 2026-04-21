@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
@@ -23,6 +23,9 @@ export default function TopNav() {
   const [user, setUser] = useState<AuthedUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [awaitingCount, setAwaitingCount] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const CREATE_HREF = "/q/create";
   const PROFILE_HREF = useMemo(
@@ -38,13 +41,13 @@ export default function TopNav() {
   const isOnExplore =
     pathname === "/explore" || pathname?.startsWith("/explore");
 
-  const isOnBlog =
-    pathname === "/blog" || pathname?.startsWith("/blog");
+  const isOnNotifications =
+    pathname === "/notifications" || pathname?.startsWith("/notifications");
 
-  const isOnInvite =
-    pathname === "/invite" || pathname?.startsWith("/invite");
+  const isOnBlog = pathname === "/blog" || pathname?.startsWith("/blog");
+  const isOnInvite = pathname === "/invite" || pathname?.startsWith("/invite");
+  const isOnProfile = !!user?.id && pathname?.startsWith(`/u/${user.id}`);
 
-  // 🔐 AUTH LOAD
   useEffect(() => {
     let alive = true;
 
@@ -79,7 +82,6 @@ export default function TopNav() {
     };
   }, []);
 
-  // 🔥 FIXED AWAITING COUNT (TypeScript-safe)
   useEffect(() => {
     const uid = user?.id;
 
@@ -108,6 +110,27 @@ export default function TopNav() {
     };
   }, [user?.id]);
 
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+
+    function handleEsc(e: KeyboardEvent) {
+      if (e.key === "Escape") setMenuOpen(false);
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEsc);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEsc);
+    };
+  }, []);
+
   async function handleLogout() {
     try {
       await supabase.auth.signOut();
@@ -117,16 +140,23 @@ export default function TopNav() {
       await fetch("/api/logout", { method: "POST" });
     } catch {}
 
+    setMenuOpen(false);
     router.push("/");
     router.refresh();
   }
 
   const initial = (user?.email?.[0] || "Q").toUpperCase();
 
+  const menuLinkClass = (active?: boolean) =>
+    `block rounded-xl px-3 py-2 text-sm font-medium transition ${
+      active
+        ? "bg-slate-100 text-slate-900"
+        : "text-slate-700 hover:bg-slate-50 hover:text-slate-900 hover:font-semibold"
+    }`;
+
   return (
     <header className="w-full border-b border-slate-200 bg-white/80 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-        
         {/* LEFT */}
         <div className="flex items-center gap-6">
           <Link href="/" className="flex items-center gap-3">
@@ -148,44 +178,47 @@ export default function TopNav() {
             </div>
           </Link>
 
-          <nav className="flex items-center gap-6">
+          <nav className="hidden items-center gap-6 sm:flex">
             <Link
               href="/explore"
-              className={`text-sm font-medium ${
+              className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
                 isOnExplore
-                  ? "text-slate-900"
-                  : "text-slate-600 hover:text-slate-900"
+                  ? "text-white"
+                  : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
               }`}
+              style={
+                isOnExplore
+                  ? { background: `linear-gradient(90deg, ${BLUE}, ${TEAL})` }
+                  : undefined
+              }
             >
               Explore
-            </Link>
-
-            <Link
-              href="/blog"
-              className={`text-sm font-medium ${
-                isOnBlog
-                  ? "text-slate-900"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Founder’s Notes
-            </Link>
-
-            <Link
-              href="/invite"
-              className={`text-sm font-medium ${
-                isOnInvite
-                  ? "text-slate-900"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Invite
             </Link>
           </nav>
         </div>
 
         {/* RIGHT */}
         <div className="flex items-center gap-3">
+          {/* 🔔 NOTIFICATION BELL */}
+          {user && (
+            <Link
+              href="/notifications"
+              className={`relative flex h-10 w-10 items-center justify-center rounded-full border bg-white hover:bg-slate-50 ${
+                isOnNotifications ? "border-slate-400" : "border-slate-200"
+              }`}
+              title="Notifications"
+            >
+              <span className="text-lg">🔔</span>
+
+              {awaitingCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                  {awaitingCount}
+                </span>
+              )}
+            </Link>
+          )}
+
+          {/* CREATE */}
           <Link
             href={CREATE_HREF}
             className={`inline-flex items-center rounded-full px-4 py-1.5 text-xs font-semibold whitespace-nowrap text-white shadow-sm transition-transform sm:text-sm ${
@@ -195,57 +228,99 @@ export default function TopNav() {
               background: `linear-gradient(90deg, ${BLUE} 0%, ${TEAL} 50%, ${CORAL} 100%)`,
             }}
           >
-            Create a Quandr3
+            Create
           </Link>
 
           {checkingAuth ? null : user ? (
-            <div className="flex items-center gap-2">
-              
+            <>
+              {/* PROFILE */}
               <Link
                 href={PROFILE_HREF}
-                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                className={`flex items-center gap-2 rounded-full border bg-white px-3 py-1.5 shadow-sm ${
+                  isOnProfile ? "border-slate-400" : "border-slate-200"
+                }`}
+                title="Profile"
               >
-                View Profile
+                <div
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white"
+                  style={{ background: NAVY }}
+                >
+                  {initial}
+                </div>
               </Link>
 
-              <div className="relative">
-                <Link
-                  href={PROFILE_HREF}
-                  className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 shadow-sm"
+              {/* HAMBURGER MENU */}
+              <div className="relative" ref={menuRef}>
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((v) => !v)}
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  aria-label="Open menu"
+                  aria-expanded={menuOpen}
+                  aria-haspopup="menu"
+                  title="Menu"
                 >
-                  <div
-                    className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white"
-                    style={{ background: NAVY }}
-                  >
-                    {initial}
-                  </div>
+                  <span className="text-lg">☰</span>
+                </button>
 
-                  <div className="flex flex-col leading-tight">
-                    <span className="max-w-[160px] truncate text-xs font-medium text-slate-800">
-                      {user.email}
-                    </span>
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                      Wayfinder
-                    </span>
-                  </div>
-                </Link>
+                {menuOpen && (
+                  <div className="absolute right-0 top-12 z-50 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                    <div className="border-b border-slate-100 px-3 py-2">
+                      <div className="truncate text-sm font-semibold text-slate-900">
+                        {user.email}
+                      </div>
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        Wayfinder
+                      </div>
+                    </div>
 
-                {/* 🔴 Notification Badge */}
-                {awaitingCount > 0 && (
-                  <div className="absolute -top-1 -right-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow">
-                    {awaitingCount}
+                    <div className="space-y-1 py-2">
+                      <Link
+                        href="/blog"
+                        className={menuLinkClass(isOnBlog)}
+                        onClick={() => setMenuOpen(false)}
+                      >
+                        Founder’s Notes
+                      </Link>
+
+                      <Link
+                        href="/invite"
+                        className={menuLinkClass(isOnInvite)}
+                        onClick={() => setMenuOpen(false)}
+                      >
+                        Invite
+                      </Link>
+
+                      <Link
+                        href={PROFILE_HREF}
+                        className={menuLinkClass(isOnProfile)}
+                        onClick={() => setMenuOpen(false)}
+                      >
+                        View Profile
+                      </Link>
+
+                      <Link
+                        href="/notifications"
+                        className={menuLinkClass(isOnNotifications)}
+                        onClick={() => setMenuOpen(false)}
+                      >
+                        Notifications
+                      </Link>
+                    </div>
+
+                    <div className="border-t border-slate-100 pt-2">
+                      <button
+                        type="button"
+                        onClick={handleLogout}
+                        className="block w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:text-slate-900 hover:font-semibold"
+                      >
+                        Log out
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
-
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Log out
-              </button>
-            </div>
+            </>
           ) : (
             <div className="flex items-center gap-2">
               <Link
