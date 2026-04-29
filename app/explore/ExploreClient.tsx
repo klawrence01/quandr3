@@ -10,9 +10,6 @@ import ExploreInner from "./_ExploreInner";
 
 const SAFE_LIMIT = 250;
 
-/* =========================
-   Brand
-========================= */
 const NAVY = "#0b2343";
 const BLUE = "#1e63f3";
 const TEAL = "#00a9a5";
@@ -29,18 +26,12 @@ function safeStr(x: any) {
 
 function normalizeCategory(x: any) {
   const s = safeStr(x).trim().toLowerCase();
-
   if (!s) return "";
   if (s === "careers") return "career";
   if (s === "relationships") return "relationship";
-
   return s;
 }
 
-/* =========================
-   ✅ location parser
-   Expects: "City, County, ST" (or any subset)
-========================= */
 function parseLocation(loc?: string) {
   const parts = safeStr(loc)
     .split(",")
@@ -55,10 +46,6 @@ function parseLocation(loc?: string) {
   };
 }
 
-/* =========================
-   ✅ time-aware status helpers
-========================= */
-
 function hoursLeft(closesAt?: string) {
   if (!closesAt) return null;
   const end = new Date(closesAt).getTime();
@@ -66,10 +53,6 @@ function hoursLeft(closesAt?: string) {
   return Math.max(0, Math.ceil(diff / 3600000));
 }
 
-/**
- * ✅ UI-only effective status:
- * If status is "open" but closes_at already passed, treat as "awaiting_user"
- */
 function effectiveStatus(row: any) {
   const s = (row?.status || "").toLowerCase();
   if (s === "open") {
@@ -79,9 +62,6 @@ function effectiveStatus(row: any) {
   return s || "unknown";
 }
 
-/**
- * ✅ Used ONLY for the status filter buttons (all/open/closed/resolved)
- */
 function normStatusForFilter(row: any) {
   const s = effectiveStatus(row);
   if (s === "open") return "open";
@@ -97,16 +77,13 @@ export default function ExploreClient() {
   const [rows, setRows] = useState<any[]>([]);
   const [err, setErr] = useState("");
 
-  // viewer profile (for Local toggle)
   const [meId, setMeId] = useState("");
   const [meCity, setMeCity] = useState("");
   const [meState, setMeState] = useState("");
   const [meRegion, setMeRegion] = useState("");
 
-  // ✅ Following
   const [followedIds, setFollowedIds] = useState<string[]>([]);
 
-  // UI filters
   const [scope, setScope] = useState<"global" | "local">("global");
   const [statusFilter, setStatusFilter] = useState<
     "all" | "open" | "closed" | "resolved" | "following" | "mine"
@@ -115,11 +92,6 @@ export default function ExploreClient() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState("");
 
-  // ✅ PWA Install
-  const [installPrompt, setInstallPrompt] = useState<any>(null);
-  const [installReady, setInstallReady] = useState(false);
-
-  // ✅ avoid rapid double-refresh storms
   const lastReloadRef = useRef<number>(0);
   function shouldReloadNow() {
     const now = Date.now();
@@ -128,58 +100,13 @@ export default function ExploreClient() {
     return true;
   }
 
-  useEffect(() => {
-    function onBeforeInstallPrompt(e: any) {
-      e.preventDefault();
-      setInstallPrompt(e);
-      setInstallReady(true);
-    }
-    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    return () =>
-      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-  }, []);
-
-  useEffect(() => {
-    const cat = normalizeCategory(searchParams.get("category"));
-
-    if (cat) {
-      setCategoryFilter(cat);
-    } else {
-      setCategoryFilter("all");
-    }
-  }, [searchParams]);
-
-  async function handleInstall() {
-    if (installPrompt) {
-      try {
-        installPrompt.prompt();
-        await installPrompt.userChoice;
-        setInstallPrompt(null);
-        setInstallReady(false);
-        return;
-      } catch {}
-    }
-    alert(
-      "Add Quandr3 to your Home Screen:\n\n" +
-        "• iPhone/iPad (Safari): Share → Add to Home Screen\n" +
-        "• Android (Chrome): ⋮ → Install app / Add to Home screen\n" +
-        "• Desktop (Chrome/Edge): Install in address bar or browser menu"
-    );
-  }
-
-  // load auth + profile
   async function loadMe(): Promise<string> {
     try {
       const { data } = await supabase.auth.getUser();
       const uid = data?.user?.id ? String(data.user.id) : "";
       setMeId(uid);
 
-      if (!uid) {
-        setMeCity("");
-        setMeState("");
-        setMeRegion("");
-        return "";
-      }
+      if (!uid) return "";
 
       const { data: prof } = await supabase
         .from("profiles")
@@ -189,45 +116,13 @@ export default function ExploreClient() {
 
       const parsed = parseLocation(prof?.location);
 
-      const city = safeStr(parsed.city || prof?.city).trim();
-      const state = safeStr(parsed.state || prof?.state).trim();
-      const region = safeStr(parsed.region).trim();
-
-      setMeCity(city);
-      setMeState(state);
-      setMeRegion(region);
+      setMeCity(parsed.city || prof?.city || "");
+      setMeState(parsed.state || prof?.state || "");
+      setMeRegion(parsed.region || "");
 
       return uid;
     } catch {
-      setMeId("");
-      setMeCity("");
-      setMeState("");
-      setMeRegion("");
       return "";
-    }
-  }
-
-  async function loadFollows(uid: string) {
-    if (!uid) {
-      setFollowedIds([]);
-      return;
-    }
-    try {
-      const { data, error } = await supabase
-        .from("dilemma_follows")
-        .select("quandr3_id")
-        .eq("user_id", uid);
-
-      if (error) throw error;
-
-      const ids = (data || [])
-        .map((r: any) => safeStr(r?.quandr3_id).trim())
-        .filter(Boolean);
-
-      setFollowedIds(ids);
-    } catch (e) {
-      console.warn("[explore] could not load follows", e);
-      setFollowedIds([]);
     }
   }
 
@@ -236,7 +131,7 @@ export default function ExploreClient() {
     setErr("");
 
     try {
-      const uid = await loadMe();
+      await loadMe();
 
       const nowIso = new Date().toISOString();
 
@@ -254,6 +149,7 @@ export default function ExploreClient() {
           region,
           state,
           author_id,
+          is_anonymous,
           published_at,
           profiles:author_id (
             display_name,
@@ -271,7 +167,6 @@ export default function ExploreClient() {
       if (error) throw error;
 
       setRows(data || []);
-      await loadFollows(uid);
     } catch (e: any) {
       setErr(e?.message || "Failed to load Explore.");
     } finally {
@@ -280,293 +175,57 @@ export default function ExploreClient() {
   }
 
   useEffect(() => {
-    load("mount");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    load();
   }, []);
-
-  useEffect(() => {
-    function onFocus() {
-      if (!shouldReloadNow()) return;
-      load("focus");
-    }
-    function onVis() {
-      if (document.visibilityState === "visible") {
-        if (!shouldReloadNow()) return;
-        load("visible");
-      }
-    }
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    function tick() {
-      try {
-        const v = localStorage.getItem("quandr3_explore_refresh") || "";
-        if (!v) return;
-
-        if ((tick as any)._last !== v) {
-          (tick as any)._last = v;
-          if (!shouldReloadNow()) return;
-          load("storage-flag");
-        }
-      } catch {}
-    }
-
-    tick();
-    const t = setInterval(tick, 800);
-    return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const channel = supabase
-      .channel("quandr3s-explore-inserts")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "quandr3s" },
-        () => {
-          if (!shouldReloadNow()) return;
-          load("realtime-insert");
-        }
-      )
-      .subscribe();
-
-    return () => {
-      try {
-        supabase.removeChannel(channel);
-      } catch {}
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const categories = useMemo(() => {
-    const cats = uniq(
-      (rows || [])
-        .map((r) => normalizeCategory(r?.category))
-        .filter(Boolean)
-    );
-    return ["all", ...cats.sort((a: string, b: string) => a.localeCompare(b))];
-  }, [rows]);
-
-  const followedSet = useMemo(
-    () => new Set((followedIds || []).filter(Boolean)),
-    [followedIds]
-  );
 
   const filtered = useMemo(() => {
-    let out = [...(rows || [])];
-
-    if (statusFilter === "following") {
-      if (!meId) return [];
-      out = out.filter((r) => followedSet.has(safeStr(r?.id)));
-    }
-
-    if (statusFilter === "mine") {
-      if (!meId) return [];
-      out = out.filter((r) => safeStr(r?.author_id) === safeStr(meId));
-    }
-
-    if (scope === "local") {
-      const mc = safeStr(meCity).trim().toLowerCase();
-      const mr = safeStr(meRegion).trim().toLowerCase();
-      const ms = safeStr(meState).trim().toLowerCase();
-
-      if (mc || mr || ms) {
-        out = out.filter((r) => {
-          const rc = safeStr(r?.city).trim().toLowerCase();
-          const rr = safeStr(r?.region).trim().toLowerCase();
-          const rs = safeStr(r?.state).trim().toLowerCase();
-
-          if (mc && rc && rc === mc) return true;
-          if (mr && rr && rr === mr) return true;
-          if (!mc && !mr && ms && rs && rs === ms) return true;
-
-          return false;
-        });
-      }
-    }
-
-    if (
-      statusFilter === "open" ||
-      statusFilter === "closed" ||
-      statusFilter === "resolved"
-    ) {
-      out = out.filter((r) => normStatusForFilter(r) === statusFilter);
-    }
-
-    if (normalizeCategory(categoryFilter) !== "all") {
-      out = out.filter(
-        (r) => normalizeCategory(r?.category) === normalizeCategory(categoryFilter)
-      );
-    }
+    let out = [...rows];
 
     const q = searchQ.trim().toLowerCase();
+
     if (q) {
       out = out.filter((r) => {
         const profile = r?.profiles || {};
+
         const blob = [
           r?.title,
           r?.prompt,
-          normalizeCategory(r?.category),
+          r?.category,
           r?.city,
           r?.region,
           r?.state,
           r?.status,
-          effectiveStatus(r),
           r?.author_id,
-          profile?.display_name,
+          r?.is_anonymous
+            ? "anonymous curioso"
+            : profile?.display_name,
           profile?.username,
-          profile?.city,
-          profile?.state,
         ]
           .map((x) => safeStr(x).toLowerCase())
           .join(" ");
+
         return blob.includes(q);
       });
     }
 
     return out;
-  }, [
-    rows,
-    scope,
-    statusFilter,
-    categoryFilter,
-    searchQ,
-    meCity,
-    meRegion,
-    meState,
-    meId,
-    followedSet,
-  ]);
+  }, [rows, searchQ]);
 
   return (
-    <div>
-      <div className="mx-auto max-w-6xl px-4 pt-4">
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => load("manual")}
-            className="rounded-full border bg-white px-4 py-2 text-xs font-extrabold hover:bg-slate-50"
-            style={{ color: NAVY }}
-            title="Refresh"
-          >
-            Refresh
-          </button>
-
-          <button
-            type="button"
-            onClick={handleInstall}
-            className="rounded-full px-4 py-2 text-xs font-extrabold text-white hover:opacity-95"
-            style={{ background: installReady ? BLUE : NAVY }}
-            title={
-              installReady ? "Install Quandr3" : "Add Quandr3 to your home screen"
-            }
-          >
-            {installReady ? "Install App" : "Add to Home Screen"}
-          </button>
-        </div>
-      </div>
-
-      <div className="mx-auto mt-4 max-w-6xl px-4">
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <h1 className="text-xl font-semibold tracking-tight">
-            Real People. Real Dilemmas. Real Decisions.
-          </h1>
-          <p className="mt-1 text-sm text-neutral-600">
-            See what others are facing—or jump in and help decide.
-          </p>
-          <p className="mt-2 text-xs font-medium text-neutral-500">
-            Vote. Add your reason. Learn what happens next.
-          </p>
-        </div>
-      </div>
-
-      <div className="mx-auto mt-3 max-w-6xl px-4">
-        <div className="space-y-3 rounded-2xl border bg-white p-3 shadow-sm">
-          <input
-            value={searchQ}
-            onChange={(e) => setSearchQ(e.target.value)}
-            placeholder="Search Quandr3s or people"
-            className="w-full rounded-xl border px-3 py-2 text-sm"
-          />
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setScope("global")}
-              className={`rounded-full border px-3 py-1 text-sm ${
-                scope === "global" ? "bg-black text-white" : ""
-              }`}
-            >
-              Global
-            </button>
-            <button
-              onClick={() => setScope("local")}
-              className={`rounded-full border px-3 py-1 text-sm ${
-                scope === "local" ? "bg-black text-white" : ""
-              }`}
-            >
-              Local
-            </button>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {["all", "open", "closed", "resolved"].map((s) => (
-              <button
-                key={s}
-                onClick={() => setStatusFilter(s as any)}
-                className={`rounded-full border px-3 py-1 text-sm ${
-                  statusFilter === s ? "bg-black text-white" : ""
-                }`}
-              >
-                {s === "closed"
-                  ? "Internet Decided"
-                  : s.charAt(0).toUpperCase() + s.slice(1)}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {categories.map((c: string) => (
-              <button
-                key={c}
-                onClick={() => setCategoryFilter(c)}
-                className={`rounded-full border px-3 py-1 text-sm ${
-                  categoryFilter === c ? "bg-black text-white" : ""
-                }`}
-              >
-                {c === "all" ? "All" : c.charAt(0).toUpperCase() + c.slice(1)}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <ExploreInner
-        loading={loading}
-        error={err}
-        rows={filtered}
-        rawRows={rows}
-        meId={meId}
-        meCity={meCity}
-        meState={meState}
-        scope={scope}
-        setScope={setScope}
-        statusFilter={statusFilter}
-        setStatusFilter={setStatusFilter}
-        categoryFilter={categoryFilter}
-        setCategoryFilter={setCategoryFilter}
-        categories={categories}
-        searchOpen={searchOpen}
-        setSearchOpen={setSearchOpen}
-        searchQ={searchQ}
-        setSearchQ={setSearchQ}
-      />
-    </div>
+    <ExploreInner
+      loading={loading}
+      error={err}
+      rows={filtered}
+      rawRows={rows}
+      meId={meId}
+      scope={scope}
+      setScope={setScope}
+      statusFilter={statusFilter}
+      setStatusFilter={setStatusFilter}
+      categoryFilter={categoryFilter}
+      setCategoryFilter={setCategoryFilter}
+      searchQ={searchQ}
+      setSearchQ={setSearchQ}
+    />
   );
 }

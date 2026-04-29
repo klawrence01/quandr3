@@ -8,13 +8,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/utils/supabase/browser";
 
-/* =========================
-   Brand
-========================= */
 const NAVY = "#0b2343";
 const BLUE = "#1e63f3";
 const TEAL = "#00a9a5";
-const CORAL = "#ff6b6b";
 const SOFT_BG = "#f5f7fc";
 
 const CATEGORIES = [
@@ -27,10 +23,6 @@ const CATEGORIES = [
   "Faith",
   "Lifestyle",
 ];
-
-/* =========================
-   Helpers
-========================= */
 
 function slugify(s = "") {
   return s
@@ -61,13 +53,9 @@ async function shareUrl(url: string, title?: string) {
     alert("Link copied.");
     return true;
   } catch {
-    try {
-      prompt("Copy this link:", url);
-      return true;
-    } catch {}
+    prompt("Copy this link:", url);
+    return true;
   }
-
-  return false;
 }
 
 async function copyUrl(url: string) {
@@ -76,18 +64,10 @@ async function copyUrl(url: string) {
     alert("Link copied.");
     return true;
   } catch {
-    try {
-      prompt("Copy this link:", url);
-      return true;
-    } catch {}
+    prompt("Copy this link:", url);
+    return true;
   }
-
-  return false;
 }
-
-/* =========================
-   Page
-========================= */
 
 export default function CreateQuandr3Page() {
   const router = useRouter();
@@ -99,11 +79,11 @@ export default function CreateQuandr3Page() {
   const [optB, setOptB] = useState("");
   const [optC, setOptC] = useState("");
   const [optD, setOptD] = useState("");
+  const [isAnonymous, setIsAnonymous] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // success signal
   const [publishedId, setPublishedId] = useState<string | null>(null);
   const [publishedAt, setPublishedAt] = useState<string | null>(null);
 
@@ -144,7 +124,6 @@ export default function CreateQuandr3Page() {
 
       const userId = String(user.id);
 
-      // Ensure a matching profile row exists before inserting into quandr3s.
       const { error: profileErr } = await supabase
         .from("profiles")
         .upsert({ id: userId }, { onConflict: "id" });
@@ -160,6 +139,7 @@ export default function CreateQuandr3Page() {
         status: "open",
         author_id: userId,
         user_id: userId,
+        is_anonymous: isAnonymous,
       };
 
       const { data: q, error: qErr } = await supabase
@@ -208,7 +188,6 @@ export default function CreateQuandr3Page() {
       setPublishedId(q.id);
       setPublishedAt(q.created_at || null);
 
-      // Give the UI a brief success moment, then do a hard redirect.
       setTimeout(() => {
         if (typeof window !== "undefined") {
           window.location.assign(`/q/${q.id}`);
@@ -219,19 +198,12 @@ export default function CreateQuandr3Page() {
       }, 1200);
     } catch (e: any) {
       console.error("Create failed:", e);
-
       const msg = e?.message || "Failed to create Quandr3";
 
       if (String(msg).toLowerCase().includes("foreign key")) {
-        setError(
-          "Profile link failed. The signed-in user could not be matched to a profile record."
-        );
+        setError("Profile link failed. The signed-in user could not be matched to a profile record.");
       } else if (String(msg).toLowerCase().includes("row-level security")) {
-        setError(
-          "Blocked by security policy. Make sure you are signed in and allowed to create Quandr3s."
-        );
-      } else if (String(msg).toLowerCase().includes("ownership mismatch")) {
-        setError(msg);
+        setError("Blocked by security policy. Make sure you are signed in and allowed to create Quandr3s.");
       } else {
         setError(msg);
       }
@@ -240,15 +212,18 @@ export default function CreateQuandr3Page() {
     }
   }
 
-  /* =========================
-     Preview UI
-  ========================= */
-
   if (previewMode) {
     return (
       <main className="min-h-screen p-6" style={{ background: SOFT_BG }}>
         <div className="mx-auto max-w-2xl rounded-xl bg-white p-6 shadow">
           <h1 className="mb-2 text-2xl font-bold">{title || "Untitled Quandr3"}</h1>
+
+          {isAnonymous && (
+            <div className="mb-3 rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-700 inline-block">
+              Posting as Anonymous
+            </div>
+          )}
+
           <p className="mb-4 text-gray-700">{prompt || "No prompt yet..."}</p>
 
           <div className="space-y-2">
@@ -260,56 +235,8 @@ export default function CreateQuandr3Page() {
 
           {error && <div className="mt-4 text-sm text-red-600">{error}</div>}
 
-          {publishedId && (
-            <div
-              className="mt-4 rounded-lg p-3 text-sm"
-              style={{ background: "#e9fff7", border: `1px solid ${TEAL}` }}
-            >
-              <div className="font-bold" style={{ color: NAVY }}>
-                Published ✅
-              </div>
-              <div className="mt-1" style={{ color: NAVY, opacity: 0.9 }}>
-                Your Quandr3 is live{" "}
-                <span style={{ opacity: 0.7 }}>
-                  {publishedAt ? `(${new Date(publishedAt).toLocaleString()})` : ""}
-                </span>
-              </div>
-
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => copyUrl(publishedUrl)}
-                  className="rounded-full px-3 py-1.5 text-xs font-extrabold text-white hover:opacity-95"
-                  style={{ background: NAVY }}
-                  disabled={!publishedUrl}
-                >
-                  Copy Link
-                </button>
-                <button
-                  type="button"
-                  onClick={() => shareUrl(publishedUrl, title || "Quandr3")}
-                  className="rounded-full px-3 py-1.5 text-xs font-extrabold text-white hover:opacity-95"
-                  style={{ background: BLUE }}
-                  disabled={!publishedUrl}
-                >
-                  Share
-                </button>
-                <Link
-                  href={`/q/${publishedId}`}
-                  className="text-xs font-extrabold"
-                  style={{ color: BLUE }}
-                >
-                  View →
-                </Link>
-              </div>
-            </div>
-          )}
-
           <div className="mt-6 flex gap-3">
-            <button
-              onClick={() => setPreviewMode(false)}
-              className="rounded bg-gray-200 px-4 py-2"
-            >
+            <button onClick={() => setPreviewMode(false)} className="rounded bg-gray-200 px-4 py-2">
               Back to Edit
             </button>
 
@@ -322,65 +249,15 @@ export default function CreateQuandr3Page() {
               {isSaving ? "Publishing..." : "Publish"}
             </button>
           </div>
-
-          <div className="mt-3 text-xs" style={{ color: NAVY, opacity: 0.65 }}>
-            Tip: Publish shows a confirmation immediately, then redirects you to the live page.
-          </div>
         </div>
       </main>
     );
   }
 
-  /* =========================
-     Edit UI
-  ========================= */
-
   return (
     <main className="min-h-screen p-6" style={{ background: SOFT_BG }}>
       <div className="mx-auto max-w-2xl rounded-xl bg-white p-6 shadow">
         <h1 className="mb-4 text-2xl font-bold">Create a Quandr3</h1>
-
-        {publishedId && (
-          <div
-            className="mb-4 rounded-lg p-3 text-sm"
-            style={{ background: "#e9fff7", border: `1px solid ${TEAL}` }}
-          >
-            <div className="font-bold" style={{ color: NAVY }}>
-              Published ✅
-            </div>
-            <div className="mt-1" style={{ color: NAVY, opacity: 0.9 }}>
-              Your Quandr3 is live.
-            </div>
-
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => copyUrl(publishedUrl)}
-                className="rounded-full px-3 py-1.5 text-xs font-extrabold text-white hover:opacity-95"
-                style={{ background: NAVY }}
-                disabled={!publishedUrl}
-              >
-                Copy Link
-              </button>
-              <button
-                type="button"
-                onClick={() => shareUrl(publishedUrl, title || "Quandr3")}
-                className="rounded-full px-3 py-1.5 text-xs font-extrabold text-white hover:opacity-95"
-                style={{ background: BLUE }}
-                disabled={!publishedUrl}
-              >
-                Share
-              </button>
-              <Link
-                href={`/q/${publishedId}`}
-                className="text-xs font-extrabold"
-                style={{ color: BLUE }}
-              >
-                View →
-              </Link>
-            </div>
-          </div>
-        )}
 
         <input
           className="mb-3 w-full rounded border p-2"
@@ -409,30 +286,24 @@ export default function CreateQuandr3Page() {
           ))}
         </select>
 
-        <input
-          className="mb-2 w-full rounded border p-2"
-          placeholder="Option A"
-          value={optA}
-          onChange={(e) => setOptA(e.target.value)}
-        />
-        <input
-          className="mb-2 w-full rounded border p-2"
-          placeholder="Option B"
-          value={optB}
-          onChange={(e) => setOptB(e.target.value)}
-        />
-        <input
-          className="mb-2 w-full rounded border p-2"
-          placeholder="Option C (optional)"
-          value={optC}
-          onChange={(e) => setOptC(e.target.value)}
-        />
-        <input
-          className="mb-4 w-full rounded border p-2"
-          placeholder="Option D (optional)"
-          value={optD}
-          onChange={(e) => setOptD(e.target.value)}
-        />
+        <input className="mb-2 w-full rounded border p-2" placeholder="Option A" value={optA} onChange={(e) => setOptA(e.target.value)} />
+        <input className="mb-2 w-full rounded border p-2" placeholder="Option B" value={optB} onChange={(e) => setOptB(e.target.value)} />
+        <input className="mb-2 w-full rounded border p-2" placeholder="Option C (optional)" value={optC} onChange={(e) => setOptC(e.target.value)} />
+        <input className="mb-4 w-full rounded border p-2" placeholder="Option D (optional)" value={optD} onChange={(e) => setOptD(e.target.value)} />
+
+        <label className="mb-4 flex items-center gap-2 rounded-lg border bg-gray-50 p-3 text-sm">
+          <input
+            type="checkbox"
+            checked={isAnonymous}
+            onChange={(e) => setIsAnonymous(e.target.checked)}
+          />
+          <span>
+            <strong>Post as Anonymous</strong>
+            <span className="block text-xs text-gray-500">
+              Your identity will be hidden publicly, but the system still keeps ownership privately.
+            </span>
+          </span>
+        </label>
 
         {error && <div className="mb-3 text-sm text-red-600">{error}</div>}
 

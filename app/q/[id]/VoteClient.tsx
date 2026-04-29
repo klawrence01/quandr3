@@ -219,11 +219,19 @@ export default function VoteClient({ serverUserId = "" }: VoteClientProps) {
       </div>
 
       <div className="space-y-3">
-        <div className="text-xs uppercase tracking-widest text-gray-500">
-          {safeStr(q.category) || "Quandr3"}
-        </div>
+  <div className="text-xs uppercase tracking-widest text-gray-500">
+    {safeStr(q.category) || "Quandr3"}
+  </div>
 
-        <h1 className="text-3xl font-bold">{q.title}</h1>
+  {/* ✅ Anonymous Badge */}
+  {q.is_anonymous && (
+  <div className="inline-flex items-center gap-2 rounded-full border bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700">
+    <span className="h-2 w-2 rounded-full bg-gray-400"></span>
+    Anonymous Curioso
+  </div>
+)}
+
+  <h1 className="text-3xl font-bold">{q.title}</h1>
 
         {(q.prompt || q.context) && (
           <p className="text-gray-700 whitespace-pre-line">{q.prompt || q.context}</p>
