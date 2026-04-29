@@ -10,26 +10,10 @@ import ExploreInner from "./_ExploreInner";
 
 const SAFE_LIMIT = 250;
 
-const NAVY = "#0b2343";
-const BLUE = "#1e63f3";
-const TEAL = "#00a9a5";
-const CORAL = "#ff6b6b";
-const SOFT_BG = "#f5f7fc";
-
-function uniq(arr: any[]) {
-  return Array.from(new Set((arr || []).filter(Boolean)));
-}
+const EXPLAINER_VIDEO_URL = "https://youtu.be/N8JhimbnRVg?si=_24H0PN25opiWtUI";
 
 function safeStr(x: any) {
   return (x ?? "").toString();
-}
-
-function normalizeCategory(x: any) {
-  const s = safeStr(x).trim().toLowerCase();
-  if (!s) return "";
-  if (s === "careers") return "career";
-  if (s === "relationships") return "relationship";
-  return s;
 }
 
 function parseLocation(loc?: string) {
@@ -62,14 +46,6 @@ function effectiveStatus(row: any) {
   return s || "unknown";
 }
 
-function normStatusForFilter(row: any) {
-  const s = effectiveStatus(row);
-  if (s === "open") return "open";
-  if (s === "awaiting_user") return "closed";
-  if (s === "resolved") return "resolved";
-  return "other";
-}
-
 export default function ExploreClient() {
   const searchParams = useSearchParams();
 
@@ -82,17 +58,15 @@ export default function ExploreClient() {
   const [meState, setMeState] = useState("");
   const [meRegion, setMeRegion] = useState("");
 
-  const [followedIds, setFollowedIds] = useState<string[]>([]);
-
   const [scope, setScope] = useState<"global" | "local">("global");
   const [statusFilter, setStatusFilter] = useState<
     "all" | "open" | "closed" | "resolved" | "following" | "mine"
   >("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState("");
 
   const lastReloadRef = useRef<number>(0);
+
   function shouldReloadNow() {
     const now = Date.now();
     if (now - lastReloadRef.current < 800) return false;
@@ -196,9 +170,7 @@ export default function ExploreClient() {
           r?.state,
           r?.status,
           r?.author_id,
-          r?.is_anonymous
-            ? "anonymous curioso"
-            : profile?.display_name,
+          r?.is_anonymous ? "anonymous curioso" : profile?.display_name,
           profile?.username,
         ]
           .map((x) => safeStr(x).toLowerCase())
@@ -212,20 +184,50 @@ export default function ExploreClient() {
   }, [rows, searchQ]);
 
   return (
-    <ExploreInner
-      loading={loading}
-      error={err}
-      rows={filtered}
-      rawRows={rows}
-      meId={meId}
-      scope={scope}
-      setScope={setScope}
-      statusFilter={statusFilter}
-      setStatusFilter={setStatusFilter}
-      categoryFilter={categoryFilter}
-      setCategoryFilter={setCategoryFilter}
-      searchQ={searchQ}
-      setSearchQ={setSearchQ}
-    />
+    <>
+      <section className="mx-auto max-w-6xl px-4 pt-6">
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">
+                New to Quandr3?
+              </p>
+              <h2 className="mt-1 text-2xl font-bold text-slate-950">
+                Watch the quick explainer.
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                See how Quandr3 helps people ask better questions, gather real perspective,
+                and make better decisions.
+              </p>
+            </div>
+
+            <a
+              href={EXPLAINER_VIDEO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center rounded-full bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700"
+            >
+              Watch the Video
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <ExploreInner
+        loading={loading}
+        error={err}
+        rows={filtered}
+        rawRows={rows}
+        meId={meId}
+        scope={scope}
+        setScope={setScope}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        categoryFilter={categoryFilter}
+        setCategoryFilter={setCategoryFilter}
+        searchQ={searchQ}
+        setSearchQ={setSearchQ}
+      />
+    </>
   );
 }
