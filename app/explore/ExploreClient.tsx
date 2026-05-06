@@ -3,31 +3,15 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/utils/supabase/browser";
 import ExploreInner from "./_ExploreInner";
 
 const SAFE_LIMIT = 250;
-
 const EXPLAINER_VIDEO_URL = "https://youtu.be/N8JhimbnRVg?si=_24H0PN25opiWtUI";
 
 function safeStr(x: any) {
   return (x ?? "").toString();
-}
-
-function parseLocation(loc?: string) {
-  const parts = safeStr(loc)
-    .split(",")
-    .map((s: string) => s.trim())
-    .filter(Boolean);
-
-  return {
-    city: parts[0] || "",
-    region: parts[1] || "",
-    state: parts[2] || "",
-    country: parts[3] || "",
-  };
 }
 
 function hoursLeft(closesAt?: string) {
@@ -47,94 +31,27 @@ function effectiveStatus(row: any) {
 }
 
 export default function ExploreClient() {
-  const searchParams = useSearchParams();
-
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<any[]>([]);
   const [err, setErr] = useState("");
-
   const [meId, setMeId] = useState("");
-  const [meCity, setMeCity] = useState("");
-  const [meState, setMeState] = useState("");
-  const [meRegion, setMeRegion] = useState("");
 
-  const [scope, setScope] = useState<"global" | "local">("global");
-  const [statusFilter, setStatusFilter] = useState<
-    "all" | "open" | "closed" | "resolved" | "following" | "mine"
-  >("all");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const [searchQ, setSearchQ] = useState("");
 
-  const lastReloadRef = useRef<number>(0);
-
-  function shouldReloadNow() {
-    const now = Date.now();
-    if (now - lastReloadRef.current < 800) return false;
-    lastReloadRef.current = now;
-    return true;
-  }
-
-  async function loadMe(): Promise<string> {
-    try {
-      const { data } = await supabase.auth.getUser();
-      const uid = data?.user?.id ? String(data.user.id) : "";
-      setMeId(uid);
-
-      if (!uid) return "";
-
-      const { data: prof } = await supabase
-        .from("profiles")
-        .select("location,city,state")
-        .eq("id", uid)
-        .maybeSingle();
-
-      const parsed = parseLocation(prof?.location);
-
-      setMeCity(parsed.city || prof?.city || "");
-      setMeState(parsed.state || prof?.state || "");
-      setMeRegion(parsed.region || "");
-
-      return uid;
-    } catch {
-      return "";
-    }
-  }
-
-  async function load(reason = "load") {
+  async function load() {
     setLoading(true);
     setErr("");
 
     try {
-      await loadMe();
-
-      const nowIso = new Date().toISOString();
+      const { data: userData } = await supabase.auth.getUser();
+      const uid = userData?.user?.id || "";
+      setMeId(uid);
 
       const { data, error } = await supabase
         .from("quandr3s")
-        .select(`
-          id,
-          title,
-          prompt,
-          category,
-          status,
-          created_at,
-          closes_at,
-          city,
-          region,
-          state,
-          author_id,
-          is_anonymous,
-          published_at,
-          profiles:author_id (
-            display_name,
-            username,
-            avatar_url,
-            city,
-            state
-          )
-        `)
-        .or(`published_at.is.null,published_at.lte.${nowIso}`)
-        .order("published_at", { ascending: false })
+        .select("*")
         .order("created_at", { ascending: false })
         .limit(SAFE_LIMIT);
 
@@ -155,78 +72,118 @@ export default function ExploreClient() {
   const filtered = useMemo(() => {
     let out = [...rows];
 
-    const q = searchQ.trim().toLowerCase();
+    // SEARCH
+    if (searchQ.trim()) {
+      const q = searchQ.toLowerCase();
+      out = out.filter((r) =>
+        `${r.title} ${r.prompt} ${r.category}`.toLowerCase().includes(q)
+      );
+    }
 
-    if (q) {
+    // STATUS
+    if (statusFilter !== "all") {
       out = out.filter((r) => {
-        const profile = r?.profiles || {};
+        const s = effectiveStatus(r);
 
-        const blob = [
-          r?.title,
-          r?.prompt,
-          r?.category,
-          r?.city,
-          r?.region,
-          r?.state,
-          r?.status,
-          r?.author_id,
-          r?.is_anonymous ? "anonymous curioso" : profile?.display_name,
-          profile?.username,
-        ]
-          .map((x) => safeStr(x).toLowerCase())
-          .join(" ");
+        if (statusFilter === "open") return s === "open";
+        if (statusFilter === "closed") return s === "awaiting_user";
+        if (statusFilter === "resolved") return s === "resolved";
+        if (statusFilter === "mine") return r.author_id === meId;
 
-        return blob.includes(q);
+        return true;
       });
     }
 
+    // CATEGORY
+    if (categoryFilter !== "all") {
+      out = out.filter(
+        (r) => safeStr(r.category).toLowerCase() === categoryFilter
+      );
+    }
+
     return out;
-  }, [rows, searchQ]);
+  }, [rows, searchQ, statusFilter, categoryFilter, meId]);
+
+  const categories = Array.from(
+    new Set(rows.map((r) => safeStr(r.category).toLowerCase()))
+  ).filter(Boolean);
 
   return (
     <>
+      {/* VIDEO BLOCK */}
       <section className="mx-auto max-w-6xl px-4 pt-6">
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">
-                New to Quandr3?
-              </p>
-              <h2 className="mt-1 text-2xl font-bold text-slate-950">
-                Watch the quick explainer.
-              </h2>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                See how Quandr3 helps people ask better questions, gather real perspective,
-                and make better decisions.
-              </p>
-            </div>
-
-            <a
-              href={EXPLAINER_VIDEO_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center rounded-full bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700"
-            >
-              Watch the Video
-            </a>
-          </div>
+        <div className="rounded-3xl border bg-white p-6 shadow-sm">
+          <h2 className="text-2xl font-bold mb-2">
+            Watch the quick explainer.
+          </h2>
+          <p className="text-slate-600 mb-4">
+            See how Quandr3 helps people ask better questions and decide better.
+          </p>
+          <a
+            href={EXPLAINER_VIDEO_URL}
+            target="_blank"
+            className="block w-full text-center rounded-full bg-blue-600 px-6 py-4 font-bold text-white"
+          >
+            Watch the Video
+          </a>
         </div>
       </section>
 
+      {/* CONTROL STRIP */}
+      <section className="mx-auto max-w-6xl px-4 mt-6 space-y-3">
+
+        {/* 🔥 ROW 1 — STATUS */}
+        <div className="flex flex-wrap gap-2">
+          {["all", "open", "closed", "resolved", "mine"].map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              className={`px-4 py-2 rounded-full text-sm font-bold ${
+                statusFilter === s
+                  ? "bg-blue-600 text-white"
+                  : "bg-white border"
+              }`}
+            >
+              {s.toUpperCase()}
+            </button>
+          ))}
+        </div>
+
+        {/* 🔥 ROW 2 — CATEGORY */}
+        <div className="flex flex-wrap gap-2">
+          {categories.map((c) => (
+            <button
+              key={c}
+              onClick={() => setCategoryFilter(c)}
+              className={`px-4 py-2 rounded-full text-sm ${
+                categoryFilter === c
+                  ? "bg-black text-white"
+                  : "bg-white border"
+              }`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+
+        {/* 🔍 ROW 3 — SEARCH */}
+        <div className="flex justify-end">
+          <input
+            placeholder="Search..."
+            value={searchQ}
+            onChange={(e) => setSearchQ(e.target.value)}
+            className="w-[220px] border rounded-full px-4 py-2 text-sm"
+          />
+        </div>
+
+      </section>
+
+      {/* FEED */}
       <ExploreInner
         loading={loading}
         error={err}
         rows={filtered}
-        rawRows={rows}
         meId={meId}
-        scope={scope}
-        setScope={setScope}
-        statusFilter={statusFilter}
-        setStatusFilter={setStatusFilter}
-        categoryFilter={categoryFilter}
-        setCategoryFilter={setCategoryFilter}
-        searchQ={searchQ}
-        setSearchQ={setSearchQ}
       />
     </>
   );
